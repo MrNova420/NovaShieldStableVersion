@@ -469,6 +469,40 @@ install_dependencies(){
   local need=(python3 awk sed grep tar gzip df du ps top uname head tail cut tr sha256sum curl ping find xargs)
   local missing=()
   
+  # Enhanced Termux setup as requested
+  if [ "$IS_TERMUX" -eq 1 ]; then
+    ns_log "Termux detected - performing enhanced mobile setup..."
+    
+    # Essential Termux packages for better experience
+    ns_log "Installing enhanced Termux packages..."
+    PKG_INSTALL termux-tools || true
+    PKG_INSTALL termux-api || true
+    PKG_INSTALL procps || true  # Better ps, top, etc.
+    PKG_INSTALL htop || true    # Enhanced system monitor
+    PKG_INSTALL nano || true    # Text editor
+    PKG_INSTALL vim || true     # Advanced editor
+    PKG_INSTALL git || true     # Version control
+    PKG_INSTALL man || true     # Manual pages
+    PKG_INSTALL which || true   # Which command
+    PKG_INSTALL openssh || true # SSH capabilities
+    
+    # Update packages to latest versions
+    ns_log "Updating Termux packages..."
+    pkg update -y 2>/dev/null || true
+    pkg upgrade -y 2>/dev/null || true
+    
+    # Setup storage access
+    ns_log "Setting up Termux storage access..."
+    if [ ! -d "$HOME/storage" ]; then
+      termux-setup-storage 2>/dev/null || ns_warn "Storage setup may require manual confirmation"
+    fi
+    
+    # Enhanced terminal capabilities
+    ns_log "Setting up enhanced terminal..."
+    echo "export TERM=xterm-256color" >> "$HOME/.bashrc" 2>/dev/null || true
+    echo "export COLORTERM=truecolor" >> "$HOME/.bashrc" 2>/dev/null || true
+  fi
+  
   # Check which dependencies are missing
   for c in "${need[@]}"; do
     if ! command -v "$c" >/dev/null 2>&1; then
@@ -516,6 +550,18 @@ install_dependencies(){
       ns_log "Installing termux-services (optional for auto-start)"
       PKG_INSTALL termux-services || ns_warn "termux-services install failed (non-critical)"
     fi
+    
+    # Install additional useful tools for Termux users
+    ns_log "Installing additional security and system tools..."
+    PKG_INSTALL nmap || ns_warn "nmap install failed"
+    PKG_INSTALL netcat-openbsd || PKG_INSTALL netcat || true
+    PKG_INSTALL wget || true
+    PKG_INSTALL zip || true
+    PKG_INSTALL unzip || true
+    PKG_INSTALL tree || true
+    PKG_INSTALL lsof || true
+    
+    ns_ok "Enhanced Termux setup completed"
   fi
   
   # Verify critical dependencies are available
@@ -2155,6 +2201,39 @@ def ai_reply(prompt, username, user_ip):
     # Advanced features intent
     elif any(term in prompt_low for term in ['advanced', 'expert', 'technical', 'professional']):
         return f"Advanced mode activated, {username}! I can execute system tools, analyze logs, perform security scans, generate reports, and provide technical insights. Try commands like 'run nmap localhost', 'analyze performance', or 'security audit' for detailed technical operations."
+    
+    # Tool execution intent - NEW CAPABILITY
+    elif any(term in prompt_low for term in ['run ', 'execute ', 'launch ', 'start ']) and any(tool in prompt_low for tool in ['nmap', 'netstat', 'htop', 'ps', 'df', 'ping', 'curl', 'dig', 'ss']):
+        # Extract tool name
+        tool_match = None
+        for tool in ['nmap', 'netstat', 'htop', 'ps', 'df', 'ping', 'curl', 'dig', 'ss']:
+            if tool in prompt_low:
+                tool_match = tool
+                break
+        
+        if tool_match:
+            try:
+                # Execute the tool
+                output = execute_tool(tool_match)
+                return f"Executed {tool_match} for you, {username}:\n\n{output[:500]}{'...' if len(output) > 500 else ''}\n\nCheck the Tools tab for the complete output and to run more tools."
+            except Exception as e:
+                return f"I tried to run {tool_match} but encountered an error, {username}: {str(e)}. You can manually execute tools in the Tools tab."
+        
+    # Security scan intent - ENHANCED
+    elif any(term in prompt_low for term in ['security scan', 'scan security', 'check security', 'security audit']):
+        try:
+            output = execute_tool('security-scan')
+            return f"Security scan completed, {username}! Here's a summary:\n\n{output[:400]}{'...' if len(output) > 400 else ''}\n\nFull results are in the Tools tab. I can also run specific tools like nmap or netstat if needed."
+        except Exception:
+            return f"I'll perform a security scan, {username}. Switch to the Tools tab and run the Security Scan tool for comprehensive analysis."
+    
+    # System information intent - ENHANCED
+    elif any(term in prompt_low for term in ['system info', 'system report', 'full status', 'detailed status']):
+        try:
+            output = execute_tool('system-info')
+            return f"System report generated, {username}:\n\n{output[:400]}{'...' if len(output) > 400 else ''}\n\nComplete report available in the Tools tab."
+        except Exception:
+            return f"Generating detailed system report, {username}. Check the Tools tab for comprehensive system information and diagnostics."
     
     # Fallback responses based on personality
     if personality == 'snarky':
@@ -4485,6 +4564,15 @@ tabs.forEach(b=>b.onclick=()=>{
     }
   } else if (b.dataset.tab === 'terminal') {
     if (!ws) connectTerm();
+    // Focus the hidden input for mobile keyboard support
+    const termInput = $('#terminal-input');
+    if (termInput) {
+      setTimeout(() => {
+        termInput.focus();
+        // Try to trigger mobile keyboard
+        termInput.click();
+      }, 100);
+    }
   } else if (b.dataset.tab === 'security') {
     refreshSecurityLogs();
   } else if (b.dataset.tab === 'config') {
@@ -4764,6 +4852,12 @@ $$('.toggle').forEach(b=>{
     const t=b.dataset.target;
     if (!t) return;
     
+    // Check if CSRF is available
+    if (!CSRF) {
+      toast('⚠️ Initializing system... please wait and try again');
+      return;
+    }
+    
     const originalText = b.textContent;
     b.disabled = true;
     
@@ -4802,6 +4896,7 @@ $$('.toggle').forEach(b=>{
         b.textContent = originalText; // Restore original text on failure
       }
     }catch(e){
+      console.error(`Toggle error for ${t}:`, e);
       toast(`✗ Failed to ${action} ${t} monitor: ${e.message}`);
       b.textContent = originalText; // Restore original text on failure
     } finally {
