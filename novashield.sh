@@ -2795,9 +2795,6 @@ def get_personalized_jarvis_response(username, base_reply):
             # In a full implementation, this would be encrypted
         except Exception:
             pass  # Fail silently for global logging
-            
-    except Exception as e:
-        security_log(f"AI_MEMORY_ERROR user={username} error={str(e)}")
 
 def get_personalized_jarvis_response(username, base_response):
     """Enhance response with personalization based on user learning patterns"""
@@ -3154,26 +3151,6 @@ def jarvis_security_integration():
         security_data['system_threats'].append(f"Error in security integration: {str(e)}")
     
     return security_data
-                    elif 'ACCESS_DENIED' in line or 'UNAUTHORIZED' in line:
-                        security_data['access_violations'].append(line.strip())
-                    elif 'SECURITY' in line:
-                        security_data['security_alerts'].append(line.strip())
-        
-        # Read alerts log  
-        alerts_log_path = os.path.join(NS_LOGS, 'alerts.log')
-        if os.path.exists(alerts_log_path):
-            with open(alerts_log_path, 'r') as f:
-                lines = f.readlines()[-20:]  # Last 20 alerts
-                for line in lines:
-                    if any(threat in line.lower() for threat in ['threat', 'malware', 'virus', 'compromise']):
-                        security_data['system_threats'].append(line.strip())
-                    else:
-                        security_data['security_alerts'].append(line.strip())
-                        
-    except Exception as e:
-        security_log(f"JARVIS_SECURITY_SCAN_ERROR error={str(e)}")
-    
-    return security_data
 
 def enhanced_jarvis_learning(username, prompt, reply_context):
     """Enhanced learning system for Jarvis AI with advanced pattern analysis"""
@@ -3265,20 +3242,6 @@ def enhanced_jarvis_learning(username, prompt, reply_context):
         
         # Save updated learning patterns
         save_user_memory(username, user_memory)
-                
-                # Detect interaction style
-                if any(word in prompt_text for word in ['please', 'thank', 'sorry']):
-                    user_patterns['interaction_style'] = 'formal'
-                elif any(word in prompt_text for word in ['yo', 'hey', 'sup', 'dude']):
-                    user_patterns['interaction_style'] = 'casual'
-                elif any(word in prompt_text for word in ['execute', 'analyze', 'generate', 'scan']):
-                    user_patterns['interaction_style'] = 'technical'
-        
-        # Update user memory with learned patterns
-        user_memory['learning_patterns'] = user_patterns
-        save_user_memory(username, user_memory)
-        
-        security_log(f"JARVIS_LEARNING user={username} style={user_patterns['interaction_style']} commands={len(user_patterns['frequent_commands'])}")
         
     except Exception as e:
         security_log(f"JARVIS_LEARNING_ERROR user={username} error={str(e)}")
