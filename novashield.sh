@@ -6267,79 +6267,6 @@ let statusPolling = null;
 let loadedTabs = new Set(['ai', 'alerts']); // Pre-load Jarvis and Alerts
 
 const tabs = $$('.tabs button');
-tabs.forEach(b=>b.onclick=()=>{ 
-  tabs.forEach(x=>x.classList.remove('active')); 
-  b.classList.add('active'); 
-  $$('.tab').forEach(x=>x.classList.remove('active')); 
-  const tabId = 'tab-'+b.dataset.tab;
-  $('#'+tabId).classList.add('active'); 
-  
-  activeTab = b.dataset.tab;
-  
-  // Lazy load tab content if not loaded yet
-  if (!loadedTabs.has(activeTab)) {
-    loadTabContent(activeTab);
-    loadedTabs.add(activeTab);
-  }
-  
-  // Manage polling based on active tab
-  managePolling(activeTab);
-  
-  // Auto-actions when switching tabs
-  if (b.dataset.tab === 'files') {
-    const cwdEl = $('#cwd');
-    if (cwdEl && cwdEl.value) {
-      list(cwdEl.value);
-    }
-  } else if (b.dataset.tab === 'terminal') {
-    if (!ws) connectTerm();
-    // Focus the hidden input for mobile keyboard support
-    const termInput = $('#terminal-input');
-    if (termInput) {
-      setTimeout(() => {
-        termInput.focus();
-        // Try to trigger mobile keyboard
-        termInput.click();
-      }, 100);
-    }
-  } else if (b.dataset.tab === 'security') {
-    refreshSecurityLogs();
-  } else if (b.dataset.tab === 'config') {
-    loadConfig();
-  }
-});
-
-function loadTabContent(tabName) {
-  // Load tab-specific content on demand
-  if (tabName === 'status') {
-    // Status tab is always loaded since it's the main dashboard
-    refresh();
-  } else if (tabName === 'security') {
-    refreshSecurityLogs();
-  } else if (tabName === 'config') {
-    loadConfig();
-  } else if (tabName === 'alerts') {
-    loadAlerts();
-  }
-}
-
-function managePolling(tabName) {
-  // Stop all polling first
-  if (statusPolling) {
-    clearInterval(statusPolling);
-    statusPolling = null;
-  }
-  
-  // Start appropriate polling for active tab
-  if (tabName === 'status') {
-    // Poll status data when Status tab is active
-    statusPolling = setInterval(refresh, 5000);
-  } else if (tabName === 'alerts') {
-    // Light polling for alerts
-    statusPolling = setInterval(loadAlerts, 10000);
-  }
-  // Other tabs don't need continuous polling
-}
 
 let CSRF = '';
 
@@ -8303,10 +8230,24 @@ tabs.forEach(b => {
         ['files', 'terminal', 'webgen', 'config', 'security'].forEach(tab => {
             if (activeTab === tab && !loadedTabs.has(tab)) {
                 loadedTabs.add(tab);
-                if (tab === 'files') loadFiles();
-                else if (tab === 'terminal') connectTerm();
-                else if (tab === 'config') loadConfig();
-                else if (tab === 'security') loadSecurityLogs();
+                if (tab === 'files') {
+                    loadFiles();
+                } else if (tab === 'terminal') {
+                    connectTerm();
+                    // Focus the hidden input for mobile keyboard support
+                    const termInput = $('#terminal-input');
+                    if (termInput) {
+                        setTimeout(() => {
+                            termInput.focus();
+                            // Try to trigger mobile keyboard
+                            termInput.click();
+                        }, 100);
+                    }
+                } else if (tab === 'config') {
+                    loadConfig();
+                } else if (tab === 'security') {
+                    loadSecurityLogs();
+                }
             }
         });
     };
