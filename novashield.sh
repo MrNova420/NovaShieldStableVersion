@@ -1700,6 +1700,66 @@ def cfg_get(path, default=None):
             return default
     return cur
 
+def aes_key_path():
+    """Get the AES key file path from config"""
+    aes_file = cfg_get('keys.aes_key_file', 'keys/aes.key')
+    return os.path.join(NS_HOME, aes_file)
+
+def enc_json_to_file(obj, out_path_enc):
+    """Encrypt a JSON object to a file using AES-256-CBC"""
+    import tempfile, subprocess
+    try:
+        # Write JSON to temporary file
+        with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.json') as tmp:
+            json.dump(obj, tmp, ensure_ascii=False, indent=2)
+            tmp_path = tmp.name
+        
+        # Encrypt using OpenSSL
+        key_path = aes_key_path()
+        if not os.path.exists(key_path):
+            # Generate key if it doesn't exist
+            os.makedirs(os.path.dirname(key_path), exist_ok=True)
+            with open(key_path, 'wb') as f:
+                f.write(os.urandom(64))
+        
+        cmd = ['openssl', 'enc', '-aes-256-cbc', '-salt', '-pbkdf2', 
+               '-in', tmp_path, '-out', out_path_enc, '-pass', f'file:{key_path}']
+        result = subprocess.run(cmd, capture_output=True, timeout=30)
+        
+        # Clean up temp file
+        os.unlink(tmp_path)
+        
+        return result.returncode == 0
+    except Exception:
+        return False
+
+def dec_json_from_file(in_path_enc):
+    """Decrypt a JSON file using AES-256-CBC"""
+    import tempfile, subprocess
+    try:
+        key_path = aes_key_path()
+        if not os.path.exists(key_path):
+            return None
+        
+        # Decrypt to temporary file
+        with tempfile.NamedTemporaryFile(mode='r', delete=False, suffix='.json') as tmp:
+            tmp_path = tmp.name
+        
+        cmd = ['openssl', 'enc', '-d', '-aes-256-cbc', '-pbkdf2',
+               '-in', in_path_enc, '-out', tmp_path, '-pass', f'file:{key_path}']
+        result = subprocess.run(cmd, capture_output=True, timeout=30)
+        
+        if result.returncode == 0:
+            with open(tmp_path, 'r', encoding='utf-8') as f:
+                obj = json.load(f)
+            os.unlink(tmp_path)
+            return obj
+        else:
+            os.unlink(tmp_path)
+            return None
+    except Exception:
+        return None
+
 def _coerce_bool(v, default=False):
     if isinstance(v, bool): return v
     if isinstance(v, str):
@@ -2301,81 +2361,56 @@ def load_user_memory(username):
     
     # Default empty memory structure
     default_memory = {
-        "conversations": [],
+        "memory": {},
         "preferences": {"theme": "jarvis-dark", "last_active_tab": "ai"},
+        "history": [],
         "last_seen": time.strftime('%Y-%m-%d %H:%M:%S')
     }
     
     # Try to load encrypted file first
     if os.path.exists(enc_path):
-        try:
-            # Use openssl to decrypt
-            aes_key_path = os.path.join(NS_KEYS, 'aes.key')
-            if os.path.exists(aes_key_path):
-                # Read the key
-                with open(aes_key_path, 'rb') as f:
-                    aes_key = f.read().strip()
-                
-                # Decrypt using openssl
-                cmd = ['openssl', 'aes-256-cbc', '-d', '-salt', '-pbkdf2', '-in', enc_path, '-pass', f'file:{aes_key_path}']
-                result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
-                
-                if result.returncode == 0 and result.stdout.strip():
-                    return json.loads(result.stdout)
-        except Exception as e:
-            # Log error but continue with fallback
-            py_alert('WARN', f'Failed to decrypt user memory for {username}: {str(e)}')
+        memory = dec_json_from_file(enc_path)
+        if memory:
+            # Ensure all required fields exist
+            for key in default_memory:
+                if key not in memory:
+                    memory[key] = default_memory[key]
+            memory["last_seen"] = time.strftime('%Y-%m-%d %H:%M:%S')
+            return memory
     
-    # Fallback to plaintext JSON file
+    # Fallback to plaintext file if encryption fails
     if os.path.exists(json_path):
         try:
-            return read_json(json_path, default_memory)
+            memory = read_json(json_path, default_memory)
+            # Migrate to encrypted format
+            save_user_memory(username, memory)
+            os.unlink(json_path)  # Remove plaintext file after migration
+            return memory
         except Exception:
             pass
     
-    # Return default memory if no file exists
+    # Return default and save it
+    save_user_memory(username, default_memory)
     return default_memory
 
-def save_user_memory(username, data):
-    """Save per-user encrypted memory, fallback to plaintext if encryption fails."""
+def save_user_memory(username, memory):
+    """Save per-user encrypted memory."""
     safe_username = sanitize_username(username)
     enc_path = user_memory_path(username)
-    json_path = os.path.join(NS_CTRL, f'memory_{safe_username}.json')
     
-    # Ensure data has required structure
-    if not isinstance(data, dict):
-        data = {"conversations": [], "preferences": {}, "last_seen": time.strftime('%Y-%m-%d %H:%M:%S')}
+    # Update last seen timestamp
+    memory["last_seen"] = time.strftime('%Y-%m-%d %H:%M:%S')
     
     # Ensure directory exists
-    Path(NS_CTRL).mkdir(parents=True, exist_ok=True)
+    os.makedirs(os.path.dirname(enc_path), exist_ok=True)
     
-    # Try to encrypt and save
-    aes_key_path = os.path.join(NS_KEYS, 'aes.key')
-    if os.path.exists(aes_key_path):
-        try:
-            # Convert data to JSON
-            json_data = json.dumps(data)
-            
-            # Encrypt using openssl
-            cmd = ['openssl', 'aes-256-cbc', '-salt', '-pbkdf2', '-out', enc_path, '-pass', f'file:{aes_key_path}']
-            result = subprocess.run(cmd, input=json_data, text=True, capture_output=True, timeout=10)
-            
-            if result.returncode == 0:
-                # Successfully encrypted, remove any old plaintext file
-                if os.path.exists(json_path):
-                    try:
-                        os.remove(json_path)
-                    except Exception:
-                        pass
-                return
-        except Exception as e:
-            py_alert('WARN', f'Failed to encrypt user memory for {username}: {str(e)}')
+    # Save encrypted
+    success = enc_json_to_file(memory, enc_path)
     
-    # Fallback to plaintext JSON
-    try:
-        write_json(json_path, data)
-    except Exception as e:
-        py_alert('ERROR', f'Failed to save user memory for {username}: {str(e)}')
+    if not success:
+        # Fallback to plaintext if encryption fails
+        json_path = os.path.join(NS_CTRL, f'memory_{safe_username}.json')
+        write_json(json_path, memory)
 
 def get_jarvis_personality():
     """Get the configured Jarvis personality type."""
@@ -2407,9 +2442,9 @@ def ai_reply(prompt, username, user_ip):
     # Get personality traits
     personality = get_jarvis_personality()
     
-    # Add this conversation to user memory
+    # Add this conversation to user memory history
     memory_size = _coerce_int(cfg_get('jarvis.memory_size', 10), 10)
-    user_memory["conversations"].append({
+    user_memory["history"].append({
         "timestamp": now,
         "type": "user",
         "user": username,
@@ -2421,9 +2456,14 @@ def ai_reply(prompt, username, user_ip):
         }
     })
     
+    # Keep only last N conversations
+    if len(user_memory["history"]) > memory_size * 2:  # *2 for user+AI pairs
+        user_memory["history"] = user_memory["history"][-memory_size * 2:]
+    
     # Keep memory at configured size
-    if len(user_memory["conversations"]) > memory_size:
-        user_memory["conversations"] = user_memory["conversations"][-memory_size:]
+    # Trim memory to keep only recent history
+    if len(user_memory["history"]) > memory_size * 2:  # *2 for user+AI pairs  
+        user_memory["history"] = user_memory["history"][-memory_size * 2:]
     
     save_user_memory(username, user_memory)
     
@@ -2486,7 +2526,7 @@ def ai_reply(prompt, username, user_ip):
     # Whoami intent
     elif any(term in prompt_low for term in ['who am i', 'whoami', 'my info']):
         last_seen = user_memory.get('last_seen', 'first time')
-        convo_count = len(user_memory.get('conversations', []))
+        convo_count = len(user_memory.get('history', []))
         return f"You are {username}, last active: {last_seen}. We've had {convo_count} conversations. Your preferred theme: {user_memory['preferences'].get('theme', 'default')}."
     
     # Help intent
@@ -2589,8 +2629,8 @@ def ai_reply(prompt, username, user_ip):
     
     # Learning and memory intent
     elif any(term in prompt_low for term in ['remember', 'memory', 'forget', 'learn']):
-        convo_count = len(user_memory.get('conversations', []))
-        patterns = user_memory.get('learning_patterns', {})
+        convo_count = len(user_memory.get('history', []))
+        patterns = user_memory.get('memory', {}).get('learning_patterns', {})
         style = patterns.get('interaction_style', 'formal')
         frequent_cmds = len(patterns.get('frequent_commands', {}))
         reply = f"I remember our {convo_count} conversations, {username}. I've learned your interaction style is '{style}' and you use {frequent_cmds} different commands frequently. I continuously learn from your preferences, security patterns, and system usage to provide better assistance!"
@@ -2680,44 +2720,35 @@ def save_ai_response(username, reply, user_memory, memory_size):
     """Save AI response to user memory with enhanced learning and personalization."""
     try:
         now = time.strftime('%Y-%m-%d %H:%M:%S')
-        user_memory["conversations"].append({
+        user_memory["history"].append({
             "timestamp": now,
             "type": "ai",
             "user": "jarvis",
             "reply": reply,
             "context": {
-                "response_to": "user_query",
-                "learning_mode": "active",
-                "personality": get_jarvis_personality(),
-                "session_length": len(user_memory["conversations"])
+                "response_length": len(reply),
+                "intent_type": "general"
             }
         })
         
-        # Enhanced learning: analyze conversation patterns
-        if "learning_patterns" not in user_memory:
-            user_memory["learning_patterns"] = {}
+        # Keep only last N conversations  
+        if len(user_memory["history"]) > memory_size * 2:  # *2 for user+AI pairs
+            user_memory["history"] = user_memory["history"][-memory_size * 2:]
         
-        patterns = user_memory["learning_patterns"]
+        # Update user learning patterns in memory section
+        if "learning_patterns" not in user_memory["memory"]:
+            user_memory["memory"]["learning_patterns"] = {}
         
-        # Track interaction frequency
+        patterns = user_memory["memory"]["learning_patterns"]
+        patterns["last_interaction"] = now
         patterns["total_interactions"] = patterns.get("total_interactions", 0) + 1
         
-        # Analyze conversation topics
-        if "topics" not in patterns:
-            patterns["topics"] = {}
-        
-        # Simple topic extraction based on response content
-        reply_lower = reply.lower()
-        if "security" in reply_lower:
-            patterns["topics"]["security"] = patterns["topics"].get("security", 0) + 1
-        if "system" in reply_lower:
-            patterns["topics"]["system"] = patterns["topics"].get("system", 0) + 1
-        if "status" in reply_lower:
-            patterns["topics"]["status"] = patterns["topics"].get("status", 0) + 1
-        if "tool" in reply_lower:
-            patterns["topics"]["tools"] = patterns["topics"].get("tools", 0) + 1
-        
-        # Track interaction style preferences
+        # Save the updated memory
+        save_user_memory(username, user_memory)
+    except Exception as e:
+        py_alert('WARN', f'Failed to save AI response for {username}: {str(e)}')
+
+def get_personalized_jarvis_response(username, base_reply):
         if len(reply) > 200:
             patterns["prefers_detailed"] = patterns.get("prefers_detailed", 0) + 1
         else:
@@ -2740,8 +2771,9 @@ def save_ai_response(username, reply, user_memory, memory_size):
         patterns["active_hours"][str(current_hour)] = patterns["active_hours"].get(str(current_hour), 0) + 1
         
         # Keep memory at configured size
-        if len(user_memory["conversations"]) > memory_size:
-            user_memory["conversations"] = user_memory["conversations"][-memory_size:]
+        # Trim memory to keep only recent history
+        if len(user_memory["history"]) > memory_size * 2:  # *2 for user+AI pairs
+            user_memory["history"] = user_memory["history"][-memory_size * 2:]
         
         # Save updated memory with enhanced data
         save_user_memory(username, user_memory)
@@ -2763,9 +2795,6 @@ def save_ai_response(username, reply, user_memory, memory_size):
             # In a full implementation, this would be encrypted
         except Exception:
             pass  # Fail silently for global logging
-            
-    except Exception as e:
-        security_log(f"AI_MEMORY_ERROR user={username} error={str(e)}")
 
 def get_personalized_jarvis_response(username, base_response):
     """Enhance response with personalization based on user learning patterns"""
@@ -3122,26 +3151,6 @@ def jarvis_security_integration():
         security_data['system_threats'].append(f"Error in security integration: {str(e)}")
     
     return security_data
-                    elif 'ACCESS_DENIED' in line or 'UNAUTHORIZED' in line:
-                        security_data['access_violations'].append(line.strip())
-                    elif 'SECURITY' in line:
-                        security_data['security_alerts'].append(line.strip())
-        
-        # Read alerts log  
-        alerts_log_path = os.path.join(NS_LOGS, 'alerts.log')
-        if os.path.exists(alerts_log_path):
-            with open(alerts_log_path, 'r') as f:
-                lines = f.readlines()[-20:]  # Last 20 alerts
-                for line in lines:
-                    if any(threat in line.lower() for threat in ['threat', 'malware', 'virus', 'compromise']):
-                        security_data['system_threats'].append(line.strip())
-                    else:
-                        security_data['security_alerts'].append(line.strip())
-                        
-    except Exception as e:
-        security_log(f"JARVIS_SECURITY_SCAN_ERROR error={str(e)}")
-    
-    return security_data
 
 def enhanced_jarvis_learning(username, prompt, reply_context):
     """Enhanced learning system for Jarvis AI with advanced pattern analysis"""
@@ -3154,7 +3163,7 @@ def enhanced_jarvis_learning(username, prompt, reply_context):
         patterns = user_memory["learning_patterns"]
         
         # Enhanced pattern analysis
-        conversations = user_memory.get('conversations', [])
+        conversations = user_memory.get('history', [])
         
         # Track command usage patterns
         if "frequent_commands" not in patterns:
@@ -3233,20 +3242,6 @@ def enhanced_jarvis_learning(username, prompt, reply_context):
         
         # Save updated learning patterns
         save_user_memory(username, user_memory)
-                
-                # Detect interaction style
-                if any(word in prompt_text for word in ['please', 'thank', 'sorry']):
-                    user_patterns['interaction_style'] = 'formal'
-                elif any(word in prompt_text for word in ['yo', 'hey', 'sup', 'dude']):
-                    user_patterns['interaction_style'] = 'casual'
-                elif any(word in prompt_text for word in ['execute', 'analyze', 'generate', 'scan']):
-                    user_patterns['interaction_style'] = 'technical'
-        
-        # Update user memory with learned patterns
-        user_memory['learning_patterns'] = user_patterns
-        save_user_memory(username, user_memory)
-        
-        security_log(f"JARVIS_LEARNING user={username} style={user_patterns['interaction_style']} commands={len(user_patterns['frequent_commands'])}")
         
     except Exception as e:
         security_log(f"JARVIS_LEARNING_ERROR user={username} error={str(e)}")
@@ -3662,8 +3657,8 @@ def analyze_system_logs():
         ("/var/log/syslog", "System Messages"),
         ("/var/log/messages", "General Messages"),
         ("/var/log/secure", "Security Events"),
-        (NS_ALERTS, "NovaShield Alerts"),
-        (NS_AUDIT, "NovaShield Audit"),
+        (os.path.join(NS_LOGS, 'alerts.log'), "NovaShield Alerts"),
+        (os.path.join(NS_LOGS, 'audit.log'), "NovaShield Audit"),
     ]
     
     for log_path, description in log_files:
@@ -4184,7 +4179,7 @@ class Handler(SimpleHTTPRequestHandler):
                         'ok': True,
                         'memory': user_memory.get('memory', {}),
                         'preferences': user_memory.get('preferences', {}),
-                        'history': user_memory.get('conversations', [])  # Use 'conversations' as history
+                        'history': user_memory.get('history', [])  # Use history field consistently
                     }).encode('utf-8'))
                 except Exception:
                     self._set_headers(200)
@@ -4208,7 +4203,7 @@ class Handler(SimpleHTTPRequestHandler):
                     user_memory['memory'] = data.get('memory', {})
                     user_memory['preferences'] = data.get('preferences', {})
                     # Use 'conversations' instead of 'history' for consistency with ai_reply
-                    user_memory['conversations'] = data.get('history', [])
+                    user_memory['history'] = data.get('history', [])
                     user_memory['last_updated'] = time.time()
                     user_memory['last_seen'] = time.strftime('%Y-%m-%d %H:%M:%S')
                     
@@ -6235,79 +6230,6 @@ let statusPolling = null;
 let loadedTabs = new Set(['ai', 'alerts']); // Pre-load Jarvis and Alerts
 
 const tabs = $$('.tabs button');
-tabs.forEach(b=>b.onclick=()=>{ 
-  tabs.forEach(x=>x.classList.remove('active')); 
-  b.classList.add('active'); 
-  $$('.tab').forEach(x=>x.classList.remove('active')); 
-  const tabId = 'tab-'+b.dataset.tab;
-  $('#'+tabId).classList.add('active'); 
-  
-  activeTab = b.dataset.tab;
-  
-  // Lazy load tab content if not loaded yet
-  if (!loadedTabs.has(activeTab)) {
-    loadTabContent(activeTab);
-    loadedTabs.add(activeTab);
-  }
-  
-  // Manage polling based on active tab
-  managePolling(activeTab);
-  
-  // Auto-actions when switching tabs
-  if (b.dataset.tab === 'files') {
-    const cwdEl = $('#cwd');
-    if (cwdEl && cwdEl.value) {
-      list(cwdEl.value);
-    }
-  } else if (b.dataset.tab === 'terminal') {
-    if (!ws) connectTerm();
-    // Focus the hidden input for mobile keyboard support
-    const termInput = $('#terminal-input');
-    if (termInput) {
-      setTimeout(() => {
-        termInput.focus();
-        // Try to trigger mobile keyboard
-        termInput.click();
-      }, 100);
-    }
-  } else if (b.dataset.tab === 'security') {
-    refreshSecurityLogs();
-  } else if (b.dataset.tab === 'config') {
-    loadConfig();
-  }
-});
-
-function loadTabContent(tabName) {
-  // Load tab-specific content on demand
-  if (tabName === 'status') {
-    // Status tab is always loaded since it's the main dashboard
-    refresh();
-  } else if (tabName === 'security') {
-    refreshSecurityLogs();
-  } else if (tabName === 'config') {
-    loadConfig();
-  } else if (tabName === 'alerts') {
-    loadAlerts();
-  }
-}
-
-function managePolling(tabName) {
-  // Stop all polling first
-  if (statusPolling) {
-    clearInterval(statusPolling);
-    statusPolling = null;
-  }
-  
-  // Start appropriate polling for active tab
-  if (tabName === 'status') {
-    // Poll status data when Status tab is active
-    statusPolling = setInterval(refresh, 5000);
-  } else if (tabName === 'alerts') {
-    // Light polling for alerts
-    statusPolling = setInterval(loadAlerts, 10000);
-  }
-  // Other tabs don't need continuous polling
-}
 
 let CSRF = '';
 
@@ -8148,15 +8070,26 @@ function startVoiceInput() {
     recognition.start();
 }
 
-// Canonical sendChat function
+// Canonical sendChat function with learning capabilities
 async function sendChat() {
   const prompt = $('#prompt').value.trim(); 
   if(!prompt) return;
   const log = $('#chatlog'); 
+  
+  // Add to conversation history for learning
+  if (typeof conversationHistory !== 'undefined') {
+    conversationHistory.push({
+        type: 'user',
+        message: prompt,
+        timestamp: new Date().toISOString()
+    });
+  }
+  
   const you = document.createElement('div'); 
   you.className = 'user-msg';
   you.textContent='You: '+prompt; 
   log.appendChild(you);
+  
   try {
     const j = await (await api('/api/chat',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF':CSRF},body:JSON.stringify({prompt})})).json();
     const ai = document.createElement('div'); 
@@ -8167,8 +8100,25 @@ async function sendChat() {
     log.scrollTop=log.scrollHeight;
     
     // Speak the reply if voice is enabled and speak flag is set
-    if (j.speak && voiceEnabled) {
+    if (j.speak && typeof voiceEnabled !== 'undefined' && voiceEnabled && typeof speak === 'function') {
       speak(j.reply);
+    }
+    
+    // Update learning data
+    if (typeof updateUserLearning === 'function') {
+      updateUserLearning(prompt);
+    }
+    if (typeof saveJarvisMemory === 'function') {
+      saveJarvisMemory();
+    }
+    if (typeof updateAIStats === 'function') {
+      updateAIStats();
+    }
+    
+    // Update last interaction
+    const lastInteractionEl = $('#last-interaction');
+    if (lastInteractionEl) {
+      lastInteractionEl.textContent = new Date().toLocaleString();
     }
   } catch(e) { 
     const err = document.createElement('div'); 
@@ -8178,32 +8128,6 @@ async function sendChat() {
     log.scrollTop=log.scrollHeight;
   }
 }
-
-// Enhanced sendChat with learning capabilities
-const originalSendChat = window.sendChat;
-window.sendChat = async function() {
-    const prompt = $('#prompt');
-    const message = prompt.value.trim();
-    if (!message) return;
-    
-    // Add to conversation history
-    conversationHistory.push({
-        type: 'user',
-        message: message,
-        timestamp: new Date().toISOString()
-    });
-    
-    // Call original sendChat
-    await originalSendChat();
-    
-    // Update learning data
-    updateUserLearning(message);
-    saveJarvisMemory();
-    updateAIStats();
-    
-    // Update last interaction
-    $('#last-interaction').textContent = new Date().toLocaleString();
-};
 
 function updateUserLearning(message) {
     // Track command usage
@@ -8269,10 +8193,24 @@ tabs.forEach(b => {
         ['files', 'terminal', 'webgen', 'config', 'security'].forEach(tab => {
             if (activeTab === tab && !loadedTabs.has(tab)) {
                 loadedTabs.add(tab);
-                if (tab === 'files') loadFiles();
-                else if (tab === 'terminal') connectTerm();
-                else if (tab === 'config') loadConfig();
-                else if (tab === 'security') loadSecurityLogs();
+                if (tab === 'files') {
+                    loadFiles();
+                } else if (tab === 'terminal') {
+                    connectTerm();
+                    // Focus the hidden input for mobile keyboard support
+                    const termInput = $('#terminal-input');
+                    if (termInput) {
+                        setTimeout(() => {
+                            termInput.focus();
+                            // Try to trigger mobile keyboard
+                            termInput.click();
+                        }, 100);
+                    }
+                } else if (tab === 'config') {
+                    loadConfig();
+                } else if (tab === 'security') {
+                    loadSecurityLogs();
+                }
             }
         });
     };
