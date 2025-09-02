@@ -1891,6 +1891,23 @@ def mirror_terminal(handler):
                 
             if opcode in (1, 2) and allow_write:  # Text/binary frame
                 try:
+                    # Try to parse as JSON for resize frames
+                    if opcode == 1:  # Text frame
+                        try:
+                            frame_text = data.decode('utf-8')
+                            frame_data = json.loads(frame_text)
+                            if frame_data.get('type') == 'resize' and 'cols' in frame_data and 'rows' in frame_data:
+                                # Handle terminal resize
+                                cols = int(frame_data['cols'])
+                                rows = int(frame_data['rows'])
+                                winsz = struct.pack("HHHH", rows, cols, 0, 0)
+                                fcntl.ioctl(fd, tty.TIOCSWINSZ, winsz)
+                                continue  # Don't write JSON to PTY
+                        except (UnicodeDecodeError, json.JSONDecodeError, ValueError):
+                            # Not JSON, treat as regular terminal input
+                            pass
+                    
+                    # Regular terminal input - write to PTY
                     os.write(fd, data)
                 except Exception:
                     break
@@ -4332,8 +4349,6 @@ body.login-active header, body.login-active nav, body.login-active main{
     resize: vertical;
     min-height: 200px;
 }
-    overflow-y: auto;
-}
 
 /* Description styles for enhanced user guidance */
 .section-description, .panel-description, .card-description {
@@ -5143,29 +5158,16 @@ if (btnSave) btnSave.onclick=async()=>{
   if(!p) return; try{ await api('/api/fs_write',{method:'POST', headers:{'Content-Type':'application/json','X-CSRF':CSRF}, body:JSON.stringify({path:p,content:c})}); toast('saved'); list($('#cwd').value);}catch(e){toast('save failed')}
 }
 
-// Jarvis chat
-$('#send').onclick=async()=>{
-  const prompt = $('#prompt').value.trim(); if(!prompt) return;
-  const log = $('#chatlog'); 
-  const you = document.createElement('div'); 
-  you.className = 'user-msg';
-  you.textContent='You: '+prompt; 
-  log.appendChild(you);
-  try{
-    const j = await (await api('/api/chat',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF':CSRF},body:JSON.stringify({prompt})})).json();
-    const ai = document.createElement('div'); 
-    ai.className = 'jarvis-msg';
-    ai.textContent='Jarvis: '+j.reply; 
-    log.appendChild(ai); 
-    $('#prompt').value=''; 
-    log.scrollTop=log.scrollHeight;
-    
-    // Speak the reply if voice is enabled and speak flag is set
-    if (j.speak && voiceEnabled) {
-      speak(j.reply);
-    }
-  }catch(e){ console.error(e); }
-};
+// Jarvis chat - use canonical sendChat function
+$('#send').onclick = sendChat;
+
+// Add Enter key handler for chat input
+$('#prompt').addEventListener('keypress', (e) => {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    sendChat();
+  }
+});
 
 // Web Terminal
 let ws = null;
@@ -5205,11 +5207,8 @@ function connectTerm() {
             const rows = Math.floor(termRect.height / 16) || 24;
             ws.send(JSON.stringify({type: 'resize', cols, rows}));
             
-            toast('✓ Terminal connected');
-        };
-            term.focus(); 
             setupTerminalInput();
-            toast('Terminal connected'); 
+            toast('✓ Terminal connected');
         };
         
         ws.onmessage = (ev) => {
@@ -6102,6 +6101,37 @@ function startVoiceInput() {
     };
     
     recognition.start();
+}
+
+// Canonical sendChat function
+async function sendChat() {
+  const prompt = $('#prompt').value.trim(); 
+  if(!prompt) return;
+  const log = $('#chatlog'); 
+  const you = document.createElement('div'); 
+  you.className = 'user-msg';
+  you.textContent='You: '+prompt; 
+  log.appendChild(you);
+  try {
+    const j = await (await api('/api/chat',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF':CSRF},body:JSON.stringify({prompt})})).json();
+    const ai = document.createElement('div'); 
+    ai.className = 'jarvis-msg';
+    ai.textContent='Jarvis: '+j.reply; 
+    log.appendChild(ai); 
+    $('#prompt').value=''; 
+    log.scrollTop=log.scrollHeight;
+    
+    // Speak the reply if voice is enabled and speak flag is set
+    if (j.speak && voiceEnabled) {
+      speak(j.reply);
+    }
+  } catch(e) { 
+    const err = document.createElement('div'); 
+    err.className = 'error-msg';
+    err.textContent='Error: ' + e.message; 
+    log.appendChild(err); 
+    log.scrollTop=log.scrollHeight;
+  }
 }
 
 // Enhanced sendChat with learning capabilities
