@@ -5027,6 +5027,24 @@ async function loadConfig() {
   }
 }
 
+// Load status data (alias for refresh function)
+async function loadStatus() {
+  await refresh();
+}
+
+// Load security logs (alias for refreshSecurityLogs function)
+async function loadSecurityLogs() {
+  await refreshSecurityLogs();
+}
+
+// Load files for file manager (trigger initial directory listing)
+function loadFiles() {
+  const cwdEl = $('#cwd');
+  if (cwdEl && cwdEl.value) {
+    list(cwdEl.value);
+  }
+}
+
 // Monitors toggles
 async function post(action,target){
   try{ 
