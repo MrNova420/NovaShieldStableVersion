@@ -2451,20 +2451,44 @@ def install_missing_tools():
 
 def execute_custom_command(command):
     """Execute a custom command with safety checks."""
+    import shlex
+    
     if not command or not command.strip():
         return "Error: Empty command"
     
-    # Basic safety check for dangerous commands
-    dangerous_patterns = ['rm -rf', 'mkfs', 'dd if=', 'format', 'fdisk', 'shutdown', 'halt', 'init 0', 'init 6']
-    for pattern in dangerous_patterns:
-        if pattern in command.lower():
-            return f"Error: Potentially dangerous command blocked: {pattern}"
+    # Whitelist approach for allowed commands
+    allowed_commands = [
+        'ls', 'cat', 'grep', 'find', 'head', 'tail', 'wc', 'sort', 'uniq',
+        'ps', 'top', 'htop', 'df', 'du', 'free', 'uptime', 'who', 'w',
+        'netstat', 'ss', 'iptables', 'ufw', 'systemctl', 'journalctl',
+        'curl', 'wget', 'ping', 'nslookup', 'dig', 'traceroute',
+        'id', 'whoami', 'groups', 'last', 'lastlog', 'history',
+        'nmap', 'nikto', 'dirb', 'gobuster', 'ffuf', 'sqlmap',
+        'john', 'hydra', 'hashcat', 'metasploit', 'msfconsole',
+        'python3', 'python', 'bash', 'sh', 'zsh'
+    ]
     
     try:
-        # Execute with timeout and capture output
+        # Parse command safely using shlex to prevent injection
+        cmd_parts = shlex.split(command)
+        if not cmd_parts:
+            return "Error: Invalid command format"
+        
+        # Check if the base command is allowed
+        base_cmd = cmd_parts[0].split('/')[-1]  # Handle full paths
+        if base_cmd not in allowed_commands:
+            return f"Error: Command '{base_cmd}' not in allowed whitelist"
+        
+        # Additional safety checks for dangerous arguments
+        dangerous_args = ['--delete', '--remove', '--format', '--wipe', '--destroy']
+        cmd_str = ' '.join(cmd_parts).lower()
+        for arg in dangerous_args:
+            if arg in cmd_str:
+                return f"Error: Dangerous argument '{arg}' blocked"
+        
+        # Execute without shell=True to prevent command injection
         result = subprocess.run(
-            command,
-            shell=True,
+            cmd_parts,
             capture_output=True,
             text=True,
             timeout=30,
@@ -2879,8 +2903,11 @@ class Handler(SimpleHTTPRequestHandler):
             # Enhanced session handling with force_login_on_reload support
             force_login_on_reload = _coerce_bool(cfg_get('security.force_login_on_reload', False), False)
             
-            # If AUTH_STRICT is enabled and no valid session OR force_login_on_reload is enabled
-            if AUTH_STRICT and (not sess or force_login_on_reload):
+            # If AUTH_STRICT is enabled and no valid session, clear session cookie
+            if AUTH_STRICT and not sess:
+                self._set_headers(200, 'text/html; charset=utf-8', {'Set-Cookie': 'NSSESS=deleted; Path=/; HttpOnly; Max-Age=0; SameSite=Strict'})
+            # If force_login_on_reload is enabled, clear session cookie (even if session is valid)
+            elif force_login_on_reload:
                 self._set_headers(200, 'text/html; charset=utf-8', {'Set-Cookie': 'NSSESS=deleted; Path=/; HttpOnly; Max-Age=0; SameSite=Strict'})
             else:
                 self._set_headers(200, 'text/html; charset=utf-8')
