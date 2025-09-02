@@ -6781,14 +6781,6 @@ async function loadConfig() {
     toast('Failed to load configuration', 'error');
   }
 }
-    const cfgEl = $('#config');
-    if (cfgEl && j.config) {
-      cfgEl.textContent = j.config;
-    }
-  } catch(e) {
-    console.error('Failed to load config:', e);
-  }
-}
 
 // Load status data (alias for refresh function)
 async function loadStatus() {
@@ -7093,41 +7085,6 @@ function connectTerm() {
     } catch (error) {
         console.error('Failed to create WebSocket connection:', error);
         toast('Failed to create terminal connection', 'error');
-    }
-}
-            
-            let out = '';
-            if (e.key === 'Enter') out = '\r';
-            else if (e.key === 'Backspace') out = '\x7f';
-            else if (e.key === 'Delete') out = '\x1b[3~';
-            else if (e.key === 'Tab') out = '\t';
-            else if (e.key === 'Escape') out = '\x1b';
-            else if (e.key === 'ArrowUp') out = '\x1b[A';
-            else if (e.key === 'ArrowDown') out = '\x1b[B';
-            else if (e.key === 'ArrowRight') out = '\x1b[C';
-            else if (e.key === 'ArrowLeft') out = '\x1b[D';
-            else if (e.key === 'Home') out = '\x1b[H';
-            else if (e.key === 'End') out = '\x1b[F';
-            else if (e.key === 'PageUp') out = '\x1b[5~';
-            else if (e.key === 'PageDown') out = '\x1b[6~';
-            else if (e.ctrlKey && e.key.toLowerCase() === 'c') out = '\x03';
-            else if (e.ctrlKey && e.key.toLowerCase() === 'd') out = '\x04';
-            else if (e.ctrlKey && e.key.toLowerCase() === 'z') out = '\x1a';
-            else if (e.ctrlKey && e.key.toLowerCase() === 'l') out = '\x0c';
-            else if (e.key.length === 1) out = e.key;
-            
-            if (out) { 
-                ws.send(new TextEncoder().encode(out)); 
-            }
-        };
-        
-        // Ensure terminal stays focused when clicked
-        term.onclick = () => term.focus();
-        
-    } catch (e) { 
-        console.error(e); 
-        toast('Terminal connection failed'); 
-        ws = null;
     }
 }
 
