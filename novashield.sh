@@ -2069,6 +2069,8 @@ def ai_reply(prompt, username, user_ip):
     memory_size = _coerce_int(cfg_get('jarvis.memory_size', 10), 10)
     user_memory["conversations"].append({
         "timestamp": now,
+        "type": "user",
+        "user": username,
         "prompt": prompt,
         "context": {
             "cpu_load": status['cpu'].get('load1','?'),
@@ -2091,11 +2093,14 @@ def ai_reply(prompt, username, user_ip):
         disk_pct = status['disk'].get('use_pct', '?')
         
         if personality == 'snarky':
-            return f"Systems are running, {username}. CPU: {cpu_load}, Memory: {mem_pct}%, Disk: {disk_pct}%. Anything else you need to micromanage?"
+            reply = f"Systems are running, {username}. CPU: {cpu_load}, Memory: {mem_pct}%, Disk: {disk_pct}%. Anything else you need to micromanage?"
         elif personality == 'professional':
-            return f"System status report: CPU load {cpu_load}, Memory usage {mem_pct}%, Disk usage {disk_pct}%. All systems operational."
+            reply = f"System status report: CPU load {cpu_load}, Memory usage {mem_pct}%, Disk usage {disk_pct}%. All systems operational."
         else:
-            return f"All systems running smoothly, {username}. CPU load: {cpu_load}, Memory: {mem_pct}%, Disk: {disk_pct}%."
+            reply = f"All systems running smoothly, {username}. CPU load: {cpu_load}, Memory: {mem_pct}%, Disk: {disk_pct}%."
+        
+        save_ai_response(username, reply, user_memory, memory_size)
+        return reply
     
     # Backup intent
     elif any(term in prompt_low for term in ['backup', 'create backup']):
@@ -2145,7 +2150,9 @@ def ai_reply(prompt, username, user_ip):
     # Help intent
     elif any(term in prompt_low for term in ['help', 'what can you do', 'commands']):
         tools_count = len(scan_system_tools())
-        return f"I can help with: system status, backups, version info, restart monitors, show IP info, alerts, logs, terminal access, file management, web generation, and {tools_count} system tools. I also remember our conversations and learn from them, {username}! Try asking about 'tools', 'security scan', or 'system info'."
+        reply = f"I can help with: system status, backups, version info, restart monitors, show IP info, alerts, logs, terminal access, file management, web generation, and {tools_count} system tools. I also remember our conversations and learn from them, {username}! Try asking about 'tools', 'security scan', or 'system info'."
+        save_ai_response(username, reply, user_memory, memory_size)
+        return reply
     
     # Tools intent
     elif any(term in prompt_low for term in ['tools', 'scan tools', 'available tools', 'what tools']):
@@ -2217,7 +2224,9 @@ def ai_reply(prompt, username, user_ip):
     # Learning and memory intent
     elif any(term in prompt_low for term in ['remember', 'memory', 'forget', 'learn']):
         convo_count = len(user_memory.get('conversations', []))
-        return f"I remember our {convo_count} conversations, {username}. I learn from your preferences, command usage, and interaction patterns. You can view or clear my memory in the AI panel. I'm constantly improving based on our interactions!"
+        reply = f"I remember our {convo_count} conversations, {username}. I learn from your preferences, command usage, and interaction patterns. You can view or clear my memory in the AI panel. I'm constantly improving based on our interactions!"
+        save_ai_response(username, reply, user_memory, memory_size)
+        return reply
     
     # Advanced features intent
     elif any(term in prompt_low for term in ['advanced', 'expert', 'technical', 'professional']):
@@ -2257,12 +2266,34 @@ def ai_reply(prompt, username, user_ip):
             return f"Generating detailed system report, {username}. Check the Tools tab for comprehensive system information and diagnostics."
     
     # Fallback responses based on personality
+    reply = ""
     if personality == 'snarky':
-        return f"I'm not sure what you want, {username}. Try asking about status, backups, or saying 'help' for available commands."
+        reply = f"I'm not sure what you want, {username}. Try asking about status, backups, or saying 'help' for available commands."
     elif personality == 'professional':
-        return f"I don't recognize that request, {username}. Please try asking about system status, backups, or type 'help' for available commands."
+        reply = f"I don't recognize that request, {username}. Please try asking about system status, backups, or type 'help' for available commands."
     else:
-        return f"I'm here to help, {username}! Try asking about system status, creating backups, or say 'help' to see what I can do."
+        reply = f"I'm here to help, {username}! Try asking about system status, creating backups, or say 'help' to see what I can do."
+    
+    # Save AI response to memory
+    save_ai_response(username, reply, user_memory, memory_size)
+    return reply
+
+def save_ai_response(username, reply, user_memory, memory_size):
+    """Save AI response to user memory for learning."""
+    now = time.strftime('%Y-%m-%d %H:%M:%S')
+    user_memory["conversations"].append({
+        "timestamp": now,
+        "type": "ai",
+        "user": "jarvis",
+        "reply": reply
+    })
+    
+    # Keep memory at configured size
+    if len(user_memory["conversations"]) > memory_size:
+        user_memory["conversations"] = user_memory["conversations"][-memory_size:]
+    
+    # Save updated memory
+    save_user_memory(username, user_memory)
 
 # Old ai_reply function removed - using enhanced version above
 
@@ -3645,11 +3676,69 @@ write_dashboard(){
     <button data-tab="terminal" type="button">Terminal</button>
     <button data-tab="webgen" type="button">Web Builder</button>
     <button data-tab="config" type="button">Config</button>
+    <button data-tab="results" type="button">Results</button>
   </nav>
 
   <main>
     <section id="tab-status" class="tab" aria-labelledby="Status">
       <p class="section-description">Real-time system monitoring dashboard showing CPU load, memory usage, disk space, network connectivity, and security status. Use the monitor controls below to enable/disable specific monitoring modules.</p>
+      
+      <!-- Live Monitoring Stats Section -->
+      <section class="live-stats-panel">
+        <h2 class="stats-title">🔴 Live System Metrics</h2>
+        <div class="stats-grid">
+          <div class="stat-card">
+            <div class="stat-header">CPU Load</div>
+            <div class="stat-visual">
+              <div class="progress-bar">
+                <div class="progress-fill" id="cpu-progress"></div>
+              </div>
+              <span class="stat-value" id="cpu-stat">0%</span>
+            </div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-header">Memory</div>
+            <div class="stat-visual">
+              <div class="progress-bar">
+                <div class="progress-fill" id="mem-progress"></div>
+              </div>
+              <span class="stat-value" id="mem-stat">0%</span>
+            </div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-header">Disk</div>
+            <div class="stat-visual">
+              <div class="progress-bar">
+                <div class="progress-fill" id="disk-progress"></div>
+              </div>
+              <span class="stat-value" id="disk-stat">0%</span>
+            </div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-header">Network</div>
+            <div class="stat-visual">
+              <div class="status-indicator" id="net-indicator"></div>
+              <span class="stat-value" id="net-stat">Checking...</span>
+            </div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-header">Security</div>
+            <div class="stat-visual">
+              <div class="status-indicator" id="sec-indicator"></div>
+              <span class="stat-value" id="sec-stat">Monitoring</span>
+            </div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-header">Monitors</div>
+            <div class="stat-visual">
+              <div class="monitor-count" id="monitor-count">
+                <span class="active" id="monitors-active">0</span>/<span id="monitors-total">0</span>
+              </div>
+              <span class="stat-value" id="monitor-stat">Active</span>
+            </div>
+          </div>
+        </div>
+      </section>
       
       <section class="grid">
         <div class="card" id="card-cpu" title="System CPU load averages with warning and critical thresholds"><h2>CPU Load</h2><div class="value" id="cpu"></div></div>
@@ -3682,9 +3771,41 @@ write_dashboard(){
 
     <section id="tab-alerts" class="tab" aria-labelledby="Alerts">
       <div class="panel">
-        <h3>System Alerts</h3>
-        <p class="panel-description">Critical system alerts and notifications. Shows warnings about high resource usage, security threats, failed services, and other important system events that require attention.</p>
-        <ul id="alerts"></ul>
+        <h3>🚨 Critical Security Alerts</h3>
+        <p class="panel-description">High-priority security alerts including breach attempts, brute force attacks, suspicious activity, and critical system warnings. Only urgent events requiring immediate attention are displayed here.</p>
+        
+        <!-- Security Alert Categories -->
+        <div class="alert-categories">
+          <div class="alert-category critical">
+            <h4>🔴 Critical Threats</h4>
+            <div class="alert-count" id="critical-count">0</div>
+            <ul id="critical-alerts" class="alert-list"></ul>
+          </div>
+          
+          <div class="alert-category warning">
+            <h4>🟡 Security Warnings</h4>
+            <div class="alert-count" id="warning-count">0</div>
+            <ul id="warning-alerts" class="alert-list"></ul>
+          </div>
+          
+          <div class="alert-category brute-force">
+            <h4>🛡️ Brute Force Attempts</h4>
+            <div class="alert-count" id="brute-force-count">0</div>
+            <ul id="brute-force-alerts" class="alert-list"></ul>
+          </div>
+          
+          <div class="alert-category breach">
+            <h4>⚠️ Access Violations</h4>
+            <div class="alert-count" id="breach-count">0</div>
+            <ul id="breach-alerts" class="alert-list"></ul>
+          </div>
+        </div>
+        
+        <!-- Legacy Alert List (for backwards compatibility) -->
+        <div class="legacy-alerts">
+          <h4>All System Alerts</h4>
+          <ul id="alerts"></ul>
+        </div>
       </div>
     </section>
 
@@ -4019,6 +4140,81 @@ write_dashboard(){
         <h3>Configuration Viewer</h3>
         <p class="panel-description">View current NovaShield configuration settings including enabled features, monitoring thresholds, security options, and system paths. This is a read-only view - edit the configuration file directly to make changes.</p>
         <pre id="config" style="white-space:pre-wrap;"></pre>
+      </div>
+    </section>
+
+    <section id="tab-results" class="tab" aria-labelledby="Results">
+      <div class="panel">
+        <h3>📊 Analysis Results & Reports</h3>
+        <p class="panel-description">Comprehensive results from security scans, system analysis, tool executions, and automated reports. View detailed outputs, historical analysis data, and generated system reports.</p>
+        
+        <!-- Results Categories -->
+        <div class="results-categories">
+          <div class="results-nav">
+            <button class="result-category-btn active" data-category="recent">Recent Results</button>
+            <button class="result-category-btn" data-category="security">Security Scans</button>
+            <button class="result-category-btn" data-category="system">System Reports</button>
+            <button class="result-category-btn" data-category="tools">Tool Outputs</button>
+            <button class="result-category-btn" data-category="logs">Log Analysis</button>
+          </div>
+          
+          <div class="results-content">
+            <!-- Recent Results -->
+            <div class="result-category-content active" id="recent-results">
+              <h4>Recent Analysis Results</h4>
+              <div class="results-list" id="recent-results-list">
+                <div class="no-results">No recent results available. Run some tools or security scans to see results here.</div>
+              </div>
+            </div>
+            
+            <!-- Security Scan Results -->
+            <div class="result-category-content" id="security-results">
+              <h4>Security Scan Results</h4>
+              <div class="results-actions">
+                <button onclick="runSecurityScan()" class="action-btn">🔒 Run Security Scan</button>
+                <button onclick="runVulnerabilityCheck()" class="action-btn">🛡️ Vulnerability Check</button>
+              </div>
+              <div class="results-list" id="security-results-list">
+                <div class="no-results">No security scan results yet. Click "Run Security Scan" to generate a comprehensive security report.</div>
+              </div>
+            </div>
+            
+            <!-- System Reports -->
+            <div class="result-category-content" id="system-results">
+              <h4>System Analysis Reports</h4>
+              <div class="results-actions">
+                <button onclick="generateSystemReport()" class="action-btn">📋 Generate System Report</button>
+                <button onclick="runPerformanceAnalysis()" class="action-btn">⚡ Performance Analysis</button>
+              </div>
+              <div class="results-list" id="system-results-list">
+                <div class="no-results">No system reports available. Generate a comprehensive system report to see detailed analysis.</div>
+              </div>
+            </div>
+            
+            <!-- Tool Outputs -->
+            <div class="result-category-content" id="tools-results">
+              <h4>Tool Execution Results</h4>
+              <div class="results-actions">
+                <button onclick="showTab('tools')" class="action-btn">🔧 Go to Tools Panel</button>
+              </div>
+              <div class="results-list" id="tools-results-list">
+                <div class="no-results">No tool execution results yet. Use the Tools panel to run system commands and tools.</div>
+              </div>
+            </div>
+            
+            <!-- Log Analysis -->
+            <div class="result-category-content" id="logs-results">
+              <h4>Log Analysis Results</h4>
+              <div class="results-actions">
+                <button onclick="analyzeSecurityLogs()" class="action-btn">🔍 Analyze Security Logs</button>
+                <button onclick="analyzeSystemLogs()" class="action-btn">📜 Analyze System Logs</button>
+              </div>
+              <div class="results-list" id="logs-results-list">
+                <div class="no-results">No log analysis results yet. Run log analysis to identify patterns and potential issues.</div>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     </section>
   </main>
@@ -4671,6 +4867,297 @@ body.login-active header, body.login-active nav, body.login-active main{
     border-radius: 50%;
     width: 36px;
 }
+
+/* Live Stats Panel */
+.live-stats-panel {
+    margin-bottom: 20px;
+    background: rgba(5, 15, 25, 0.6);
+    border: 1px solid #173764;
+    border-radius: 12px;
+    padding: 16px;
+}
+
+.stats-title {
+    margin: 0 0 15px 0;
+    color: var(--accent);
+    font-size: 16px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 12px;
+}
+
+.stat-card {
+    background: rgba(13, 35, 57, 0.6);
+    border: 1px solid #173764;
+    border-radius: 8px;
+    padding: 12px;
+    text-align: center;
+}
+
+.stat-header {
+    font-size: 11px;
+    color: #94a3b8;
+    margin-bottom: 8px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.stat-visual {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+}
+
+.progress-bar {
+    width: 100%;
+    height: 6px;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 3px;
+    overflow: hidden;
+}
+
+.progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #10b981 0%, #3b82f6 50%, #f59e0b 80%, #ef4444 100%);
+    width: 0%;
+    transition: width 0.3s ease;
+    border-radius: 3px;
+}
+
+.status-indicator {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: #10b981;
+    animation: pulse 2s infinite;
+}
+
+.status-indicator.warning { background: #f59e0b; }
+.status-indicator.critical { background: #ef4444; }
+
+.monitor-count {
+    font-size: 18px;
+    font-weight: bold;
+    color: var(--accent);
+}
+
+.monitor-count .active {
+    color: #10b981;
+}
+
+.stat-value {
+    font-size: 12px;
+    color: #cfe6ff;
+    font-weight: 500;
+}
+
+/* Enhanced Alerts Panel */
+.alert-categories {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 15px;
+    margin-bottom: 20px;
+}
+
+.alert-category {
+    background: rgba(13, 35, 57, 0.6);
+    border: 1px solid #173764;
+    border-radius: 8px;
+    padding: 14px;
+}
+
+.alert-category.critical { border-left: 4px solid #ef4444; }
+.alert-category.warning { border-left: 4px solid #f59e0b; }
+.alert-category.brute-force { border-left: 4px solid #8b5cf6; }
+.alert-category.breach { border-left: 4px solid #f97316; }
+
+.alert-category h4 {
+    margin: 0 0 10px 0;
+    font-size: 14px;
+    color: var(--accent);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.alert-count {
+    background: rgba(255, 255, 255, 0.1);
+    color: #cfe6ff;
+    padding: 2px 8px;
+    border-radius: 12px;
+    font-size: 11px;
+    font-weight: bold;
+}
+
+.alert-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    max-height: 120px;
+    overflow-y: auto;
+}
+
+.alert-list li {
+    padding: 6px 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    font-size: 11px;
+    color: #94a3b8;
+}
+
+.alert-list li:last-child {
+    border-bottom: none;
+}
+
+.legacy-alerts {
+    margin-top: 20px;
+    padding-top: 20px;
+    border-top: 1px solid #173764;
+}
+
+.legacy-alerts h4 {
+    margin: 0 0 10px 0;
+    color: #94a3b8;
+    font-size: 13px;
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+}
+
+/* Results Page Styles */
+.results-categories {
+    margin-top: 15px;
+}
+
+.results-nav {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 20px;
+    flex-wrap: wrap;
+}
+
+.result-category-btn {
+    background: rgba(13, 35, 57, 0.6);
+    color: #94a3b8;
+    border: 1px solid #173764;
+    border-radius: 6px;
+    padding: 8px 16px;
+    cursor: pointer;
+    font-size: 12px;
+    transition: all 0.2s;
+}
+
+.result-category-btn:hover {
+    border-color: var(--accent);
+    color: #cfe6ff;
+}
+
+.result-category-btn.active {
+    background: var(--accent);
+    color: #0f172a;
+    border-color: var(--accent);
+}
+
+.result-category-content {
+    display: none;
+}
+
+.result-category-content.active {
+    display: block;
+}
+
+.result-category-content h4 {
+    margin: 0 0 15px 0;
+    color: var(--accent);
+    font-size: 16px;
+}
+
+.results-actions {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 20px;
+    flex-wrap: wrap;
+}
+
+.action-btn {
+    background: rgba(13, 35, 57, 0.8);
+    color: var(--accent);
+    border: 1px solid #173764;
+    border-radius: 6px;
+    padding: 8px 12px;
+    cursor: pointer;
+    font-size: 11px;
+    transition: all 0.2s;
+}
+
+.action-btn:hover {
+    background: var(--accent);
+    color: #0f172a;
+    border-color: var(--accent);
+}
+
+.results-list {
+    background: rgba(5, 15, 25, 0.6);
+    border: 1px solid #173764;
+    border-radius: 8px;
+    padding: 15px;
+    max-height: 400px;
+    overflow-y: auto;
+}
+
+.result-item {
+    background: rgba(13, 35, 57, 0.6);
+    border: 1px solid #173764;
+    border-radius: 6px;
+    padding: 12px;
+    margin-bottom: 10px;
+}
+
+.result-item:last-child {
+    margin-bottom: 0;
+}
+
+.result-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+}
+
+.result-title {
+    color: var(--accent);
+    font-weight: 500;
+    font-size: 13px;
+}
+
+.result-timestamp {
+    color: #94a3b8;
+    font-size: 10px;
+}
+
+.result-content {
+    color: #cfe6ff;
+    font-size: 11px;
+    line-height: 1.4;
+    white-space: pre-wrap;
+    font-family: monospace;
+}
+
+.no-results {
+    color: #94a3b8;
+    text-align: center;
+    padding: 20px;
+    font-style: italic;
+}
+
 CSS
 
   write_file "${NS_WWW}/app.js" 644 <<'JS'
@@ -4887,12 +5374,102 @@ async function api(path, opts){
 function human(val, unit=''){ if(val===undefined || val===null) return '?'; return `${val}${unit}`; }
 function setCard(id, text){ const el = $('#'+id); if(el) el.textContent = text; }
 
+// Update Live Stats Panel with real-time monitoring data
+function updateLiveStats(data) {
+    // CPU Stats
+    const cpu = data.cpu || {};
+    const cpuLoad = parseFloat(cpu.load1 || 0);
+    const cpuPercent = Math.min(Math.max(cpuLoad * 25, 0), 100); // Rough conversion to percentage
+    updateStatProgress('cpu', cpuPercent, `${cpu.load1 || '0.0'} (1m)`);
+    
+    // Memory Stats
+    const mem = data.memory || {};
+    const memPercent = parseFloat(mem.used_pct || 0);
+    updateStatProgress('mem', memPercent, `${memPercent}%`);
+    
+    // Disk Stats
+    const disk = data.disk || {};
+    const diskPercent = parseFloat(disk.use_pct || 0);
+    updateStatProgress('disk', diskPercent, `${diskPercent}%`);
+    
+    // Network Status
+    const net = data.network || {};
+    const netStatus = net.level || 'OK';
+    updateStatusIndicator('net', netStatus, `${netStatus} (${net.ip || 'N/A'})`);
+    
+    // Security Status
+    const security = data.integrity || {};
+    const secStatus = security.level || 'OK';
+    updateStatusIndicator('sec', secStatus, `${secStatus}`);
+    
+    // Monitor Counts
+    let activeMonitors = 0;
+    let totalMonitors = 8; // Total possible monitors
+    const monitors = ['cpu_enabled', 'memory_enabled', 'disk_enabled', 'network_enabled', 
+                     'integrity_enabled', 'process_enabled', 'userlogins_enabled', 'services_enabled'];
+    monitors.forEach(monitor => {
+        if (data[monitor]) activeMonitors++;
+    });
+    
+    updateMonitorCount(activeMonitors, totalMonitors);
+}
+
+function updateStatProgress(type, percent, value) {
+    const progressEl = $(`#${type}-progress`);
+    const valueEl = $(`#${type}-stat`);
+    
+    if (progressEl) {
+        progressEl.style.width = `${Math.min(percent, 100)}%`;
+        // Color coding based on percentage
+        if (percent >= 90) {
+            progressEl.style.background = '#ef4444'; // Red
+        } else if (percent >= 75) {
+            progressEl.style.background = '#f59e0b'; // Yellow
+        } else if (percent >= 50) {
+            progressEl.style.background = '#3b82f6'; // Blue
+        } else {
+            progressEl.style.background = '#10b981'; // Green
+        }
+    }
+    
+    if (valueEl) valueEl.textContent = value;
+}
+
+function updateStatusIndicator(type, status, value) {
+    const indicatorEl = $(`#${type}-indicator`);
+    const valueEl = $(`#${type}-stat`);
+    
+    if (indicatorEl) {
+        indicatorEl.className = 'status-indicator';
+        if (status === 'WARN' || status === 'WARNING') {
+            indicatorEl.classList.add('warning');
+        } else if (status === 'CRIT' || status === 'CRITICAL' || status === 'ERROR') {
+            indicatorEl.classList.add('critical');
+        }
+    }
+    
+    if (valueEl) valueEl.textContent = value;
+}
+
+function updateMonitorCount(active, total) {
+    const activeEl = $('#monitors-active');
+    const totalEl = $('#monitors-total');
+    const statEl = $('#monitor-stat');
+    
+    if (activeEl) activeEl.textContent = active;
+    if (totalEl) totalEl.textContent = total;
+    if (statEl) statEl.textContent = `${active}/${total} Active`;
+}
+
 async function refresh(){
   try{
     const r = await api('/api/status'); const j = await r.json();
     CSRF = j.csrf || '';
     // If we got here successfully, ensure login overlay is off
     hideLogin();
+
+    // Update Live Stats Panel
+    updateLiveStats(j);
 
     // Enhanced CPU information
     const cpu = j.cpu || {};
@@ -4992,6 +5569,7 @@ async function loadAlerts() {
     
     const alertsEl = $('#alerts');
     if (alertsEl && j.alerts) {
+      // Legacy alerts list
       alertsEl.innerHTML = '';
       const alerts = j.alerts.slice(-10); // Show last 10 alerts
       if (alerts.length === 0) {
@@ -5005,10 +5583,87 @@ async function loadAlerts() {
           alertsEl.appendChild(li);
         });
       }
+      
+      // Categorize alerts for enhanced display
+      categorizeAlerts(j.alerts || []);
     }
   } catch(e) {
     console.error('Failed to load alerts:', e);
   }
+}
+
+// Categorize alerts into security threat levels
+function categorizeAlerts(alerts) {
+    const critical = [];
+    const warnings = [];
+    const bruteForce = [];
+    const breaches = [];
+    
+    alerts.forEach(alert => {
+        const alertLower = alert.toLowerCase();
+        
+        // Critical threats (immediate danger)
+        if (alertLower.includes('breach') || alertLower.includes('compromised') || 
+            alertLower.includes('intrusion') || alertLower.includes('malware') ||
+            alertLower.includes('critical') || alertLower.includes('emergency')) {
+            critical.push(alert);
+        }
+        // Brute force attempts
+        else if (alertLower.includes('brute') || alertLower.includes('failed login') ||
+                 alertLower.includes('multiple attempts') || alertLower.includes('suspicious login') ||
+                 alertLower.includes('rate limit') || alertLower.includes('blocked ip')) {
+            bruteForce.push(alert);
+        }
+        // Access violations and unauthorized attempts
+        else if (alertLower.includes('unauthorized') || alertLower.includes('access denied') ||
+                 alertLower.includes('permission') || alertLower.includes('forbidden') ||
+                 alertLower.includes('invalid token') || alertLower.includes('session expired')) {
+            breaches.push(alert);
+        }
+        // General warnings
+        else if (alertLower.includes('warn') || alertLower.includes('suspicious') ||
+                 alertLower.includes('unusual') || alertLower.includes('high usage') ||
+                 alertLower.includes('threshold')) {
+            warnings.push(alert);
+        }
+        // If doesn't match any category, put in warnings
+        else {
+            warnings.push(alert);
+        }
+    });
+    
+    // Update alert categories
+    updateAlertCategory('critical', critical, 'No critical threats detected');
+    updateAlertCategory('warning', warnings, 'No warnings');
+    updateAlertCategory('brute-force', bruteForce, 'No brute force attempts');
+    updateAlertCategory('breach', breaches, 'No access violations');
+}
+
+function updateAlertCategory(categoryId, alerts, emptyMessage) {
+    const countEl = $(`#${categoryId}-count`);
+    const listEl = $(`#${categoryId}-alerts`);
+    
+    if (countEl) {
+        countEl.textContent = alerts.length;
+    }
+    
+    if (listEl) {
+        listEl.innerHTML = '';
+        
+        if (alerts.length === 0) {
+            const li = document.createElement('li');
+            li.textContent = emptyMessage;
+            li.style.color = '#10b981'; // Green for good news
+            listEl.appendChild(li);
+        } else {
+            // Show last 5 alerts for this category
+            alerts.slice(-5).forEach(alert => {
+                const li = document.createElement('li');
+                li.textContent = alert;
+                listEl.appendChild(li);
+            });
+        }
+    }
 }
 
 // Load configuration data
@@ -5956,6 +6611,189 @@ function bindAIEvents() {
     }
 }
 
+// Results page functions
+function initializeResultsPage() {
+    // Bind category navigation
+    $$('.result-category-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            switchResultCategory(btn.dataset.category);
+        });
+    });
+    
+    // Load any existing results
+    loadStoredResults();
+}
+
+function switchResultCategory(category) {
+    // Update active button
+    $$('.result-category-btn').forEach(btn => {
+        btn.classList.remove('active');
+    });
+    $(`.result-category-btn[data-category="${category}"]`).classList.add('active');
+    
+    // Update active content
+    $$('.result-category-content').forEach(content => {
+        content.classList.remove('active');
+    });
+    $(`#${category}-results`).classList.add('active');
+}
+
+function addResult(category, title, content, type = 'info') {
+    const resultsList = $(`#${category}-results-list`);
+    if (!resultsList) return;
+    
+    // Remove "no results" message if present
+    const noResults = resultsList.querySelector('.no-results');
+    if (noResults) noResults.remove();
+    
+    // Create result item
+    const resultItem = document.createElement('div');
+    resultItem.className = 'result-item';
+    resultItem.innerHTML = `
+        <div class="result-header">
+            <span class="result-title">${title}</span>
+            <span class="result-timestamp">${new Date().toLocaleString()}</span>
+        </div>
+        <div class="result-content">${content}</div>
+    `;
+    
+    // Add to top of list
+    resultsList.insertBefore(resultItem, resultsList.firstChild);
+    
+    // Also add to recent results
+    if (category !== 'recent') {
+        addResult('recent', title, content, type);
+    }
+    
+    // Store in localStorage for persistence
+    storeResult(category, title, content, type);
+}
+
+function loadStoredResults() {
+    try {
+        const storedResults = localStorage.getItem('novashield-results');
+        if (storedResults) {
+            const results = JSON.parse(storedResults);
+            results.forEach(result => {
+                addResult(result.category, result.title, result.content, result.type);
+            });
+        }
+    } catch (e) {
+        console.warn('Failed to load stored results:', e);
+    }
+}
+
+function storeResult(category, title, content, type) {
+    try {
+        let results = [];
+        const stored = localStorage.getItem('novashield-results');
+        if (stored) {
+            results = JSON.parse(stored);
+        }
+        
+        results.unshift({
+            category,
+            title,
+            content,
+            type,
+            timestamp: new Date().toISOString()
+        });
+        
+        // Keep only last 50 results
+        results = results.slice(0, 50);
+        
+        localStorage.setItem('novashield-results', JSON.stringify(results));
+    } catch (e) {
+        console.warn('Failed to store result:', e);
+    }
+}
+
+// Security scan functions
+async function runSecurityScan() {
+    try {
+        const result = await executeToolRequest('security-scan');
+        addResult('security', '🔒 Security Scan', result, 'security');
+        toast('Security scan completed');
+    } catch (e) {
+        toast('Security scan failed: ' + e.message);
+    }
+}
+
+async function runVulnerabilityCheck() {
+    try {
+        const result = await executeToolRequest('nmap -sV localhost');
+        addResult('security', '🛡️ Vulnerability Check', result, 'security');
+        toast('Vulnerability check completed');
+    } catch (e) {
+        toast('Vulnerability check failed: ' + e.message);
+    }
+}
+
+// System report functions
+async function generateSystemReport() {
+    try {
+        const result = await executeToolRequest('system-info');
+        addResult('system', '📋 System Report', result, 'system');
+        toast('System report generated');
+    } catch (e) {
+        toast('System report failed: ' + e.message);
+    }
+}
+
+async function runPerformanceAnalysis() {
+    try {
+        const result = await executeToolRequest('ps aux --sort=-%cpu | head -20');
+        addResult('system', '⚡ Performance Analysis', result, 'system');
+        toast('Performance analysis completed');
+    } catch (e) {
+        toast('Performance analysis failed: ' + e.message);
+    }
+}
+
+// Log analysis functions
+async function analyzeSecurityLogs() {
+    try {
+        const result = await executeToolRequest('log-analyzer');
+        addResult('logs', '🔍 Security Log Analysis', result, 'logs');
+        toast('Security log analysis completed');
+    } catch (e) {
+        toast('Security log analysis failed: ' + e.message);
+    }
+}
+
+async function analyzeSystemLogs() {
+    try {
+        const result = await executeToolRequest('tail -n 100 /var/log/syslog');
+        addResult('logs', '📜 System Log Analysis', result, 'logs');
+        toast('System log analysis completed');
+    } catch (e) {
+        toast('System log analysis failed: ' + e.message);
+    }
+}
+
+// Helper function to execute tool requests
+async function executeToolRequest(tool) {
+    const response = await api('/api/tools/execute', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRF': CSRF
+        },
+        body: JSON.stringify({ tool })
+    });
+    
+    if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+    }
+    
+    const data = await response.json();
+    if (!data.ok) {
+        throw new Error(data.error || 'Tool execution failed');
+    }
+    
+    return data.output || 'No output generated';
+}
+
 async function loadJarvisMemory() {
     try {
         const response = await fetch('/api/jarvis/memory');
@@ -6220,6 +7058,11 @@ tabs.forEach(b => {
         if (activeTab === 'ai' && !loadedTabs.has('ai-enhanced')) {
             loadedTabs.add('ai-enhanced');
             initEnhancedAI();
+        }
+        
+        if (activeTab === 'results' && !loadedTabs.has('results')) {
+            loadedTabs.add('results');
+            initializeResultsPage();
         }
         
         // Original polling and loading logic
