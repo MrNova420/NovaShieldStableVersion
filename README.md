@@ -5,7 +5,7 @@ This is a stableish version of the project/repo , NovaShield with built in Jarvi
 
 
 # NovaShield — JARVIS Edition (3.1.0)
-![Enhanced AI-Powered Security Dashboard](<img width="1080" height="2284" alt="Image" src="https://github.com/user-attachments/assets/e09ce815-624b-422f-ba01-e0df34cacbc4" />)
+![Enhanced AI-Powered Security Dashboard](https://private-user-images.githubusercontent.com/155208275/484666342-c251af56-56f1-4643-88d9-67d35bdc391e.png?jwt=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJnaXRodWIuY29tIiwiYXVkIjoicmF3LmdpdGh1YnVzZXJjb250ZW50LmNvbSIsImtleSI6ImtleTUiLCJleHAiOjE3NTY4MzAzMTEsIm5iZiI6MTc1NjgzMDAxMSwicGF0aCI6Ii8xNTUyMDgyNzUvNDg0NjY2MzQyLWMyNTFhZjU2LTU2ZjEtNDY0My04OGQ5LTY3ZDM1YmRjMzkxZS5wbmc_WC1BbXotQWxnb3JpdGhtPUFXUzQtSE1BQy1TSEEyNTYmWC1BbXotQ3JlZGVudGlhbD1BS0lBVkNPRFlMU0E1M1BRSzRaQSUyRjIwMjUwOTAyJTJGdXMtZWFzdC0xJTJGczMlMkZhd3M0X3JlcXVlc3QmWC1BbXotRGF0ZT0yMDI1MDkwMlQxNjIwMTFaJlgtQW16LUV4cGlyZXM9MzAwJlgtQW16LVNpZ25hdHVyZT0zMzRjODhmMTlkM2EyZTE0M2M2NWJiNDFkMWI1MjdjYzdjNTU0ZGRlYTllMzU3N2NhODUyMWRhZWE5ZjQ0NDA0JlgtQW16LVNpZ25lZEhlYWRlcnM9aG9zdCJ9.7Mv5EhzzY64lFlWmcZfsUqEvVIYaWxGXXp8pkvltL1U)
 
 ![Version](https://img.shields.io/badge/version-3.1.0-blue.svg)
 ![Platform](https://img.shields.io/badge/platform-Android%20%7C%20Linux-green.svg)
