@@ -5,7 +5,7 @@ This is a stableish version of the project/repo , NovaShield with built in Jarvi
 
 
 # NovaShield — JARVIS Edition (3.1.0)
-![Enhanced AI-Powered Security Dashboard](https://github.com/user-attachments/assets/ff349892-426e-4d2f-b521-90e8a966c83c)
+![Enhanced AI-Powered Security Dashboard](<img width="1080" height="2284" alt="Image" src="https://github.com/user-attachments/assets/e09ce815-624b-422f-ba01-e0df34cacbc4" />)
 
 ![Version](https://img.shields.io/badge/version-3.1.0-blue.svg)
 ![Platform](https://img.shields.io/badge/platform-Android%20%7C%20Linux-green.svg)
