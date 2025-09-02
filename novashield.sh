@@ -2643,6 +2643,85 @@ def analyze_system_logs():
     
     return "\n".join(output)
 
+def execute_custom_command(command):
+    """Execute a custom command safely and return its output."""
+    output = []
+    output.append(f"=== EXECUTING CUSTOM COMMAND ===")
+    output.append(f"Command: {command}")
+    output.append(f"Started: {time.strftime('%Y-%m-%d %H:%M:%S')}")
+    output.append("")
+    
+    # Basic command validation and security checks
+    dangerous_patterns = [
+        'rm -rf /', 'rm -rf ~', 'rm -rf *', 
+        'dd if=', 'mkfs', 'format',
+        '> /dev/', '> /etc/', '> /boot/',
+        'init 0', 'init 6', 'shutdown', 'halt', 'reboot',
+        'iptables -F', 'iptables -X',
+        'chmod 777 /', 'chown root /'
+    ]
+    
+    command_lower = command.lower()
+    is_dangerous = any(pattern in command_lower for pattern in dangerous_patterns)
+    
+    if is_dangerous:
+        output.append("⚠️  WARNING: Command blocked for security reasons")
+        output.append("Potentially dangerous commands are not allowed via web interface")
+        output.append("Use the terminal tab for administrative commands")
+        return "\n".join(output)
+    
+    # Limit command length
+    if len(command) > 200:
+        output.append("❌ ERROR: Command too long (max 200 characters)")
+        return "\n".join(output)
+    
+    try:
+        # Execute command with timeout and limits
+        result = subprocess.run(
+            command,
+            shell=True,
+            capture_output=True,
+            text=True,
+            timeout=30,  # 30 second timeout
+            cwd=os.path.expanduser('~')  # Run in user's home directory
+        )
+        
+        output.append("--- STDOUT ---")
+        if result.stdout.strip():
+            # Limit output size to prevent browser issues
+            stdout = result.stdout.strip()
+            if len(stdout) > 5000:
+                stdout = stdout[:5000] + "\n... (output truncated - use terminal for full output)"
+            output.append(stdout)
+        else:
+            output.append("(no output)")
+        
+        if result.stderr.strip():
+            output.append("")
+            output.append("--- STDERR ---")
+            stderr = result.stderr.strip()
+            if len(stderr) > 1000:
+                stderr = stderr[:1000] + "\n... (error output truncated)"
+            output.append(stderr)
+        
+        output.append("")
+        output.append(f"Exit code: {result.returncode}")
+        
+        if result.returncode == 0:
+            output.append("✅ Command completed successfully")
+        else:
+            output.append("❌ Command failed with non-zero exit code")
+            
+    except subprocess.TimeoutExpired:
+        output.append("⏱️  ERROR: Command timed out after 30 seconds")
+        output.append("Use the terminal tab for long-running commands")
+    except Exception as e:
+        output.append(f"❌ ERROR: {str(e)}")
+    
+    output.append("")
+    output.append(f"Completed: {time.strftime('%Y-%m-%d %H:%M:%S')}")
+    return "\n".join(output)
+
 # ------------------------------- WebSocket PTY -------------------------------
 def ws_handshake(handler):
     key = handler.headers.get('Sec-WebSocket-Key')
@@ -3330,13 +3409,20 @@ class Handler(SimpleHTTPRequestHandler):
             try:
                 data = json.loads(body or '{}')
                 tool_name = data.get('tool', '')
+                custom_command = data.get('command', '')
+                
                 if not tool_name:
                     self._set_headers(400)
                     self.wfile.write(json.dumps({'ok': False, 'error': 'No tool specified'}).encode('utf-8'))
                     return
                 
-                output = execute_tool(tool_name)
-                audit(f'TOOL_EXEC tool={tool_name} ip={self.client_address[0]}')
+                # Handle custom command execution
+                if tool_name == 'custom' and custom_command:
+                    output = execute_custom_command(custom_command)
+                else:
+                    output = execute_tool(tool_name)
+                    
+                audit(f'TOOL_EXEC tool={tool_name} command="{custom_command if custom_command else tool_name}" ip={self.client_address[0]}')
                 self._set_headers(200)
                 self.wfile.write(json.dumps({
                     'ok': True,
@@ -3773,6 +3859,23 @@ write_dashboard(){
             <span id="active-tool">No tool selected</span>
           </div>
           <pre id="tool-output" class="tool-output" placeholder="Tool output will appear here..."></pre>
+          
+          <div class="manual-command-panel">
+            <h5>Manual Command Execution</h5>
+            <p class="panel-description">Execute custom commands directly. Use with caution - commands run with full system access.</p>
+            <div class="command-input-group">
+              <input id="manual-command" type="text" placeholder="Enter command (e.g., ps aux, netstat -tuln, df -h)" title="Type any system command to execute" />
+              <button id="execute-command" type="button" title="Execute the entered command">Execute</button>
+            </div>
+            <div class="command-suggestions">
+              <button class="cmd-suggestion" data-cmd="ps aux">ps aux</button>
+              <button class="cmd-suggestion" data-cmd="df -h">df -h</button>
+              <button class="cmd-suggestion" data-cmd="netstat -tuln">netstat -tuln</button>
+              <button class="cmd-suggestion" data-cmd="top -n 1">top -n 1</button>
+              <button class="cmd-suggestion" data-cmd="uname -a">uname -a</button>
+              <button class="cmd-suggestion" data-cmd="whoami">whoami</button>
+            </div>
+          </div>
         </div>
       </div>
     </section>
@@ -4380,6 +4483,77 @@ body.login-active header, body.login-active nav, body.login-active main{
     font-family: 'Courier New', monospace;
     font-size: 11px;
     white-space: pre-wrap;
+}
+
+/* Manual Command Panel */
+.manual-command-panel {
+    margin-top: 16px;
+    padding: 12px;
+    background: rgba(5, 15, 25, 0.6);
+    border: 1px solid #173764;
+    border-radius: 8px;
+}
+
+.manual-command-panel h5 {
+    margin: 0 0 8px 0;
+    color: var(--accent);
+    font-size: 13px;
+}
+
+.command-input-group {
+    display: flex;
+    gap: 8px;
+    margin: 8px 0;
+}
+
+.command-input-group input {
+    flex: 1;
+    background: #0a1426;
+    border: 1px solid #173764;
+    border-radius: 6px;
+    padding: 6px 10px;
+    color: var(--text);
+    font-family: 'Courier New', monospace;
+    font-size: 12px;
+}
+
+.command-input-group button {
+    background: var(--card);
+    color: #cfe6ff;
+    border: 1px solid #173764;
+    border-radius: 6px;
+    padding: 6px 12px;
+    cursor: pointer;
+    font-size: 11px;
+}
+
+.command-input-group button:hover {
+    border-color: var(--accent);
+    background: rgba(13, 35, 57, 0.8);
+}
+
+.command-suggestions {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    margin-top: 8px;
+}
+
+.cmd-suggestion {
+    background: rgba(13, 35, 57, 0.6);
+    color: #cfe6ff;
+    border: 1px solid #173764;
+    border-radius: 4px;
+    padding: 4px 8px;
+    cursor: pointer;
+    font-size: 10px;
+    font-family: 'Courier New', monospace;
+    transition: all 0.2s;
+}
+
+.cmd-suggestion:hover {
+    border-color: var(--accent);
+    background: rgba(13, 35, 57, 0.9);
 }
 
 /* Enhanced AI Styles */
@@ -5490,6 +5664,20 @@ function bindToolEvents() {
     $$('.tool-btn').forEach(btn => {
         btn.addEventListener('click', () => executeTool(btn.dataset.tool));
     });
+    
+    // Manual command execution
+    $('#execute-command')?.addEventListener('click', executeManualCommand);
+    $('#manual-command')?.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') executeManualCommand();
+    });
+    
+    // Command suggestions
+    $$('.cmd-suggestion').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const cmdInput = $('#manual-command');
+            if (cmdInput) cmdInput.value = btn.dataset.cmd;
+        });
+    });
 }
 
 async function scanSystemTools() {
@@ -5635,6 +5823,62 @@ function saveToolOutput() {
     a.click();
     URL.revokeObjectURL(url);
     toast('✓ Output saved to file', 'success');
+}
+
+async function executeManualCommand() {
+    const cmdInput = $('#manual-command');
+    const outputEl = $('#tool-output');
+    const activeToolEl = $('#active-tool');
+    
+    if (!cmdInput || !cmdInput.value.trim()) {
+        toast('⚠️ Please enter a command to execute');
+        return;
+    }
+    
+    const command = cmdInput.value.trim();
+    
+    // Security warning for dangerous commands
+    const dangerousCommands = ['rm ', 'rmdir', 'dd ', 'mkfs', 'format', 'fdisk', 'shutdown', 'reboot', 'init ', 'kill -9'];
+    const isDangerous = dangerousCommands.some(cmd => command.toLowerCase().includes(cmd));
+    
+    if (isDangerous) {
+        if (!confirm(`⚠️ WARNING: "${command}" may be a dangerous command that could damage your system. Are you sure you want to execute it?`)) {
+            return;
+        }
+    }
+    
+    if (activeToolEl) activeToolEl.textContent = `Running: ${command}`;
+    if (outputEl) outputEl.textContent = `Executing: ${command}\n`;
+    
+    try {
+        const response = await fetch('/api/tools/execute', {
+            method: 'POST',
+            headers: { 'X-CSRF': CSRF, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ tool: 'custom', command: command })
+        });
+        
+        if (response.ok) {
+            const data = await response.json();
+            if (outputEl) {
+                outputEl.textContent = `=== COMMAND: ${command} ===\n`;
+                outputEl.textContent += data.output || 'Command executed successfully (no output)';
+                outputEl.textContent += '\n\n=== EXECUTION COMPLETE ===';
+            }
+            
+            toast(`✓ Command executed successfully`, 'success');
+        } else {
+            const error = await response.text();
+            if (outputEl) outputEl.textContent += `\nError: ${error}`;
+            toast(`✗ Command execution failed`, 'error');
+        }
+    } catch (err) {
+        console.error('Manual command execution failed:', err);
+        if (outputEl) outputEl.textContent += `\nError: ${err.message}`;
+        toast(`✗ Command execution failed: ${err.message}`, 'error');
+    }
+    
+    // Clear the input
+    cmdInput.value = '';
 }
 
 // ========== ENHANCED JARVIS AI FUNCTIONALITY ==========
