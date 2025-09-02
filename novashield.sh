@@ -5681,7 +5681,7 @@ tabs.forEach(b => {
             if (activeTab === tab && !loadedTabs.has(tab)) {
                 loadedTabs.add(tab);
                 if (tab === 'files') loadFiles();
-                else if (tab === 'terminal') initTerminal();
+                else if (tab === 'terminal') connectTerm();
                 else if (tab === 'config') loadConfig();
                 else if (tab === 'security') loadSecurityLogs();
             }
