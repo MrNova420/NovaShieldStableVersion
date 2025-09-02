@@ -1450,43 +1450,172 @@ def security_log(msg):
     except Exception:
         pass
 
+def security_verification_required(command_parts, user):
+    """Check if a command requires additional security verification"""
+    if not command_parts:
+        return False, "N/A"
+    
+    cmd = command_parts[0].lower()
+    command_string = ' '.join(command_parts).lower()
+    
+    # Commands that always require verification
+    high_risk_commands = {
+        'rm', 'rmdir', 'del', 'erase', 'format', 'mkfs', 'fdisk', 'parted',
+        'dd', 'shred', 'wipe', 'shutdown', 'reboot', 'halt', 'poweroff'
+    }
+    
+    if cmd in high_risk_commands:
+        return True, f"High-risk command '{cmd}' requires verification"
+    
+    # Check for dangerous argument combinations
+    dangerous_patterns = [
+        ('rm', '-rf'),
+        ('systemctl', 'stop'),
+        ('systemctl', 'disable'),
+        ('iptables', '-F'),
+        ('ufw', 'disable'),
+        ('service', 'stop')
+    ]
+    
+    for base_cmd, dangerous_arg in dangerous_patterns:
+        if cmd == base_cmd and dangerous_arg in command_string:
+            return True, f"Dangerous operation '{base_cmd} {dangerous_arg}' requires verification"
+    
+    # Check for system-critical file access
+    critical_paths = ['/etc/passwd', '/etc/shadow', '/etc/sudoers', '/boot/', '/sys/', '/proc/']
+    for path in critical_paths:
+        if path in command_string:
+            return True, f"Access to critical path '{path}' requires verification"
+    
+    return False, "No verification required"
+
+def perform_security_verification(user, command, verification_method='session'):
+    """Perform additional security verification for dangerous commands"""
+    verification_level = cfg_get('security.verification_level', 'standard')
+    
+    if verification_level == 'disabled':
+        return True, "Verification disabled in configuration"
+    
+    # For now, we'll implement session-based verification
+    # In a real implementation, you might want additional auth methods
+    session_file = os.path.join(NS_CTRL, f'verification_{sanitize_username(user)}.json')
+    
+    try:
+        # Check if user has recent verification
+        if os.path.exists(session_file):
+            verification_data = read_json(session_file, {})
+            last_verification = verification_data.get('last_verification', 0)
+            verification_window = _coerce_int(cfg_get('security.verification_window_minutes', 5), 5) * 60
+            
+            if time.time() - last_verification < verification_window:
+                return True, "Recent verification valid"
+        
+        # If strict mode, always require fresh verification
+        if verification_level == 'strict':
+            return False, "Strict mode requires fresh verification for each dangerous command"
+        
+        # For standard mode, create a verification session
+        verification_data = {
+            'user': user,
+            'last_verification': time.time(),
+            'command': command,
+            'timestamp': time.strftime('%Y-%m-%d %H:%M:%S')
+        }
+        write_json(session_file, verification_data)
+        
+        security_log(f"SECURITY_VERIFICATION_GRANTED user={user} command={command} method={verification_method}")
+        return True, "Verification granted"
+        
+    except Exception as e:
+        security_log(f"SECURITY_VERIFICATION_ERROR user={user} command={command} error={str(e)}")
+        return False, f"Verification failed: {str(e)}"
+
 def command_security_check(command_parts, user, ip):
-    """Enhanced security validation for command execution"""
+    """Enhanced security validation for command execution with multi-level verification"""
     if not command_parts:
         return False, "Empty command not allowed"
     
     cmd = command_parts[0].lower()
+    command_string = ' '.join(command_parts).lower()
     
-    # Enhanced whitelist of allowed commands
-    allowed_commands = {
+    # Enhanced whitelist of allowed commands with categories
+    system_tools = {
         'nmap', 'ping', 'curl', 'dig', 'host', 'nslookup', 'traceroute', 'ss', 'netstat',
-        'ps', 'top', 'htop', 'free', 'df', 'du', 'uname', 'whoami', 'id', 'groups',
-        'ls', 'cat', 'head', 'tail', 'grep', 'awk', 'sed', 'sort', 'uniq', 'wc',
-        'find', 'locate', 'which', 'whereis', 'pwd', 'date', 'uptime', 'w', 'who',
-        'ifconfig', 'ip', 'route', 'arp', 'lsof', 'nc', 'netcat', 'telnet',
-        'systemctl', 'service', 'journalctl', 'dmesg', 'lsmod', 'lspci', 'lsusb'
+        'telnet', 'nc', 'netcat', 'arp', 'route', 'ifconfig', 'ip'
     }
     
+    monitoring_tools = {
+        'ps', 'top', 'htop', 'free', 'df', 'du', 'uname', 'whoami', 'id', 'groups',
+        'uptime', 'w', 'who', 'lsof', 'vmstat', 'iostat', 'sar'
+    }
+    
+    file_tools = {
+        'ls', 'cat', 'head', 'tail', 'grep', 'awk', 'sed', 'sort', 'uniq', 'wc',
+        'find', 'locate', 'which', 'whereis', 'pwd', 'date', 'file', 'stat'
+    }
+    
+    system_info = {
+        'systemctl', 'service', 'journalctl', 'dmesg', 'lsmod', 'lspci', 'lsusb',
+        'lscpu', 'lsmem', 'lsblk', 'mount', 'fdisk'
+    }
+    
+    allowed_commands = system_tools | monitoring_tools | file_tools | system_info
+    
     if cmd not in allowed_commands:
-        security_log(f"BLOCKED_COMMAND user={user} ip={ip} command={cmd}")
+        security_log(f"BLOCKED_COMMAND user={user} ip={ip} command={cmd} reason=not_whitelisted")
         return False, f"Command '{cmd}' not in security whitelist"
     
-    # Check for dangerous arguments
-    dangerous_args = ['--delete', '--wipe', '--format', '--remove', '-rf', '--force', '--yes']
-    command_string = ' '.join(command_parts).lower()
+    # Enhanced dangerous arguments detection
+    dangerous_args = [
+        '--delete', '--wipe', '--format', '--remove', '-rf', '--force', '--yes',
+        '--destroy', '--erase', '--purge', '--clean', '--reset', '--factory',
+        '--zero', '--shred', '--overwrite', 'rm -rf', 'del /f', 'format c:'
+    ]
     
     for arg in dangerous_args:
         if arg in command_string:
-            security_log(f"DANGEROUS_ARG user={user} ip={ip} command={command_string} blocked_arg={arg}")
-            return False, f"Dangerous argument '{arg}' not allowed"
+            security_log(f"DANGEROUS_ARG_BLOCKED user={user} ip={ip} command={command_string} blocked_arg={arg}")
+            return False, f"Dangerous argument '{arg}' requires additional verification"
     
-    # Additional checks for specific commands
-    if cmd == 'nmap' and any(arg in command_string for arg in ['--script', '-sS', '-sU', '-O']):
-        security_log(f"NMAP_ADVANCED user={user} ip={ip} command={command_string}")
-        # Allow but log advanced nmap usage
+    # Command-specific security checks
+    if cmd == 'nmap':
+        # Check for potentially dangerous nmap scans
+        dangerous_nmap = ['--script', '-sS', '-sU', '-O', '--scanflags', '--spoof-mac']
+        if any(flag in command_string for flag in dangerous_nmap):
+            security_log(f"NMAP_ADVANCED_SCAN user={user} ip={ip} command={command_string}")
+            # Allow but require verification for advanced scans
+            verification_level = cfg_get('security.command_verification', 'standard')
+            if verification_level == 'strict':
+                return False, f"Advanced nmap scan requires verification in strict mode"
     
-    security_log(f"COMMAND_ALLOWED user={user} ip={ip} command={command_string}")
-    return True, "Command approved"
+    elif cmd == 'systemctl':
+        # Check for dangerous systemctl operations
+        dangerous_systemctl = ['stop', 'disable', 'mask', 'poweroff', 'reboot', 'halt']
+        if any(op in command_string for op in dangerous_systemctl):
+            security_log(f"SYSTEMCTL_DANGEROUS user={user} ip={ip} command={command_string}")
+            verification_level = cfg_get('security.command_verification', 'standard')
+            if verification_level == 'strict':
+                return False, f"Systemctl operation '{cmd}' requires verification in strict mode"
+    
+    elif cmd in ['fdisk', 'parted', 'mkfs']:
+        # Disk operations always require verification
+        security_log(f"DISK_OPERATION_BLOCKED user={user} ip={ip} command={command_string}")
+        return False, f"Disk operation '{cmd}' requires administrator verification"
+    
+    # Check for command chaining attempts
+    chain_indicators = [';', '&&', '||', '|', '>', '>>', '<', '`', '$(' ]
+    for indicator in chain_indicators:
+        if indicator in command_string:
+            security_log(f"COMMAND_CHAINING_BLOCKED user={user} ip={ip} command={command_string} indicator={indicator}")
+            return False, f"Command chaining not allowed for security reasons"
+    
+    # Path traversal protection
+    if '..' in command_string or '/etc/passwd' in command_string or '/etc/shadow' in command_string:
+        security_log(f"PATH_TRAVERSAL_BLOCKED user={user} ip={ip} command={command_string}")
+        return False, "Path traversal attempts not allowed"
+    
+    security_log(f"COMMAND_APPROVED user={user} ip={ip} command={command_string}")
+    return True, "Command approved by security validation"
 
 def read_text(path, default=''):
     try: return open(path,'r',encoding='utf-8').read()
@@ -1859,27 +1988,78 @@ def ws_send(sock, data, opcode=1):
     sock.send(bytes(hdr)+data)
 
 def spawn_pty(shell=None, cols=120, rows=32):
-    pid, fd = pty.fork()
-    if pid==0:
-    # Child
-        try:
-            if shell is None or not shell:
-                shell = os.environ.get('SHELL','')
-            if not shell:
-                # Improved shell resolution with Termux bash preference
-                for cand in ('/data/data/com.termux/files/usr/bin/bash','/bin/bash','/bin/zsh','/system/bin/sh','/bin/sh'):
-                    if os.path.exists(cand): shell=cand; break
-            os.execv(shell, [shell, '-l'])
-        except Exception as e:
-            os.write(1, f'Failed to start shell: {e}\n'.encode())
-            os._exit(1)
-    # Parent
-    # Ensure proper window size is set
-    winsz = struct.pack("HHHH", rows, cols, 0, 0)
+    """Enhanced PTY spawning with better cross-platform support and error handling"""
     try:
+        pid, fd = pty.fork()
+    except Exception as e:
+        raise Exception(f"PTY fork failed: {str(e)}")
+    
+    if pid == 0:
+        # Child process
+        try:
+            # Set environment variables for better terminal behavior
+            os.environ['TERM'] = 'xterm-256color'
+            os.environ['COLUMNS'] = str(cols)
+            os.environ['LINES'] = str(rows)
+            
+            if shell is None or not shell:
+                shell = os.environ.get('SHELL', '')
+            
+            if not shell or not os.path.exists(shell):
+                # Enhanced shell detection with better Termux and system support
+                shell_candidates = [
+                    '/data/data/com.termux/files/usr/bin/bash',  # Termux bash
+                    '/data/data/com.termux/files/usr/bin/sh',   # Termux sh
+                    '/bin/bash',                                # Standard Linux bash
+                    '/usr/bin/bash',                            # Alternative bash location
+                    '/bin/zsh',                                 # ZSH
+                    '/usr/bin/zsh',                            # Alternative ZSH
+                    '/bin/sh',                                  # POSIX shell
+                    '/system/bin/sh',                          # Android system shell
+                    '/usr/bin/sh',                             # Alternative sh
+                ]
+                
+                shell = None
+                for candidate in shell_candidates:
+                    if os.path.exists(candidate) and os.access(candidate, os.X_OK):
+                        shell = candidate
+                        break
+                
+                if not shell:
+                    raise Exception("No suitable shell found")
+            
+            # Verify shell is executable
+            if not os.access(shell, os.X_OK):
+                raise Exception(f"Shell {shell} is not executable")
+            
+            # Execute shell with login flag for proper environment setup
+            os.execv(shell, [shell, '-l'])
+            
+        except Exception as e:
+            error_msg = f'Failed to start shell: {str(e)}\n'
+            try:
+                os.write(1, error_msg.encode())
+            except: pass
+            os._exit(1)
+    
+    # Parent process
+    try:
+        # Set proper window size with error handling
+        winsz = struct.pack("HHHH", rows, cols, 0, 0)
         fcntl.ioctl(fd, tty.TIOCSWINSZ, winsz)
+    except Exception as e:
+        # Log but don't fail - window size setting is not critical
+        try:
+            security_log(f"PTY_WINSZ_ERROR pid={pid} error={str(e)}")
+        except: pass
+    
+    # Set non-blocking mode for better responsiveness
+    try:
+        fcntl.fcntl(fd, fcntl.F_SETFL, os.O_NONBLOCK)
     except Exception:
+        # Not critical if this fails
         pass
+    
     return pid, fd
 
 def mirror_terminal(handler):
@@ -1903,20 +2083,51 @@ def mirror_terminal(handler):
         # Additional verification could be added here
         pass
     
-    # Create a real PTY with enhanced error handling
+    # Send initial connection confirmation
+    try:
+        ws_send(client, f"\r\n🔗 NovaShield Terminal - Connecting as {user}...\r\n")
+    except Exception:
+        security_log(f"TERMINAL_WEBSOCKET_ERROR user={user} stage=initial_send")
+        return
+    
+    # Create a real PTY with enhanced error handling and cross-platform support
     try:
         pid, fd = spawn_pty(shell, cols, rows)
         audit(f'TERM START user={user} pid={pid} ip={handler.client_address[0]}')
         security_log(f"PTY_SPAWNED user={user} pid={pid} shell={shell}")
+        
+        # Send success notification
+        ws_send(client, f"\r\n✅ Terminal connected (PID: {pid})\r\n")
+        
     except Exception as e:
         error_msg = f"Failed to spawn PTY: {str(e)}"
         security_log(f"PTY_ERROR user={user} error={error_msg}")
-        ws_send(client, f"\r\nTerminal Error: {error_msg}\r\nPlease contact administrator.\r\n")
-        return
+        try:
+            ws_send(client, f"\r\n❌ Terminal Error: {error_msg}\r\n")
+            ws_send(client, f"\r\nTrying alternative shell configuration...\r\n")
+            
+            # Try fallback shell options
+            fallback_shells = ['/bin/bash', '/bin/sh', '/system/bin/sh']
+            for fallback_shell in fallback_shells:
+                if os.path.exists(fallback_shell):
+                    try:
+                        pid, fd = spawn_pty(fallback_shell, cols, rows)
+                        security_log(f"PTY_FALLBACK_SUCCESS user={user} pid={pid} shell={fallback_shell}")
+                        ws_send(client, f"\r\n✅ Terminal connected with fallback shell: {fallback_shell} (PID: {pid})\r\n")
+                        break
+                    except Exception:
+                        continue
+            else:
+                ws_send(client, f"\r\n❌ All terminal options failed. Please contact administrator.\r\n")
+                return
+        except Exception:
+            security_log(f"TERMINAL_CRITICAL_ERROR user={user} cannot_send_websocket_message")
+            return
         
     last_activity = time.time()
+    connection_stable = True
     
-    # Set terminal to raw mode with error handling
+    # Set terminal to raw mode with enhanced error handling
     old_attr = None
     try:
         old_attr = termios.tcgetattr(fd)
@@ -1924,73 +2135,136 @@ def mirror_terminal(handler):
         security_log(f"TERMINAL_RAW_MODE user={user} pid={pid}")
     except Exception as e:
         security_log(f"TERMINAL_RAW_ERROR user={user} pid={pid} error={str(e)}")
+        # Continue without raw mode if it fails
         pass
     
-    # Reader thread to send terminal output to websocket
+    # Enhanced reader thread with better error handling
     def reader():
+        nonlocal connection_stable
         try:
-            while True:
-                r, _, _ = select.select([fd], [], [], 0.1)
-                if fd in r:
-                    try:
-                        data = os.read(fd, 8192)
-                        if not data: break
-                        ws_send(client, data, opcode=2)
-                    except OSError:
-                        break
+            while connection_stable:
+                try:
+                    # Use select with timeout for better responsiveness
+                    r, _, _ = select.select([fd], [], [], 0.1)
+                    if fd in r:
+                        try:
+                            data = os.read(fd, 8192)
+                            if not data: 
+                                break
+                            # Send as binary data for better terminal compatibility
+                            ws_send(client, data, opcode=2)
+                        except OSError as e:
+                            security_log(f"TERMINAL_READ_ERROR user={user} pid={pid} error={str(e)}")
+                            break
+                        except Exception as e:
+                            security_log(f"TERMINAL_SEND_ERROR user={user} pid={pid} error={str(e)}")
+                            connection_stable = False
+                            break
+                except Exception as e:
+                    security_log(f"TERMINAL_SELECT_ERROR user={user} pid={pid} error={str(e)}")
+                    break
         finally:
+            # Cleanup resources
+            connection_stable = False
+            try: 
+                if old_attr:
+                    termios.tcsetattr(fd, termios.TCSANOW, old_attr)
+            except: pass
             try: os.close(fd)
             except: pass
             try: os.kill(pid, signal.SIGTERM)
             except: pass
+            security_log(f"TERMINAL_READER_CLEANUP user={user} pid={pid}")
     
-    t = threading.Thread(target=reader, daemon=True)
-    t.start()
+    reader_thread = threading.Thread(target=reader, daemon=True)
+    reader_thread.start()
     
-    # Process websocket input
+    # Enhanced WebSocket input processing with better error handling
+    # Enhanced WebSocket input processing with better error handling
     try:
-        while True:
-            if time.time() - last_activity > idle_timeout:
-                ws_send(client, '\r\n[Session idle timeout]\r\n')
-                break
-                
-            opcode, data = ws_recv(client)
-            if opcode is None: break
-            last_activity = time.time()
-            
-            if opcode == 8:  # Close frame
-                break
-                
-            if opcode in (1, 2) and allow_write:  # Text/binary frame
-                try:
-                    # Try to parse as JSON for resize frames
-                    if opcode == 1:  # Text frame
-                        try:
-                            frame_text = data.decode('utf-8')
-                            frame_data = json.loads(frame_text)
-                            if frame_data.get('type') == 'resize' and 'cols' in frame_data and 'rows' in frame_data:
-                                # Handle terminal resize
-                                cols = int(frame_data['cols'])
-                                rows = int(frame_data['rows'])
-                                winsz = struct.pack("HHHH", rows, cols, 0, 0)
-                                fcntl.ioctl(fd, tty.TIOCSWINSZ, winsz)
-                                continue  # Don't write JSON to PTY
-                        except (UnicodeDecodeError, json.JSONDecodeError, ValueError):
-                            # Not JSON, treat as regular terminal input
-                            pass
-                    
-                    # Regular terminal input - write to PTY
-                    os.write(fd, data)
-                except Exception:
+        while connection_stable and reader_thread.is_alive():
+            try:
+                if time.time() - last_activity > idle_timeout:
+                    try:
+                        ws_send(client, '\r\n[Session idle timeout - disconnecting]\r\n')
+                    except: pass
                     break
-    except Exception:
-        pass
+                    
+                # Receive WebSocket frame with timeout
+                try:
+                    opcode, data = ws_recv(client)
+                except Exception as e:
+                    security_log(f"TERMINAL_RECV_ERROR user={user} pid={pid} error={str(e)}")
+                    break
+                    
+                if opcode is None: 
+                    security_log(f"TERMINAL_DISCONNECT user={user} pid={pid} reason=opcode_none")
+                    break
+                    
+                last_activity = time.time()
+                
+                if opcode == 8:  # Close frame
+                    security_log(f"TERMINAL_CLOSE_FRAME user={user} pid={pid}")
+                    break
+                    
+                if opcode in (1, 2) and allow_write:  # Text/binary frame
+                    try:
+                        # Handle JSON commands (like resize)
+                        if opcode == 1:  # Text frame
+                            try:
+                                frame_text = data.decode('utf-8', errors='ignore')
+                                if frame_text.startswith('{'):
+                                    frame_data = json.loads(frame_text)
+                                    if frame_data.get('type') == 'resize':
+                                        cols = max(1, min(300, int(frame_data.get('cols', cols))))
+                                        rows = max(1, min(100, int(frame_data.get('rows', rows))))
+                                        winsz = struct.pack("HHHH", rows, cols, 0, 0)
+                                        try:
+                                            fcntl.ioctl(fd, tty.TIOCSWINSZ, winsz)
+                                            security_log(f"TERMINAL_RESIZE user={user} pid={pid} cols={cols} rows={rows}")
+                                        except Exception as e:
+                                            security_log(f"TERMINAL_RESIZE_ERROR user={user} pid={pid} error={str(e)}")
+                                        continue  # Don't write JSON to PTY
+                            except (UnicodeDecodeError, json.JSONDecodeError, ValueError):
+                                # Not JSON, treat as regular terminal input
+                                pass
+                        
+                        # Write input to PTY with error handling
+                        try:
+                            if isinstance(data, str):
+                                data = data.encode('utf-8')
+                            os.write(fd, data)
+                        except Exception as e:
+                            security_log(f"TERMINAL_WRITE_ERROR user={user} pid={pid} error={str(e)}")
+                            break
+                            
+                    except Exception as e:
+                        security_log(f"TERMINAL_FRAME_ERROR user={user} pid={pid} opcode={opcode} error={str(e)}")
+                        break
+                        
+            except Exception as e:
+                security_log(f"TERMINAL_LOOP_ERROR user={user} pid={pid} error={str(e)}")
+                break
+                
+    except Exception as e:
+        security_log(f"TERMINAL_MAIN_ERROR user={user} pid={pid} error={str(e)}")
     finally:
-        try: ws_send(client, '\r\n[Session ended]\r\n')
+        connection_stable = False
+        try: 
+            ws_send(client, '\r\n[Terminal session ended]\r\n')
         except: pass
+        
+        # Wait for reader thread to finish
+        try:
+            reader_thread.join(timeout=2.0)
+        except: pass
+        
+        # Final cleanup
         try: os.kill(pid, signal.SIGTERM)
         except: pass
+        
         audit(f'TERM END user={user} pid={pid} ip={handler.client_address[0]}')
+        security_log(f"TERMINAL_SESSION_END user={user} pid={pid}")
 
 # Add these functions before the Handler class:
 def load_jarvis_memory():
@@ -2395,12 +2669,15 @@ def ai_reply(prompt, username, user_ip):
     else:
         reply = f"I'm here to help, {username}! Try asking about system status, creating backups, or say 'help' to see what I can do."
     
+    # Apply personalization to the response
+    reply = get_personalized_jarvis_response(username, reply)
+    
     # Save AI response to memory
     save_ai_response(username, reply, user_memory, memory_size)
     return reply
 
 def save_ai_response(username, reply, user_memory, memory_size):
-    """Save AI response to user memory for enhanced learning."""
+    """Save AI response to user memory with enhanced learning and personalization."""
     try:
         now = time.strftime('%Y-%m-%d %H:%M:%S')
         user_memory["conversations"].append({
@@ -2410,39 +2687,350 @@ def save_ai_response(username, reply, user_memory, memory_size):
             "reply": reply,
             "context": {
                 "response_to": "user_query",
-                "learning_mode": "active"
+                "learning_mode": "active",
+                "personality": get_jarvis_personality(),
+                "session_length": len(user_memory["conversations"])
             }
         })
+        
+        # Enhanced learning: analyze conversation patterns
+        if "learning_patterns" not in user_memory:
+            user_memory["learning_patterns"] = {}
+        
+        patterns = user_memory["learning_patterns"]
+        
+        # Track interaction frequency
+        patterns["total_interactions"] = patterns.get("total_interactions", 0) + 1
+        
+        # Analyze conversation topics
+        if "topics" not in patterns:
+            patterns["topics"] = {}
+        
+        # Simple topic extraction based on response content
+        reply_lower = reply.lower()
+        if "security" in reply_lower:
+            patterns["topics"]["security"] = patterns["topics"].get("security", 0) + 1
+        if "system" in reply_lower:
+            patterns["topics"]["system"] = patterns["topics"].get("system", 0) + 1
+        if "status" in reply_lower:
+            patterns["topics"]["status"] = patterns["topics"].get("status", 0) + 1
+        if "tool" in reply_lower:
+            patterns["topics"]["tools"] = patterns["topics"].get("tools", 0) + 1
+        
+        # Track interaction style preferences
+        if len(reply) > 200:
+            patterns["prefers_detailed"] = patterns.get("prefers_detailed", 0) + 1
+        else:
+            patterns["prefers_concise"] = patterns.get("prefers_concise", 0) + 1
+        
+        # Determine interaction style preference
+        detailed = patterns.get("prefers_detailed", 0)
+        concise = patterns.get("prefers_concise", 0)
+        if detailed > concise * 1.5:
+            patterns["interaction_style"] = "detailed"
+        elif concise > detailed * 1.5:
+            patterns["interaction_style"] = "concise"
+        else:
+            patterns["interaction_style"] = "balanced"
+        
+        # Track time patterns for personalization
+        current_hour = int(time.strftime('%H'))
+        if "active_hours" not in patterns:
+            patterns["active_hours"] = {}
+        patterns["active_hours"][str(current_hour)] = patterns["active_hours"].get(str(current_hour), 0) + 1
         
         # Keep memory at configured size
         if len(user_memory["conversations"]) > memory_size:
             user_memory["conversations"] = user_memory["conversations"][-memory_size:]
         
-        # Save updated memory
+        # Save updated memory with enhanced data
         save_user_memory(username, user_memory)
         
-        # Enhanced learning - analyze patterns
+        # Enhanced learning - analyze patterns for future responses
         enhanced_jarvis_learning(username, "", {"reply": reply})
         
         # Global conversation logging for cross-user learning (encrypted)
         try:
             global_log_path = os.path.join(NS_CTRL, 'global_conversations.enc')
-            # Simple metadata logging for learning improvement
             metadata = {
                 "timestamp": now,
                 "username": username,
                 "prompt_length": len(reply.split()),
-                "response_type": "ai_reply"
+                "response_type": "ai_reply",
+                "topics": list(patterns.get("topics", {}).keys()),
+                "interaction_style": patterns.get("interaction_style", "balanced")
             }
             # In a full implementation, this would be encrypted
         except Exception:
-            pass  # Fail silently as specified
+            pass  # Fail silently for global logging
             
     except Exception as e:
         security_log(f"AI_MEMORY_ERROR user={username} error={str(e)}")
 
+def get_personalized_jarvis_response(username, base_response):
+    """Enhance response with personalization based on user learning patterns"""
+    try:
+        user_memory = load_user_memory(username)
+        patterns = user_memory.get("learning_patterns", {})
+        
+        # Personalize based on interaction style
+        style = patterns.get("interaction_style", "balanced")
+        personality = get_jarvis_personality()
+        
+        # Add personal touches based on learning
+        total_interactions = patterns.get("total_interactions", 0)
+        
+        if total_interactions > 50:
+            experience_level = "experienced"
+        elif total_interactions > 10:
+            experience_level = "familiar"
+        else:
+            experience_level = "new"
+        
+        # Modify response based on personality and experience
+        if personality == "helpful" and experience_level == "experienced":
+            if not any(phrase in base_response.lower() for phrase in [username.lower(), "as always", "you know"]):
+                base_response = base_response.replace(f"{username}!", f"{username}, as always!")
+        
+        # Add contextual information based on preferred topics
+        favorite_topics = patterns.get("topics", {})
+        if favorite_topics:
+            top_topic = max(favorite_topics.items(), key=lambda x: x[1])[0]
+            if top_topic == "security" and "security" not in base_response.lower():
+                base_response += f" (Also, I'm keeping an eye on security metrics for you as usual.)"
+        
+        return base_response
+        
+    except Exception:
+        return base_response
+
+def verify_storage_and_memory_systems():
+    """Comprehensive verification of storage and memory systems"""
+    verification_results = {
+        "storage_health": "unknown",
+        "memory_encryption": "unknown", 
+        "file_permissions": "unknown",
+        "directory_structure": "unknown",
+        "backup_systems": "unknown",
+        "issues": [],
+        "recommendations": []
+    }
+    
+    try:
+        # Check directory structure and permissions
+        critical_dirs = [NS_HOME, NS_CTRL, NS_LOGS, NS_KEYS, NS_WWW]
+        missing_dirs = []
+        permission_issues = []
+        
+        for dir_path in critical_dirs:
+            if not os.path.exists(dir_path):
+                missing_dirs.append(dir_path)
+                verification_results["issues"].append(f"Missing directory: {dir_path}")
+            else:
+                # Check if directory is writable
+                if not os.access(dir_path, os.W_OK):
+                    permission_issues.append(dir_path)
+                    verification_results["issues"].append(f"No write permission: {dir_path}")
+        
+        if not missing_dirs and not permission_issues:
+            verification_results["directory_structure"] = "healthy"
+            verification_results["file_permissions"] = "correct"
+        else:
+            verification_results["directory_structure"] = "issues_found"
+            verification_results["file_permissions"] = "issues_found"
+        
+        # Check encryption key availability
+        aes_key_path = os.path.join(NS_KEYS, 'aes.key')
+        if os.path.exists(aes_key_path):
+            try:
+                with open(aes_key_path, 'rb') as f:
+                    key_data = f.read()
+                if len(key_data) >= 32:  # Minimum for AES-256
+                    verification_results["memory_encryption"] = "available"
+                else:
+                    verification_results["memory_encryption"] = "key_too_short"
+                    verification_results["issues"].append("Encryption key is too short")
+            except Exception as e:
+                verification_results["memory_encryption"] = "key_read_error"
+                verification_results["issues"].append(f"Cannot read encryption key: {str(e)}")
+        else:
+            verification_results["memory_encryption"] = "no_key"
+            verification_results["issues"].append("No encryption key found")
+        
+        # Test memory persistence functionality
+        test_user = "verification_test"
+        test_data = {
+            "test": True,
+            "timestamp": time.strftime('%Y-%m-%d %H:%M:%S'),
+            "conversations": [{"test": "verification"}]
+        }
+        
+        try:
+            # Test save/load cycle
+            save_user_memory(test_user, test_data)
+            loaded_data = load_user_memory(test_user)
+            
+            if loaded_data and loaded_data.get("test") == True:
+                verification_results["storage_health"] = "functional"
+                
+                # Clean up test data
+                test_files = [
+                    user_memory_path(test_user),
+                    os.path.join(NS_CTRL, f'memory_{sanitize_username(test_user)}.json')
+                ]
+                for test_file in test_files:
+                    if os.path.exists(test_file):
+                        try:
+                            os.remove(test_file)
+                        except Exception:
+                            pass
+            else:
+                verification_results["storage_health"] = "save_load_failed"
+                verification_results["issues"].append("Memory save/load test failed")
+                
+        except Exception as e:
+            verification_results["storage_health"] = "error"
+            verification_results["issues"].append(f"Memory test error: {str(e)}")
+        
+        # Check backup and recovery capabilities
+        try:
+            # Test if we can create backups
+            backup_test_path = os.path.join(NS_HOME, '.backup_test')
+            with open(backup_test_path, 'w') as f:
+                f.write("backup test")
+            
+            if os.path.exists(backup_test_path):
+                os.remove(backup_test_path)
+                verification_results["backup_systems"] = "functional"
+            else:
+                verification_results["backup_systems"] = "cannot_create"
+                verification_results["issues"].append("Cannot create backup files")
+                
+        except Exception as e:
+            verification_results["backup_systems"] = "error"
+            verification_results["issues"].append(f"Backup test error: {str(e)}")
+        
+        # Generate recommendations
+        if verification_results["memory_encryption"] == "no_key":
+            verification_results["recommendations"].append("Generate encryption key for secure memory storage")
+        
+        if verification_results["file_permissions"] == "issues_found":
+            verification_results["recommendations"].append("Fix directory permissions for proper operation")
+        
+        if verification_results["storage_health"] != "functional":
+            verification_results["recommendations"].append("Investigate memory persistence issues")
+        
+        # Overall health assessment
+        issues_count = len(verification_results["issues"])
+        if issues_count == 0:
+            verification_results["overall_status"] = "excellent"
+        elif issues_count <= 2:
+            verification_results["overall_status"] = "good_with_minor_issues"
+        else:
+            verification_results["overall_status"] = "needs_attention"
+            
+    except Exception as e:
+        verification_results["overall_status"] = "verification_failed"
+        verification_results["issues"].append(f"Verification process error: {str(e)}")
+    
+    return verification_results
+
+def generate_comprehensive_security_report():
+    """Generate a comprehensive security and system status report"""
+    report = []
+    report.append("=== NOVASHIELD COMPREHENSIVE SECURITY REPORT ===")
+    report.append(f"Generated: {time.strftime('%Y-%m-%d %H:%M:%S')}")
+    report.append("")
+    
+    try:
+        # Storage and Memory Verification
+        storage_verification = verify_storage_and_memory_systems()
+        report.append("📁 STORAGE & MEMORY SYSTEMS")
+        report.append(f"Overall Status: {storage_verification['overall_status'].upper()}")
+        report.append(f"Directory Structure: {storage_verification['directory_structure']}")
+        report.append(f"File Permissions: {storage_verification['file_permissions']}")
+        report.append(f"Memory Encryption: {storage_verification['memory_encryption']}")
+        report.append(f"Storage Health: {storage_verification['storage_health']}")
+        report.append(f"Backup Systems: {storage_verification['backup_systems']}")
+        
+        if storage_verification['issues']:
+            report.append("\n⚠️  Issues Found:")
+            for issue in storage_verification['issues']:
+                report.append(f"  • {issue}")
+        
+        if storage_verification['recommendations']:
+            report.append("\n💡 Recommendations:")
+            for rec in storage_verification['recommendations']:
+                report.append(f"  • {rec}")
+        
+        report.append("")
+        
+        # Security Integration
+        security_data = jarvis_security_integration()
+        report.append("🛡️  SECURITY MONITORING")
+        report.append(f"Authentication Events: {len(security_data['authentication_events'])}")
+        report.append(f"Intrusion Attempts: {len(security_data['intrusion_attempts'])}")
+        report.append(f"Brute Force Detections: {len(security_data['brute_force_detections'])}")
+        report.append(f"Access Violations: {len(security_data['access_violations'])}")
+        report.append(f"System Threats: {len(security_data['system_threats'])}")
+        report.append(f"Security Alerts: {len(security_data['security_alerts'])}")
+        
+        # Recent security events
+        if security_data['intrusion_attempts']:
+            report.append("\n🚨 Recent Intrusion Attempts:")
+            for attempt in security_data['intrusion_attempts'][-3:]:  # Last 3
+                report.append(f"  • {attempt}")
+        
+        if security_data['system_threats']:
+            report.append("\n⚠️  System Threats:")
+            for threat in security_data['system_threats'][-3:]:  # Last 3
+                report.append(f"  • {threat}")
+        
+        report.append("")
+        
+        # System Performance
+        report.append("📊 SYSTEM PERFORMANCE")
+        try:
+            # CPU and Memory
+            cpu_data = read_json(os.path.join(NS_LOGS,'cpu.json'), {})
+            mem_data = read_json(os.path.join(NS_LOGS,'memory.json'), {})
+            disk_data = read_json(os.path.join(NS_LOGS,'disk.json'), {})
+            
+            report.append(f"CPU Load: {cpu_data.get('load1', 'N/A')}")
+            report.append(f"Memory Usage: {mem_data.get('used_pct', 'N/A')}%")
+            report.append(f"Disk Usage: {disk_data.get('use_pct', 'N/A')}%")
+        except Exception:
+            report.append("Performance metrics unavailable")
+        
+        report.append("")
+        
+        # Jarvis AI Status
+        report.append("🧠 JARVIS AI SYSTEM")
+        try:
+            # Count total users with memory
+            memory_files = []
+            if os.path.exists(NS_CTRL):
+                for filename in os.listdir(NS_CTRL):
+                    if filename.startswith('memory_') and (filename.endswith('.enc') or filename.endswith('.json')):
+                        memory_files.append(filename)
+            
+            report.append(f"Active User Memories: {len(memory_files)}")
+            report.append(f"Encryption Available: {'Yes' if os.path.exists(os.path.join(NS_KEYS, 'aes.key')) else 'No'}")
+            report.append(f"Learning Mode: Active")
+            report.append(f"Personality: {get_jarvis_personality().title()}")
+        except Exception:
+            report.append("Jarvis status check failed")
+        
+        report.append("")
+        report.append("=== END REPORT ===")
+        
+    except Exception as e:
+        report.append(f"Report generation error: {str(e)}")
+    
+    return "\n".join(report)
+
 def jarvis_security_integration():
-    """Jarvis security addon - full access to security monitoring and features"""
+    """Enhanced Jarvis security addon - comprehensive monitoring and threat analysis"""
     security_data = {
         'authentication_events': [],
         'intrusion_attempts': [],
@@ -2453,16 +3041,87 @@ def jarvis_security_integration():
     }
     
     try:
+        # Enhanced security log parsing with time-based filtering
+        current_time = time.time()
+        cutoff_time = current_time - (24 * 3600)  # Last 24 hours
+        
         # Read security logs
         security_log_path = os.path.join(NS_LOGS, 'security.log')
         if os.path.exists(security_log_path):
-            with open(security_log_path, 'r') as f:
-                lines = f.readlines()[-50:]  # Last 50 events
+            with open(security_log_path, 'r', encoding='utf-8') as f:
+                for line in f:
+                    try:
+                        # Parse timestamp and filter recent events
+                        if len(line.split()) < 2:
+                            continue
+                        timestamp_str = line.split()[0] + " " + line.split()[1]
+                        event_time = time.mktime(time.strptime(timestamp_str, '%Y-%m-%d %H:%M:%S'))
+                        
+                        if event_time < cutoff_time:
+                            continue  # Skip old events
+                        
+                        # Enhanced categorization
+                        if any(keyword in line for keyword in ['BLOCKED_COMMAND', 'DANGEROUS_ARG', 'COMMAND_CHAINING']):
+                            security_data['intrusion_attempts'].append(line.strip())
+                        elif any(keyword in line for keyword in ['LOGIN_FAIL', 'AUTH_FAIL', 'MULTIPLE_FAILED']):
+                            security_data['brute_force_detections'].append(line.strip())
+                        elif any(keyword in line for keyword in ['UNAUTHORIZED', 'ACCESS_VIOLATION', 'PERMISSION_DENIED']):
+                            security_data['access_violations'].append(line.strip())
+                        elif any(keyword in line for keyword in ['LOGIN_SUCCESS', 'AUTH_SUCCESS', 'SESSION_START']):
+                            security_data['authentication_events'].append(line.strip())
+                        elif any(keyword in line for keyword in ['THREAT', 'MALWARE', 'VIRUS', 'EXPLOIT']):
+                            security_data['system_threats'].append(line.strip())
+                        elif any(keyword in line for keyword in ['ALERT', 'WARNING', 'CRITICAL']):
+                            security_data['security_alerts'].append(line.strip())
+                    except Exception:
+                        continue  # Skip malformed log lines
+        
+        # Read audit logs for additional security events
+        audit_log_path = NS_AUDIT
+        if os.path.exists(audit_log_path):
+            with open(audit_log_path, 'r', encoding='utf-8') as f:
+                for line in f:
+                    if any(keyword in line.upper() for keyword in ['SECURITY', 'BREACH', 'ATTACK', 'SUSPICIOUS']):
+                        security_data['security_alerts'].append(line.strip())
+        
+        # Read alerts log
+        alerts_log_path = NS_ALERTS
+        if os.path.exists(alerts_log_path):
+            with open(alerts_log_path, 'r', encoding='utf-8') as f:
+                for line in f:
+                    if any(keyword in line.upper() for keyword in ['CRIT', 'ERROR', 'SECURITY']):
+                        security_data['security_alerts'].append(line.strip())
+        
+        # Add real-time system security metrics
+        try:
+            # Check for failed SSH attempts (if available)
+            if os.path.exists('/var/log/auth.log'):
+                ssh_fails = subprocess.run(['grep', 'Failed password', '/var/log/auth.log'], 
+                                         capture_output=True, text=True, timeout=5)
+                if ssh_fails.returncode == 0:
+                    recent_fails = ssh_fails.stdout.strip().split('\n')[-10:]  # Last 10
+                    security_data['brute_force_detections'].extend(recent_fails)
+        except Exception:
+            pass
+        
+        # Check for suspicious processes
+        try:
+            suspicious_processes = []
+            ps_output = subprocess.run(['ps', 'aux'], capture_output=True, text=True, timeout=10)
+            if ps_output.returncode == 0:
+                lines = ps_output.stdout.split('\n')
                 for line in lines:
-                    if 'BLOCKED_COMMAND' in line:
-                        security_data['intrusion_attempts'].append(line.strip())
-                    elif 'LOGIN_FAIL' in line or 'AUTH_FAIL' in line:
-                        security_data['brute_force_detections'].append(line.strip())
+                    # Look for potentially suspicious process names
+                    if any(suspicious in line.lower() for suspicious in ['netcat', 'nc -l', 'reverse_shell', 'backdoor']):
+                        suspicious_processes.append(line.strip())
+                        security_data['system_threats'].append(f"Suspicious process detected: {line.strip()}")
+        except Exception:
+            pass
+        
+    except Exception as e:
+        security_data['system_threats'].append(f"Error in security integration: {str(e)}")
+    
+    return security_data
                     elif 'ACCESS_DENIED' in line or 'UNAUTHORIZED' in line:
                         security_data['access_violations'].append(line.strip())
                     elif 'SECURITY' in line:
@@ -2485,14 +3144,62 @@ def jarvis_security_integration():
     return security_data
 
 def enhanced_jarvis_learning(username, prompt, reply_context):
-    """Enhanced learning system for Jarvis AI"""
+    """Enhanced learning system for Jarvis AI with advanced pattern analysis"""
     try:
         user_memory = load_user_memory(username)
         
-        # Analyze user patterns
+        if "learning_patterns" not in user_memory:
+            user_memory["learning_patterns"] = {}
+        
+        patterns = user_memory["learning_patterns"]
+        
+        # Enhanced pattern analysis
         conversations = user_memory.get('conversations', [])
+        
+        # Track command usage patterns
+        if "frequent_commands" not in patterns:
+            patterns["frequent_commands"] = {}
+        
+        # Extract commands from user prompts
+        if prompt:
+            prompt_lower = prompt.lower()
+            command_indicators = ['run ', 'execute ', 'launch ', 'start ', 'scan ', 'check ', 'analyze ']
+            for indicator in command_indicators:
+                if indicator in prompt_lower:
+                    cmd_start = prompt_lower.find(indicator) + len(indicator)
+                    potential_cmd = prompt_lower[cmd_start:].split()[0] if cmd_start < len(prompt_lower) else ''
+                    if potential_cmd:
+                        patterns["frequent_commands"][potential_cmd] = patterns["frequent_commands"].get(potential_cmd, 0) + 1
+        
+        # Analyze AI response patterns
+        if reply_context and "reply" in reply_context:
+            reply = reply_context["reply"]
+            
+            # Track response complexity preferences
+            if "response_complexity" not in patterns:
+                patterns["response_complexity"] = {"simple": 0, "detailed": 0, "technical": 0}
+            
+            if len(reply) > 500:
+                patterns["response_complexity"]["detailed"] += 1
+            elif any(tech_term in reply.lower() for tech_term in ['cpu', 'memory', 'process', 'command', 'log']):
+                patterns["response_complexity"]["technical"] += 1
+            else:
+                patterns["response_complexity"]["simple"] += 1
+            
+            # Track emotional tone preferences (basic sentiment analysis)
+            if "emotional_preferences" not in patterns:
+                patterns["emotional_preferences"] = {"formal": 0, "friendly": 0, "enthusiastic": 0}
+            
+            if any(enthusiastic in reply for enthusiastic in ['!', 'great', 'excellent', 'perfect']):
+                patterns["emotional_preferences"]["enthusiastic"] += 1
+            elif any(friendly in reply for friendly in ['please', 'sure', 'happy to', 'glad to']):
+                patterns["emotional_preferences"]["friendly"] += 1
+            else:
+                patterns["emotional_preferences"]["formal"] += 1
+        
+        # Legacy compatibility - analyze conversation history
         user_patterns = {
-            'frequent_commands': {},
+            'frequent_commands': patterns.get("frequent_commands", {}),
             'preferred_tools': {},
             'interaction_style': 'formal',  # formal, casual, technical
             'response_preferences': {},
@@ -2505,9 +3212,27 @@ def enhanced_jarvis_learning(username, prompt, reply_context):
                 prompt_text = conv.get('prompt', '').lower()
                 
                 # Track command preferences
-                for tool in ['nmap', 'ping', 'netstat', 'ps', 'htop', 'curl']:
+                for tool in ['nmap', 'ping', 'netstat', 'ps', 'htop', 'curl', 'grep', 'find', 'ls']:
                     if tool in prompt_text:
                         user_patterns['frequent_commands'][tool] = user_patterns['frequent_commands'].get(tool, 0) + 1
+                
+                # Determine interaction style
+                if any(casual in prompt_text for casual in ['hey', 'hi', 'thanks', 'cool', 'awesome']):
+                    user_patterns['interaction_style'] = 'casual'
+                elif any(tech in prompt_text for tech in ['process', 'thread', 'memory', 'cpu', 'kernel']):
+                    user_patterns['interaction_style'] = 'technical'
+                
+                # Assess security awareness
+                if any(sec in prompt_text for sec in ['security', 'vulnerability', 'threat', 'attack', 'breach']):
+                    user_patterns['security_awareness'] = 'high'
+        
+        # Update patterns with learned data
+        patterns.update(user_patterns)
+        patterns["last_learning_update"] = time.strftime('%Y-%m-%d %H:%M:%S')
+        patterns["learning_sessions"] = patterns.get("learning_sessions", 0) + 1
+        
+        # Save updated learning patterns
+        save_user_memory(username, user_memory)
                 
                 # Detect interaction style
                 if any(word in prompt_text for word in ['please', 'thank', 'sorry']):
@@ -6138,9 +6863,12 @@ $('#prompt').addEventListener('keypress', (e) => {
   }
 });
 
-// Web Terminal
+// Enhanced Web Terminal with improved connection stability
 let ws = null;
 let termBuffer = '';
+let reconnectAttempts = 0;
+let maxReconnectAttempts = 5;
+let reconnectDelay = 2000;
 
 function connectTerm() {
     if (ws && ws.readyState === WebSocket.OPEN) {
@@ -6152,12 +6880,16 @@ function connectTerm() {
         ws = new WebSocket(`${proto}://${location.host}/ws/term`);
         const term = $('#term');
         const termInput = $('#terminal-input');
-        term.textContent = 'Connecting to terminal...\n';
+        
+        // Show connection status
+        term.textContent = '🔗 Connecting to terminal...\n';
         ws.binaryType = 'arraybuffer';
         
         ws.onopen = () => { 
             term.textContent = '';
             console.log('Terminal WebSocket connected successfully');
+            reconnectAttempts = 0; // Reset counter on successful connection
+            
             // Ensure terminal is focusable and focused
             term.setAttribute('tabindex', '0');
             term.focus();
@@ -6171,52 +6903,110 @@ function connectTerm() {
                 });
             }
             
-            // Send initial resize
-            const termRect = term.getBoundingClientRect();
-            const cols = Math.floor(termRect.width / 8) || 80;
-            const rows = Math.floor(termRect.height / 16) || 24;
-            console.log(`Sending terminal resize: ${cols}x${rows}`);
-            ws.send(JSON.stringify({type: 'resize', cols, rows}));
+            // Send initial resize with error handling
+            try {
+                const termRect = term.getBoundingClientRect();
+                const cols = Math.floor(termRect.width / 8) || 80;
+                const rows = Math.floor(termRect.height / 16) || 24;
+                console.log(`Sending terminal resize: ${cols}x${rows}`);
+                ws.send(JSON.stringify({type: 'resize', cols, rows}));
+            } catch (e) {
+                console.warn('Failed to send initial resize:', e);
+            }
             
             setupTerminalInput();
-            toast('✓ Terminal connected');
+            toast('✅ Terminal connected');
         };
         
         ws.onmessage = (ev) => {
-            if (ev.data instanceof ArrayBuffer) {
-                const dec = new TextDecoder('utf-8', {fatal: false});
-                const txt = dec.decode(new Uint8Array(ev.data));
-                term.textContent += txt;
-            } else {
-                term.textContent += ev.data;
+            try {
+                if (ev.data instanceof ArrayBuffer) {
+                    const dec = new TextDecoder('utf-8', {fatal: false});
+                    const txt = dec.decode(new Uint8Array(ev.data));
+                    term.textContent += txt;
+                } else {
+                    term.textContent += ev.data;
+                }
+                term.scrollTop = term.scrollHeight;
+            } catch (e) {
+                console.error('Error processing terminal message:', e);
             }
-            term.scrollTop = term.scrollHeight;
         };
         
         ws.onclose = (event) => { 
             console.log('Terminal WebSocket closed:', event.code, event.reason);
-            toast('Terminal disconnected - attempting reconnect...'); 
-            ws = null; 
-            // Attempt to reconnect after 2 seconds
-            setTimeout(() => {
-                if (!ws || ws.readyState !== WebSocket.OPEN) {
+            
+            if (reconnectAttempts < maxReconnectAttempts) {
+                const delay = reconnectDelay * Math.pow(1.5, reconnectAttempts); // Exponential backoff
+                toast(`Terminal disconnected - reconnecting in ${Math.round(delay/1000)}s... (${reconnectAttempts + 1}/${maxReconnectAttempts})`); 
+                
+                setTimeout(() => {
+                    reconnectAttempts++;
                     connectTerm();
-                }
-            }, 2000);
+                }, delay);
+            } else {
+                toast('Terminal connection failed - max retry attempts reached. Please refresh the page.', 'error');
+                term.textContent += '\n❌ Connection lost. Please refresh the page to reconnect.\n';
+            }
+            
+            ws = null; 
         };
+        
         ws.onerror = (error) => { 
             console.error('Terminal WebSocket error:', error);
-            toast('Terminal connection error - check authentication and server status'); 
+            
+            if (reconnectAttempts === 0) {
+                toast('Terminal connection error - check authentication and server status'); 
+            }
             ws = null; 
         };
         
         // Remove any existing keydown handlers to prevent duplicates
         term.onkeydown = null;
         
-        // Enhanced keydown handler with better key mapping
+        // Enhanced keydown handler with better key mapping and error handling
         term.onkeydown = (e) => {
-            if (!ws || ws.readyState !== WebSocket.OPEN) return;
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                toast('Terminal not connected - attempting reconnect...', 'warning');
+                connectTerm();
+                return;
+            }
+            
             e.preventDefault();
+            
+            try {
+                let out = '';
+                if (e.key === 'Enter') out = '\r';
+                else if (e.key === 'Backspace') out = '\x7f';
+                else if (e.key === 'Tab') out = '\t';
+                else if (e.key === 'ArrowUp') out = '\x1b[A';
+                else if (e.key === 'ArrowDown') out = '\x1b[B';
+                else if (e.key === 'ArrowRight') out = '\x1b[C';
+                else if (e.key === 'ArrowLeft') out = '\x1b[D';
+                else if (e.key === 'Home') out = '\x1b[H';
+                else if (e.key === 'End') out = '\x1b[F';
+                else if (e.key === 'Delete') out = '\x1b[3~';
+                else if (e.key === 'PageUp') out = '\x1b[5~';
+                else if (e.key === 'PageDown') out = '\x1b[6~';
+                else if (e.ctrlKey && e.key === 'c') out = '\x03';
+                else if (e.ctrlKey && e.key === 'd') out = '\x04';
+                else if (e.ctrlKey && e.key === 'z') out = '\x1a';
+                else if (e.key.length === 1) out = e.key;
+                
+                if (out) {
+                    ws.send(new TextEncoder().encode(out));
+                }
+            } catch (err) {
+                console.error('Error sending terminal input:', err);
+                toast('Error sending terminal input', 'error');
+            }
+        };
+        
+    } catch (error) {
+        console.error('Failed to create WebSocket connection:', error);
+        toast('Failed to create terminal connection', 'error');
+    }
+}
             
             let out = '';
             if (e.key === 'Enter') out = '\r';
@@ -6257,39 +7047,126 @@ function setupTerminalInput() {
     const term = $('#term');
     const termInput = $('#terminal-input');
     
-    // Mobile keyboard support
+    if (!term || !termInput) {
+        console.warn('Terminal elements not found during setup');
+        return;
+    }
+    
+    // Enhanced mobile keyboard support with better error handling
     term.onclick = () => {
-        term.focus();
-        // On mobile, also focus the hidden input to trigger virtual keyboard
-        if (isMobile()) {
-            termInput.focus();
-            // Quickly refocus back to terminal to maintain visual focus
-            setTimeout(() => term.focus(), 50);
+        try {
+            term.focus();
+            // On mobile, also focus the hidden input to trigger virtual keyboard
+            if (isMobile()) {
+                termInput.focus();
+                // Quickly refocus back to terminal to maintain visual focus
+                setTimeout(() => {
+                    try {
+                        term.focus();
+                    } catch (e) {
+                        console.warn('Failed to refocus terminal:', e);
+                    }
+                }, 50);
+            }
+        } catch (e) {
+            console.error('Error in terminal click handler:', e);
         }
     };
     
-    // Mirror hidden input to WebSocket
+    // Enhanced input mirroring with connection checking
     termInput.oninput = () => {
-        if (ws && ws.readyState === WebSocket.OPEN && termInput.value) {
-            ws.send(new TextEncoder().encode(termInput.value));
-            termInput.value = '';
+        try {
+            if (ws && ws.readyState === WebSocket.OPEN && termInput.value) {
+                ws.send(new TextEncoder().encode(termInput.value));
+                termInput.value = '';
+            } else if (ws && ws.readyState !== WebSocket.OPEN) {
+                // Attempt reconnection if not connected
+                toast('Terminal disconnected - reconnecting...', 'warning');
+                connectTerm();
+            }
+        } catch (e) {
+            console.error('Error sending terminal input:', e);
+            toast('Error sending input to terminal', 'error');
         }
     };
     
-    // Handle special keys from hidden input
+    // Enhanced special key handling with better key mapping
     termInput.onkeydown = (e) => {
-        if (!ws || ws.readyState !== WebSocket.OPEN) return;
+        if (!ws || ws.readyState !== WebSocket.OPEN) {
+            toast('Terminal not connected', 'warning');
+            return;
+        }
         
-        let out = '';
-        if (e.key === 'Enter') out = '\r';
-        else if (e.key === 'Backspace') out = '\x7f';
-        else if (e.key === 'Tab') { out = '\t'; e.preventDefault(); }
-        
-        if (out) {
-            ws.send(new TextEncoder().encode(out));
-            e.preventDefault();
+        try {
+            let out = '';
+            // Enhanced key mapping for better terminal compatibility
+            switch (e.key) {
+                case 'Enter': out = '\r'; break;
+                case 'Backspace': out = '\x7f'; break;
+                case 'Tab': out = '\t'; e.preventDefault(); break;
+                case 'ArrowUp': out = '\x1b[A'; e.preventDefault(); break;
+                case 'ArrowDown': out = '\x1b[B'; e.preventDefault(); break;
+                case 'ArrowRight': out = '\x1b[C'; e.preventDefault(); break;
+                case 'ArrowLeft': out = '\x1b[D'; e.preventDefault(); break;
+                case 'Home': out = '\x1b[H'; e.preventDefault(); break;
+                case 'End': out = '\x1b[F'; e.preventDefault(); break;
+                case 'Delete': out = '\x1b[3~'; e.preventDefault(); break;
+                case 'Escape': out = '\x1b'; e.preventDefault(); break;
+            }
+            
+            // Handle Ctrl combinations
+            if (e.ctrlKey) {
+                switch (e.key.toLowerCase()) {
+                    case 'c': out = '\x03'; e.preventDefault(); break;
+                    case 'd': out = '\x04'; e.preventDefault(); break;
+                    case 'z': out = '\x1a'; e.preventDefault(); break;
+                    case 'l': out = '\x0c'; e.preventDefault(); break; // Clear screen
+                    case 'a': out = '\x01'; e.preventDefault(); break; // Beginning of line
+                    case 'e': out = '\x05'; e.preventDefault(); break; // End of line
+                    case 'u': out = '\x15'; e.preventDefault(); break; // Kill line
+                    case 'k': out = '\x0b'; e.preventDefault(); break; // Kill to end
+                    case 'w': out = '\x17'; e.preventDefault(); break; // Kill word
+                }
+            }
+            
+            if (out) {
+                ws.send(new TextEncoder().encode(out));
+                e.preventDefault();
+            }
+        } catch (err) {
+            console.error('Error processing terminal key:', err);
+            toast('Error processing terminal input', 'error');
         }
     };
+    
+    // Add paste support
+    term.onpaste = (e) => {
+        try {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                e.preventDefault();
+                const paste = (e.clipboardData || window.clipboardData).getData('text');
+                if (paste) {
+                    ws.send(new TextEncoder().encode(paste));
+                }
+            }
+        } catch (err) {
+            console.error('Error pasting to terminal:', err);
+        }
+    };
+    
+    // Handle window resize for terminal sizing
+    window.addEventListener('resize', () => {
+        try {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                const termRect = term.getBoundingClientRect();
+                const cols = Math.floor(termRect.width / 8) || 80;
+                const rows = Math.floor(termRect.height / 16) || 24;
+                ws.send(JSON.stringify({type: 'resize', cols, rows}));
+            }
+        } catch (e) {
+            console.warn('Failed to send resize on window resize:', e);
+        }
+    });
 }
 
 function isMobile() {
