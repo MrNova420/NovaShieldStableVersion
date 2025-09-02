@@ -469,6 +469,40 @@ install_dependencies(){
   local need=(python3 awk sed grep tar gzip df du ps top uname head tail cut tr sha256sum curl ping find xargs)
   local missing=()
   
+  # Enhanced Termux setup as requested
+  if [ "$IS_TERMUX" -eq 1 ]; then
+    ns_log "Termux detected - performing enhanced mobile setup..."
+    
+    # Essential Termux packages for better experience
+    ns_log "Installing enhanced Termux packages..."
+    PKG_INSTALL termux-tools || true
+    PKG_INSTALL termux-api || true
+    PKG_INSTALL procps || true  # Better ps, top, etc.
+    PKG_INSTALL htop || true    # Enhanced system monitor
+    PKG_INSTALL nano || true    # Text editor
+    PKG_INSTALL vim || true     # Advanced editor
+    PKG_INSTALL git || true     # Version control
+    PKG_INSTALL man || true     # Manual pages
+    PKG_INSTALL which || true   # Which command
+    PKG_INSTALL openssh || true # SSH capabilities
+    
+    # Update packages to latest versions
+    ns_log "Updating Termux packages..."
+    pkg update -y 2>/dev/null || true
+    pkg upgrade -y 2>/dev/null || true
+    
+    # Setup storage access
+    ns_log "Setting up Termux storage access..."
+    if [ ! -d "$HOME/storage" ]; then
+      termux-setup-storage 2>/dev/null || ns_warn "Storage setup may require manual confirmation"
+    fi
+    
+    # Enhanced terminal capabilities
+    ns_log "Setting up enhanced terminal..."
+    echo "export TERM=xterm-256color" >> "$HOME/.bashrc" 2>/dev/null || true
+    echo "export COLORTERM=truecolor" >> "$HOME/.bashrc" 2>/dev/null || true
+  fi
+  
   # Check which dependencies are missing
   for c in "${need[@]}"; do
     if ! command -v "$c" >/dev/null 2>&1; then
@@ -516,6 +550,18 @@ install_dependencies(){
       ns_log "Installing termux-services (optional for auto-start)"
       PKG_INSTALL termux-services || ns_warn "termux-services install failed (non-critical)"
     fi
+    
+    # Install additional useful tools for Termux users
+    ns_log "Installing additional security and system tools..."
+    PKG_INSTALL nmap || ns_warn "nmap install failed"
+    PKG_INSTALL netcat-openbsd || PKG_INSTALL netcat || true
+    PKG_INSTALL wget || true
+    PKG_INSTALL zip || true
+    PKG_INSTALL unzip || true
+    PKG_INSTALL tree || true
+    PKG_INSTALL lsof || true
+    
+    ns_ok "Enhanced Termux setup completed"
   fi
   
   # Verify critical dependencies are available
@@ -1767,15 +1813,20 @@ def spawn_pty(shell=None, cols=120, rows=32):
             if shell is None or not shell:
                 shell = os.environ.get('SHELL','')
             if not shell:
-                for cand in ('/data/data/com.termux/files/usr/bin/bash','/bin/bash','/system/bin/sh','/bin/sh'):
+                # Improved shell resolution with Termux bash preference
+                for cand in ('/data/data/com.termux/files/usr/bin/bash','/bin/bash','/bin/zsh','/system/bin/sh','/bin/sh'):
                     if os.path.exists(cand): shell=cand; break
             os.execv(shell, [shell, '-l'])
         except Exception as e:
             os.write(1, f'Failed to start shell: {e}\n'.encode())
             os._exit(1)
     # Parent
+    # Ensure proper window size is set
     winsz = struct.pack("HHHH", rows, cols, 0, 0)
-    fcntl.ioctl(fd, tty.TIOCSWINSZ, winsz)
+    try:
+        fcntl.ioctl(fd, tty.TIOCSWINSZ, winsz)
+    except Exception:
+        pass
     return pid, fd
 
 def mirror_terminal(handler):
@@ -1865,6 +1916,104 @@ def save_jarvis_memory(memory):
     """Save Jarvis conversation memory."""
     write_json(JARVIS_MEM, memory)
 
+def sanitize_username(username):
+    """Sanitize username for safe filename usage."""
+    import re
+    # Keep only alphanumeric, underscore, hyphen, and dots
+    safe_name = re.sub(r'[^a-zA-Z0-9._-]', '_', str(username))
+    # Limit length and ensure it's not empty
+    safe_name = safe_name[:50] if safe_name else 'anonymous'
+    return safe_name
+
+def user_memory_path(username):
+    """Get the path to a user's encrypted memory file."""
+    safe_username = sanitize_username(username)
+    return os.path.join(NS_CTRL, f'memory_{safe_username}.enc')
+
+def load_user_memory(username):
+    """Load per-user encrypted memory, fallback to plaintext if encryption fails."""
+    safe_username = sanitize_username(username)
+    enc_path = user_memory_path(username)
+    json_path = os.path.join(NS_CTRL, f'memory_{safe_username}.json')
+    
+    # Default empty memory structure
+    default_memory = {
+        "conversations": [],
+        "preferences": {"theme": "jarvis-dark", "last_active_tab": "ai"},
+        "last_seen": time.strftime('%Y-%m-%d %H:%M:%S')
+    }
+    
+    # Try to load encrypted file first
+    if os.path.exists(enc_path):
+        try:
+            # Use openssl to decrypt
+            aes_key_path = os.path.join(NS_KEYS, 'aes.key')
+            if os.path.exists(aes_key_path):
+                # Read the key
+                with open(aes_key_path, 'rb') as f:
+                    aes_key = f.read().strip()
+                
+                # Decrypt using openssl
+                cmd = ['openssl', 'aes-256-cbc', '-d', '-salt', '-pbkdf2', '-in', enc_path, '-pass', f'file:{aes_key_path}']
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+                
+                if result.returncode == 0 and result.stdout.strip():
+                    return json.loads(result.stdout)
+        except Exception as e:
+            # Log error but continue with fallback
+            py_alert('WARN', f'Failed to decrypt user memory for {username}: {str(e)}')
+    
+    # Fallback to plaintext JSON file
+    if os.path.exists(json_path):
+        try:
+            return read_json(json_path, default_memory)
+        except Exception:
+            pass
+    
+    # Return default memory if no file exists
+    return default_memory
+
+def save_user_memory(username, data):
+    """Save per-user encrypted memory, fallback to plaintext if encryption fails."""
+    safe_username = sanitize_username(username)
+    enc_path = user_memory_path(username)
+    json_path = os.path.join(NS_CTRL, f'memory_{safe_username}.json')
+    
+    # Ensure data has required structure
+    if not isinstance(data, dict):
+        data = {"conversations": [], "preferences": {}, "last_seen": time.strftime('%Y-%m-%d %H:%M:%S')}
+    
+    # Ensure directory exists
+    Path(NS_CTRL).mkdir(parents=True, exist_ok=True)
+    
+    # Try to encrypt and save
+    aes_key_path = os.path.join(NS_KEYS, 'aes.key')
+    if os.path.exists(aes_key_path):
+        try:
+            # Convert data to JSON
+            json_data = json.dumps(data)
+            
+            # Encrypt using openssl
+            cmd = ['openssl', 'aes-256-cbc', '-salt', '-pbkdf2', '-out', enc_path, '-pass', f'file:{aes_key_path}']
+            result = subprocess.run(cmd, input=json_data, text=True, capture_output=True, timeout=10)
+            
+            if result.returncode == 0:
+                # Successfully encrypted, remove any old plaintext file
+                if os.path.exists(json_path):
+                    try:
+                        os.remove(json_path)
+                    except Exception:
+                        pass
+                return
+        except Exception as e:
+            py_alert('WARN', f'Failed to encrypt user memory for {username}: {str(e)}')
+    
+    # Fallback to plaintext JSON
+    try:
+        write_json(json_path, data)
+    except Exception as e:
+        py_alert('ERROR', f'Failed to save user memory for {username}: {str(e)}')
+
 def get_jarvis_personality():
     """Get the configured Jarvis personality type."""
     personality = cfg_get('jarvis.personality', 'helpful').lower()
@@ -1880,16 +2029,8 @@ def ai_reply(prompt, username, user_ip):
     prompt_low = prompt.lower()
     now = time.strftime('%Y-%m-%d %H:%M:%S')
     
-    # Load per-user memory
-    memory = load_jarvis_memory()
-    if username not in memory:
-        memory[username] = {
-            "conversations": [],
-            "preferences": {"theme": "jarvis-dark", "last_active_tab": "ai"},
-            "last_seen": now
-        }
-    
-    user_memory = memory[username]
+    # Load per-user memory using new encrypted system
+    user_memory = load_user_memory(username)
     user_memory["last_seen"] = now
     
     # Status data collection
@@ -1919,7 +2060,7 @@ def ai_reply(prompt, username, user_ip):
     if len(user_memory["conversations"]) > memory_size:
         user_memory["conversations"] = user_memory["conversations"][-memory_size:]
     
-    save_jarvis_memory(memory)
+    save_user_memory(username, user_memory)
     
     # Expanded intents processing
     # Status intent
@@ -2060,6 +2201,39 @@ def ai_reply(prompt, username, user_ip):
     # Advanced features intent
     elif any(term in prompt_low for term in ['advanced', 'expert', 'technical', 'professional']):
         return f"Advanced mode activated, {username}! I can execute system tools, analyze logs, perform security scans, generate reports, and provide technical insights. Try commands like 'run nmap localhost', 'analyze performance', or 'security audit' for detailed technical operations."
+    
+    # Tool execution intent - NEW CAPABILITY
+    elif any(term in prompt_low for term in ['run ', 'execute ', 'launch ', 'start ']) and any(tool in prompt_low for tool in ['nmap', 'netstat', 'htop', 'ps', 'df', 'ping', 'curl', 'dig', 'ss']):
+        # Extract tool name
+        tool_match = None
+        for tool in ['nmap', 'netstat', 'htop', 'ps', 'df', 'ping', 'curl', 'dig', 'ss']:
+            if tool in prompt_low:
+                tool_match = tool
+                break
+        
+        if tool_match:
+            try:
+                # Execute the tool
+                output = execute_tool(tool_match)
+                return f"Executed {tool_match} for you, {username}:\n\n{output[:500]}{'...' if len(output) > 500 else ''}\n\nCheck the Tools tab for the complete output and to run more tools."
+            except Exception as e:
+                return f"I tried to run {tool_match} but encountered an error, {username}: {str(e)}. You can manually execute tools in the Tools tab."
+        
+    # Security scan intent - ENHANCED
+    elif any(term in prompt_low for term in ['security scan', 'scan security', 'check security', 'security audit']):
+        try:
+            output = execute_tool('security-scan')
+            return f"Security scan completed, {username}! Here's a summary:\n\n{output[:400]}{'...' if len(output) > 400 else ''}\n\nFull results are in the Tools tab. I can also run specific tools like nmap or netstat if needed."
+        except Exception:
+            return f"I'll perform a security scan, {username}. Switch to the Tools tab and run the Security Scan tool for comprehensive analysis."
+    
+    # System information intent - ENHANCED
+    elif any(term in prompt_low for term in ['system info', 'system report', 'full status', 'detailed status']):
+        try:
+            output = execute_tool('system-info')
+            return f"System report generated, {username}:\n\n{output[:400]}{'...' if len(output) > 400 else ''}\n\nComplete report available in the Tools tab."
+        except Exception:
+            return f"Generating detailed system report, {username}. Check the Tools tab for comprehensive system information and diagnostics."
     
     # Fallback responses based on personality
     if personality == 'snarky':
@@ -2469,6 +2643,85 @@ def analyze_system_logs():
     
     return "\n".join(output)
 
+def execute_custom_command(command):
+    """Execute a custom command safely and return its output."""
+    output = []
+    output.append(f"=== EXECUTING CUSTOM COMMAND ===")
+    output.append(f"Command: {command}")
+    output.append(f"Started: {time.strftime('%Y-%m-%d %H:%M:%S')}")
+    output.append("")
+    
+    # Basic command validation and security checks
+    dangerous_patterns = [
+        'rm -rf /', 'rm -rf ~', 'rm -rf *', 
+        'dd if=', 'mkfs', 'format',
+        '> /dev/', '> /etc/', '> /boot/',
+        'init 0', 'init 6', 'shutdown', 'halt', 'reboot',
+        'iptables -F', 'iptables -X',
+        'chmod 777 /', 'chown root /'
+    ]
+    
+    command_lower = command.lower()
+    is_dangerous = any(pattern in command_lower for pattern in dangerous_patterns)
+    
+    if is_dangerous:
+        output.append("⚠️  WARNING: Command blocked for security reasons")
+        output.append("Potentially dangerous commands are not allowed via web interface")
+        output.append("Use the terminal tab for administrative commands")
+        return "\n".join(output)
+    
+    # Limit command length
+    if len(command) > 200:
+        output.append("❌ ERROR: Command too long (max 200 characters)")
+        return "\n".join(output)
+    
+    try:
+        # Execute command with timeout and limits
+        result = subprocess.run(
+            command,
+            shell=True,
+            capture_output=True,
+            text=True,
+            timeout=30,  # 30 second timeout
+            cwd=os.path.expanduser('~')  # Run in user's home directory
+        )
+        
+        output.append("--- STDOUT ---")
+        if result.stdout.strip():
+            # Limit output size to prevent browser issues
+            stdout = result.stdout.strip()
+            if len(stdout) > 5000:
+                stdout = stdout[:5000] + "\n... (output truncated - use terminal for full output)"
+            output.append(stdout)
+        else:
+            output.append("(no output)")
+        
+        if result.stderr.strip():
+            output.append("")
+            output.append("--- STDERR ---")
+            stderr = result.stderr.strip()
+            if len(stderr) > 1000:
+                stderr = stderr[:1000] + "\n... (error output truncated)"
+            output.append(stderr)
+        
+        output.append("")
+        output.append(f"Exit code: {result.returncode}")
+        
+        if result.returncode == 0:
+            output.append("✅ Command completed successfully")
+        else:
+            output.append("❌ Command failed with non-zero exit code")
+            
+    except subprocess.TimeoutExpired:
+        output.append("⏱️  ERROR: Command timed out after 30 seconds")
+        output.append("Use the terminal tab for long-running commands")
+    except Exception as e:
+        output.append(f"❌ ERROR: {str(e)}")
+    
+    output.append("")
+    output.append(f"Completed: {time.strftime('%Y-%m-%d %H:%M:%S')}")
+    return "\n".join(output)
+
 # ------------------------------- WebSocket PTY -------------------------------
 def ws_handshake(handler):
     key = handler.headers.get('Sec-WebSocket-Key')
@@ -2521,6 +2774,18 @@ class Handler(SimpleHTTPRequestHandler):
             mirror_terminal(self); return
 
         if parsed.path == '/':
+            # Log dashboard access for security monitoring
+            client_ip = self.client_address[0]
+            user_agent = self.headers.get('User-Agent', 'Unknown')[:100]
+            sess = get_session(self)
+            if sess:
+                user = sess.get('user', 'unknown')
+                py_alert('INFO', f'DASHBOARD_ACCESS user={user} ip={client_ip} user_agent={user_agent}')
+                audit(f'DASHBOARD_ACCESS user={user} ip={client_ip}')
+            else:
+                py_alert('INFO', f'UNAUTHORIZED_ACCESS ip={client_ip} user_agent={user_agent}')
+                audit(f'UNAUTHORIZED_ACCESS ip={client_ip}')
+            
             # Implement strict reload auth: when AUTH_STRICT is enabled (default),
             # clear NSSESS cookie on GET '/' to force re-login on browser refresh
             if AUTH_STRICT:
@@ -2569,7 +2834,8 @@ class Handler(SimpleHTTPRequestHandler):
                 'projects_count': len([x for x in os.listdir(os.path.join(NS_HOME,'projects')) if not x.startswith('.')]) if os.path.exists(os.path.join(NS_HOME,'projects')) else 0,
                 'modules_count': len([x for x in os.listdir(os.path.join(NS_HOME,'modules')) if not x.startswith('.')]) if os.path.exists(os.path.join(NS_HOME,'modules')) else 0,
                 'version': read_text(os.path.join(NS_HOME,'version.txt'),'unknown'),
-                'csrf': sess.get('csrf','') if auth_enabled() else 'public'
+                'csrf': sess.get('csrf','') if auth_enabled() else 'public',
+                'voice_enabled': cfg_get('jarvis.voice_enabled', False)
             }
             self._set_headers(200); self.wfile.write(json.dumps(data).encode('utf-8')); return
 
@@ -3038,13 +3304,19 @@ class Handler(SimpleHTTPRequestHandler):
             
             try:
                 reply = ai_reply(prompt, username, user_ip)
+                voice_enabled = cfg_get('jarvis.voice_enabled', False)
+                
                 # Log to chat.log with username
                 try: 
                     open(CHATLOG,'a',encoding='utf-8').write(f'{time.strftime("%Y-%m-%d %H:%M:%S")} User:{username} IP:{user_ip} Q:{prompt} A:{reply}\n')
                 except Exception: 
                     py_alert('WARN', f'Failed to write chat log for {username}@{user_ip}')
                     
-                self._set_headers(200); self.wfile.write(json.dumps({'ok':True,'reply':reply}).encode('utf-8')); return
+                response_data = {'ok': True, 'reply': reply}
+                if voice_enabled:
+                    response_data['speak'] = True
+                    
+                self._set_headers(200); self.wfile.write(json.dumps(response_data).encode('utf-8')); return
             except Exception as e:
                 py_alert('ERROR', f'Chat AI error for {user_ip}: {str(e)}')
                 self._set_headers(500); self.wfile.write(json.dumps({'ok':False,'error':'ai error'}).encode('utf-8')); return
@@ -3056,17 +3328,15 @@ class Handler(SimpleHTTPRequestHandler):
             username = sess.get('user', 'public') if sess else 'public'
             
             if self.command == 'GET':
-                # Load user's Jarvis memory
+                # Load user's encrypted memory
                 try:
-                    with open(JARVIS_MEM, 'r') as f:
-                        all_memory = json.load(f)
-                    user_memory = all_memory.get(username, {})
+                    user_memory = load_user_memory(username)
                     self._set_headers(200)
                     self.wfile.write(json.dumps({
                         'ok': True,
                         'memory': user_memory.get('memory', {}),
                         'preferences': user_memory.get('preferences', {}),
-                        'history': user_memory.get('history', [])
+                        'history': user_memory.get('conversations', [])  # Use 'conversations' as history
                     }).encode('utf-8'))
                 except Exception:
                     self._set_headers(200)
@@ -3079,32 +3349,28 @@ class Handler(SimpleHTTPRequestHandler):
                 return
             
             if self.command == 'POST':
-                # Save user's Jarvis memory
+                # Save user's encrypted memory
                 try:
                     data = json.loads(body or '{}')
                     
-                    # Load existing memory file or create new
-                    try:
-                        with open(JARVIS_MEM, 'r') as f:
-                            all_memory = json.load(f)
-                    except Exception:
-                        all_memory = {}
+                    # Load existing memory or start with default
+                    user_memory = load_user_memory(username)
                     
-                    # Update user's memory
-                    all_memory[username] = {
-                        'memory': data.get('memory', {}),
-                        'preferences': data.get('preferences', {}),
-                        'history': data.get('history', []),
-                        'last_updated': time.time()
-                    }
+                    # Update user's memory with new data
+                    user_memory['memory'] = data.get('memory', {})
+                    user_memory['preferences'] = data.get('preferences', {})
+                    # Use 'conversations' instead of 'history' for consistency with ai_reply
+                    user_memory['conversations'] = data.get('history', [])
+                    user_memory['last_updated'] = time.time()
+                    user_memory['last_seen'] = time.strftime('%Y-%m-%d %H:%M:%S')
                     
-                    # Save updated memory
-                    with open(JARVIS_MEM, 'w') as f:
-                        json.dump(all_memory, f, indent=2)
+                    # Save encrypted memory
+                    save_user_memory(username, user_memory)
                     
                     self._set_headers(200)
                     self.wfile.write(json.dumps({'ok': True}).encode('utf-8'))
                 except Exception as e:
+                    py_alert('ERROR', f'Failed to save memory for {username}: {str(e)}')
                     self._set_headers(500)
                     self.wfile.write(json.dumps({'ok': False, 'error': str(e)}).encode('utf-8'))
                 return
@@ -3143,13 +3409,20 @@ class Handler(SimpleHTTPRequestHandler):
             try:
                 data = json.loads(body or '{}')
                 tool_name = data.get('tool', '')
+                custom_command = data.get('command', '')
+                
                 if not tool_name:
                     self._set_headers(400)
                     self.wfile.write(json.dumps({'ok': False, 'error': 'No tool specified'}).encode('utf-8'))
                     return
                 
-                output = execute_tool(tool_name)
-                audit(f'TOOL_EXEC tool={tool_name} ip={self.client_address[0]}')
+                # Handle custom command execution
+                if tool_name == 'custom' and custom_command:
+                    output = execute_custom_command(custom_command)
+                else:
+                    output = execute_tool(tool_name)
+                    
+                audit(f'TOOL_EXEC tool={tool_name} command="{custom_command if custom_command else tool_name}" ip={self.client_address[0]}')
                 self._set_headers(200)
                 self.wfile.write(json.dumps({
                     'ok': True,
@@ -3330,9 +3603,10 @@ write_dashboard(){
     <div class="brand">
       <div class="ring"></div>
       <h1>NovaShield <span class="mini">JARVIS</span></h1>
-      <div class="by">by niteas aka MrNova420</div>
+      <div class="by">Created by @MrNova420</div>
     </div>
     <div class="actions">
+      <button id="btn-420-theme" type="button" title="Toggle 420 themed colors (purple, green, blue)">🌿 420 Mode</button>
       <button id="btn-refresh" type="button" title="Refresh all dashboard data and status information">Refresh Dashboard</button>
       <button data-act="backup" type="button" title="Create a backup of important system files and configurations">Create Backup</button>
       <button data-act="version" type="button" title="Create a system snapshot with current state and version info">Create Snapshot</button>
@@ -3585,6 +3859,23 @@ write_dashboard(){
             <span id="active-tool">No tool selected</span>
           </div>
           <pre id="tool-output" class="tool-output" placeholder="Tool output will appear here..."></pre>
+          
+          <div class="manual-command-panel">
+            <h5>Manual Command Execution</h5>
+            <p class="panel-description">Execute custom commands directly. Use with caution - commands run with full system access.</p>
+            <div class="command-input-group">
+              <input id="manual-command" type="text" placeholder="Enter command (e.g., ps aux, netstat -tuln, df -h)" title="Type any system command to execute" />
+              <button id="execute-command" type="button" title="Execute the entered command">Execute</button>
+            </div>
+            <div class="command-suggestions">
+              <button class="cmd-suggestion" data-cmd="ps aux">ps aux</button>
+              <button class="cmd-suggestion" data-cmd="df -h">df -h</button>
+              <button class="cmd-suggestion" data-cmd="netstat -tuln">netstat -tuln</button>
+              <button class="cmd-suggestion" data-cmd="top -n 1">top -n 1</button>
+              <button class="cmd-suggestion" data-cmd="uname -a">uname -a</button>
+              <button class="cmd-suggestion" data-cmd="whoami">whoami</button>
+            </div>
+          </div>
         </div>
       </div>
     </section>
@@ -3614,7 +3905,14 @@ write_dashboard(){
       <div class="panel">
         <h3>Web Terminal</h3>
         <p class="panel-description">Interactive command-line terminal access through your web browser. Provides full shell access with real-time input/output, command history, and proper keyboard handling. Automatically connects when you switch to this tab.</p>
-        <div id="term" tabindex="0"></div>
+        <div class="terminal-controls">
+          <button id="terminal-fullscreen" type="button" title="Toggle fullscreen mode">🔲 Fullscreen</button>
+          <button id="terminal-reconnect" type="button" title="Reconnect to terminal">🔄 Reconnect</button>
+        </div>
+        <div class="terminal-wrapper">
+          <div id="term" tabindex="0"></div>
+          <input id="terminal-input" type="text" style="position: absolute; left: -9999px; opacity: 0;" autocomplete="off" />
+        </div>
         <div class="term-hint">Type commands here. Press Ctrl-C to interrupt running processes. Terminal has idle timeout for security.</div>
       </div>
     </section>
@@ -3733,8 +4031,29 @@ HTML
 
   write_file "${NS_WWW}/style.css" 644 <<'CSS'
 :root { --bg:#0a1a3d; --card:#0f1d42; --text:#e1f3ff; --muted:#8bb4d9; --ok:#00d884; --warn:#ffb347; --crit:#ff5757; --accent:#00c4f7; --ring:#00ffe1; --info:#00a8ff; --success:#16a34a; }
+
+/* 420 Theme Variables */
+:root.theme-420 { 
+  --bg:#0a0f1a; 
+  --card:#1a0f2a; 
+  --text:#e1ffe1; 
+  --muted:#b9d9b9; 
+  --ok:#7fff00; 
+  --warn:#ff8c00; 
+  --crit:#ff4500; 
+  --accent:#9370db; 
+  --ring:#7fff00; 
+  --info:#8a2be2; 
+  --success:#32cd32; 
+  --purple-bright: #e9b3ff;
+  --green-bright: #7fff00;
+  --blue-bright: #4169e1;
+}
 *{box-sizing:border-box}
 body{margin:0;background:radial-gradient(1400px 700px at 15% -25%,rgba(0,159,255,.15),transparent),linear-gradient(180deg,#021933,#0d1b3a 40%,#1a2b5c 100%);color:var(--text);font-family:ui-sans-serif,system-ui,Segoe UI,Roboto,Arial}
+
+/* 420 Theme Body Background */
+.theme-420 body{background:radial-gradient(1400px 700px at 15% -25%,rgba(147,112,219,.15),transparent),linear-gradient(180deg,#0a0a0a,#1a0f2a 40%,#2a1a4a 100%)}
 header{display:flex;align-items:center;justify-content:space-between;padding:14px 18px;border-bottom:1px solid #0e223a;background:linear-gradient(180deg,rgba(0,208,255,.06),transparent)}
 .brand{display:flex;align-items:center;gap:12px}
 .brand h1{margin:0;font-size:20px;letter-spacing:.6px}
@@ -3801,6 +4120,61 @@ textarea#wcontent{width:100%;height:160px;background:#0b1830;color:#d7e3ff;borde
 .log-level.error{background:var(--crit);color:#fff}
 .log-level.info{background:var(--accent);color:#000}
 
+/* Enhanced clickable log entries */
+.log-entry.clickable {
+    cursor: pointer;
+    transition: all 0.2s ease;
+    position: relative;
+}
+
+.log-entry.clickable:hover {
+    background: rgba(13, 35, 57, 0.6);
+    border-radius: 4px;
+}
+
+.log-entry.expanded {
+    background: rgba(13, 35, 57, 0.8);
+    border-radius: 4px 4px 0 0;
+}
+
+.log-expand {
+    color: var(--accent);
+    font-weight: bold;
+    font-size: 14px;
+    margin-left: 8px;
+    user-select: none;
+}
+
+.log-details {
+    padding: 12px;
+    background: rgba(5, 15, 25, 0.8);
+    border: 1px solid #143055;
+    border-top: none;
+    border-radius: 0 0 4px 4px;
+    font-size: 11px;
+    line-height: 1.5;
+}
+
+.detail-item {
+    margin: 4px 0;
+    display: flex;
+    gap: 8px;
+}
+
+.detail-item strong {
+    color: var(--accent);
+    min-width: 80px;
+    flex-shrink: 0;
+}
+
+.detail-item:first-child {
+    margin-top: 0;
+}
+
+.detail-item:last-child {
+    margin-bottom: 0;
+}
+
 /* Enhanced alert level badges */
 .alert-badge{display:inline-block;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px}
 .alert-badge.ok{background:linear-gradient(135deg,var(--ok),#22c55e);color:#000;box-shadow:0 2px 4px rgba(0,216,132,0.3)}
@@ -3860,14 +4234,22 @@ body.login-active header, body.login-active nav, body.login-active main{
 
 #chatlog .user-msg {
     margin-bottom: 8px;
-    color: #cfe6ff;
+    color: #e9b3ff;
+    font-weight: 500;
+    padding: 6px 10px;
+    background: rgba(233, 179, 255, 0.1);
+    border-radius: 12px;
+    border-left: 3px solid #e9b3ff;
 }
 
 #chatlog .jarvis-msg {
     margin-bottom: 12px;
-    color: #00ffe1;
+    color: #7fff00;
     position: relative;
-    padding-left: 22px;
+    padding: 6px 10px 6px 22px;
+    background: rgba(127, 255, 0, 0.1);
+    border-radius: 12px;
+    border-left: 3px solid #7fff00;
 }
 
 #chatlog .jarvis-msg::before {
@@ -3890,6 +4272,50 @@ body.login-active header, body.login-active nav, body.login-active main{
 }
 
 /* Terminal improvements */
+.terminal-controls {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 12px;
+    align-items: center;
+}
+
+.terminal-controls button {
+    padding: 6px 12px;
+    border-radius: 6px;
+    border: 1px solid #143055;
+    background: #0e1726;
+    color: #d7e3ff;
+    cursor: pointer;
+    font-size: 12px;
+    transition: all 0.3s ease;
+}
+
+.terminal-controls button:hover {
+    background: #173764;
+    border-color: #1e5a96;
+}
+
+.terminal-wrapper {
+    position: relative;
+}
+
+.terminal-wrapper.fullscreen {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 9999;
+    background: #000;
+    padding: 20px;
+}
+
+.terminal-wrapper.fullscreen #term {
+    height: calc(100vh - 80px);
+    width: 100%;
+    max-width: none;
+}
+
 #term {
     font-family: 'Courier New', monospace;
     white-space: pre-wrap;
@@ -3901,6 +4327,11 @@ body.login-active header, body.login-active nav, body.login-active main{
     border: 1px solid rgba(0, 208, 255, 0.4);
     border-radius: 8px;
     box-shadow: inset 0 0 20px rgba(0, 0, 0, 0.5);
+    overflow: auto;
+    outline: none;
+    resize: vertical;
+    min-height: 200px;
+}
     overflow-y: auto;
 }
 
@@ -4054,6 +4485,77 @@ body.login-active header, body.login-active nav, body.login-active main{
     white-space: pre-wrap;
 }
 
+/* Manual Command Panel */
+.manual-command-panel {
+    margin-top: 16px;
+    padding: 12px;
+    background: rgba(5, 15, 25, 0.6);
+    border: 1px solid #173764;
+    border-radius: 8px;
+}
+
+.manual-command-panel h5 {
+    margin: 0 0 8px 0;
+    color: var(--accent);
+    font-size: 13px;
+}
+
+.command-input-group {
+    display: flex;
+    gap: 8px;
+    margin: 8px 0;
+}
+
+.command-input-group input {
+    flex: 1;
+    background: #0a1426;
+    border: 1px solid #173764;
+    border-radius: 6px;
+    padding: 6px 10px;
+    color: var(--text);
+    font-family: 'Courier New', monospace;
+    font-size: 12px;
+}
+
+.command-input-group button {
+    background: var(--card);
+    color: #cfe6ff;
+    border: 1px solid #173764;
+    border-radius: 6px;
+    padding: 6px 12px;
+    cursor: pointer;
+    font-size: 11px;
+}
+
+.command-input-group button:hover {
+    border-color: var(--accent);
+    background: rgba(13, 35, 57, 0.8);
+}
+
+.command-suggestions {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    margin-top: 8px;
+}
+
+.cmd-suggestion {
+    background: rgba(13, 35, 57, 0.6);
+    color: #cfe6ff;
+    border: 1px solid #173764;
+    border-radius: 4px;
+    padding: 4px 8px;
+    cursor: pointer;
+    font-size: 10px;
+    font-family: 'Courier New', monospace;
+    transition: all 0.2s;
+}
+
+.cmd-suggestion:hover {
+    border-color: var(--accent);
+    background: rgba(13, 35, 57, 0.9);
+}
+
 /* Enhanced AI Styles */
 .ai-status {
     font-size: 12px;
@@ -4159,6 +4661,51 @@ CSS
 const $ = sel => document.querySelector(sel);
 const $$ = sel => Array.from(document.querySelectorAll(sel));
 
+// Text-to-Speech functionality
+let voiceEnabled = false;
+let speechSynthesis = null;
+
+// Initialize text-to-speech
+function initializeTTS() {
+    if ('speechSynthesis' in window) {
+        speechSynthesis = window.speechSynthesis;
+        // Test if voices are available
+        const voices = speechSynthesis.getVoices();
+        return true;
+    }
+    return false;
+}
+
+// Speak text if voice is enabled
+function speak(text) {
+    if (!voiceEnabled || !speechSynthesis || !text) return;
+    
+    try {
+        // Cancel any ongoing speech
+        speechSynthesis.cancel();
+        
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.rate = 0.9;
+        utterance.pitch = 1.0;
+        utterance.volume = 0.8;
+        
+        // Try to select a voice (prefer female for Jarvis)
+        const voices = speechSynthesis.getVoices();
+        const femaleVoice = voices.find(voice => 
+            voice.name.toLowerCase().includes('female') || 
+            voice.name.toLowerCase().includes('zira') ||
+            voice.name.toLowerCase().includes('hazel')
+        );
+        if (femaleVoice) {
+            utterance.voice = femaleVoice;
+        }
+        
+        speechSynthesis.speak(utterance);
+    } catch (error) {
+        console.warn('Text-to-speech failed:', error);
+    }
+}
+
 // Tab lazy loading and polling management
 let activeTab = 'ai';
 let statusPolling = null;
@@ -4191,6 +4738,15 @@ tabs.forEach(b=>b.onclick=()=>{
     }
   } else if (b.dataset.tab === 'terminal') {
     if (!ws) connectTerm();
+    // Focus the hidden input for mobile keyboard support
+    const termInput = $('#terminal-input');
+    if (termInput) {
+      setTimeout(() => {
+        termInput.focus();
+        // Try to trigger mobile keyboard
+        termInput.click();
+      }, 100);
+    }
   } else if (b.dataset.tab === 'security') {
     refreshSecurityLogs();
   } else if (b.dataset.tab === 'config') {
@@ -4233,6 +4789,37 @@ function managePolling(tabName) {
 let CSRF = '';
 
 $('#btn-refresh').onclick = () => location.reload();
+
+// 420 Theme Toggle
+$('#btn-420-theme').onclick = () => {
+  const root = document.documentElement;
+  const btn = $('#btn-420-theme');
+  const is420Active = root.classList.contains('theme-420');
+  
+  if (is420Active) {
+    root.classList.remove('theme-420');
+    btn.textContent = '🌿 420 Mode';
+    btn.title = 'Toggle 420 themed colors (purple, green, blue)';
+    localStorage.setItem('theme-420', 'false');
+    toast('🌿 420 Theme Disabled');
+  } else {
+    root.classList.add('theme-420');
+    btn.textContent = '🌿 Classic';
+    btn.title = 'Switch back to classic blue theme';
+    localStorage.setItem('theme-420', 'true');
+    toast('🌿 420 Theme Activated - Purple & Green Power!');
+  }
+};
+
+// Initialize 420 theme on page load
+if (localStorage.getItem('theme-420') === 'true') {
+  document.documentElement.classList.add('theme-420');
+  const btn = $('#btn-420-theme');
+  if (btn) {
+    btn.textContent = '🌿 Classic';
+    btn.title = 'Switch back to classic blue theme';
+  }
+}
 
 // Header actions
 $$('header .actions button[data-act]').forEach(btn=>{
@@ -4439,6 +5026,12 @@ $$('.toggle').forEach(b=>{
     const t=b.dataset.target;
     if (!t) return;
     
+    // Check if CSRF is available
+    if (!CSRF) {
+      toast('⚠️ Initializing system... please wait and try again');
+      return;
+    }
+    
     const originalText = b.textContent;
     b.disabled = true;
     
@@ -4477,6 +5070,7 @@ $$('.toggle').forEach(b=>{
         b.textContent = originalText; // Restore original text on failure
       }
     }catch(e){
+      console.error(`Toggle error for ${t}:`, e);
       toast(`✗ Failed to ${action} ${t} monitor: ${e.message}`);
       b.textContent = originalText; // Restore original text on failure
     } finally {
@@ -4552,10 +5146,24 @@ if (btnSave) btnSave.onclick=async()=>{
 // Jarvis chat
 $('#send').onclick=async()=>{
   const prompt = $('#prompt').value.trim(); if(!prompt) return;
-  const log = $('#chatlog'); const you = document.createElement('div'); you.textContent='You: '+prompt; log.appendChild(you);
+  const log = $('#chatlog'); 
+  const you = document.createElement('div'); 
+  you.className = 'user-msg';
+  you.textContent='You: '+prompt; 
+  log.appendChild(you);
   try{
     const j = await (await api('/api/chat',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF':CSRF},body:JSON.stringify({prompt})})).json();
-    const ai = document.createElement('div'); ai.textContent='Jarvis: '+j.reply; log.appendChild(ai); $('#prompt').value=''; log.scrollTop=log.scrollHeight;
+    const ai = document.createElement('div'); 
+    ai.className = 'jarvis-msg';
+    ai.textContent='Jarvis: '+j.reply; 
+    log.appendChild(ai); 
+    $('#prompt').value=''; 
+    log.scrollTop=log.scrollHeight;
+    
+    // Speak the reply if voice is enabled and speak flag is set
+    if (j.speak && voiceEnabled) {
+      speak(j.reply);
+    }
   }catch(e){ console.error(e); }
 };
 
@@ -4572,13 +5180,35 @@ function connectTerm() {
         const proto = location.protocol === 'https:' ? 'wss' : 'ws';
         ws = new WebSocket(`${proto}://${location.host}/ws/term`);
         const term = $('#term');
-        term.textContent = '';
+        const termInput = $('#terminal-input');
+        term.textContent = 'Connecting to terminal...\n';
         ws.binaryType = 'arraybuffer';
         
         ws.onopen = () => { 
+            term.textContent = '';
             // Ensure terminal is focusable and focused
             term.setAttribute('tabindex', '0');
+            term.focus();
+            
+            // Focus hidden input for mobile keyboard support
+            if (termInput) {
+                termInput.focus();
+                // Re-focus on click
+                term.addEventListener('click', () => {
+                    termInput.focus();
+                });
+            }
+            
+            // Send initial resize
+            const termRect = term.getBoundingClientRect();
+            const cols = Math.floor(termRect.width / 8) || 80;
+            const rows = Math.floor(termRect.height / 16) || 24;
+            ws.send(JSON.stringify({type: 'resize', cols, rows}));
+            
+            toast('✓ Terminal connected');
+        };
             term.focus(); 
+            setupTerminalInput();
             toast('Terminal connected'); 
         };
         
@@ -4638,6 +5268,87 @@ function connectTerm() {
         ws = null;
     }
 }
+
+function setupTerminalInput() {
+    const term = $('#term');
+    const termInput = $('#terminal-input');
+    
+    // Mobile keyboard support
+    term.onclick = () => {
+        term.focus();
+        // On mobile, also focus the hidden input to trigger virtual keyboard
+        if (isMobile()) {
+            termInput.focus();
+            // Quickly refocus back to terminal to maintain visual focus
+            setTimeout(() => term.focus(), 50);
+        }
+    };
+    
+    // Mirror hidden input to WebSocket
+    termInput.oninput = () => {
+        if (ws && ws.readyState === WebSocket.OPEN && termInput.value) {
+            ws.send(new TextEncoder().encode(termInput.value));
+            termInput.value = '';
+        }
+    };
+    
+    // Handle special keys from hidden input
+    termInput.onkeydown = (e) => {
+        if (!ws || ws.readyState !== WebSocket.OPEN) return;
+        
+        let out = '';
+        if (e.key === 'Enter') out = '\r';
+        else if (e.key === 'Backspace') out = '\x7f';
+        else if (e.key === 'Tab') { out = '\t'; e.preventDefault(); }
+        
+        if (out) {
+            ws.send(new TextEncoder().encode(out));
+            e.preventDefault();
+        }
+    };
+}
+
+function isMobile() {
+    return /Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) ||
+           (window.innerWidth <= 768);
+}
+
+function toggleTerminalFullscreen() {
+    const wrapper = $('.terminal-wrapper');
+    const btn = $('#terminal-fullscreen');
+    
+    if (wrapper.classList.contains('fullscreen')) {
+        wrapper.classList.remove('fullscreen');
+        btn.textContent = '🔲 Fullscreen';
+        document.removeEventListener('keydown', handleFullscreenEscape);
+    } else {
+        wrapper.classList.add('fullscreen');
+        btn.textContent = '❌ Exit Fullscreen';
+        document.addEventListener('keydown', handleFullscreenEscape);
+        // Refocus terminal in fullscreen
+        setTimeout(() => $('#term').focus(), 100);
+    }
+}
+
+function handleFullscreenEscape(e) {
+    if (e.key === 'Escape') {
+        const wrapper = $('.terminal-wrapper');
+        if (wrapper.classList.contains('fullscreen')) {
+            toggleTerminalFullscreen();
+            e.preventDefault();
+        }
+    }
+}
+
+// Terminal control event listeners
+$('#terminal-fullscreen')?.addEventListener('click', toggleTerminalFullscreen);
+$('#terminal-reconnect')?.addEventListener('click', () => {
+    if (ws) {
+        ws.close();
+        ws = null;
+    }
+    setTimeout(connectTerm, 500);
+});
 
 function showLogin() {
     $('#login').style.display = 'flex';
@@ -4781,16 +5492,46 @@ function updateLogList(selector, logEntries) {
         return;
     }
     
-    logEntries.forEach(entry => {
+    logEntries.forEach((entry, index) => {
         const li = document.createElement('li');
         const levelClass = entry.level || 'info';
+        const entryId = `entry-${selector.replace('#', '')}-${index}`;
+        
         li.innerHTML = `
-            <div class="log-entry">
+            <div class="log-entry clickable" data-entry-id="${entryId}">
                 <span class="log-time">${entry.timestamp}</span>
                 <span class="log-message">${escapeHtml(entry.message)}</span>
                 <span class="log-level ${levelClass}">${levelClass}</span>
+                <span class="log-expand">+</span>
+            </div>
+            <div class="log-details" id="${entryId}-details" style="display: none;">
+                <div class="detail-item"><strong>Timestamp:</strong> ${entry.timestamp}</div>
+                <div class="detail-item"><strong>Level:</strong> ${entry.level || 'info'}</div>
+                <div class="detail-item"><strong>Message:</strong> ${escapeHtml(entry.message)}</div>
+                ${entry.ip ? `<div class="detail-item"><strong>IP Address:</strong> ${entry.ip}</div>` : ''}
+                ${entry.user ? `<div class="detail-item"><strong>User:</strong> ${entry.user}</div>` : ''}
+                ${entry.user_agent ? `<div class="detail-item"><strong>User Agent:</strong> ${escapeHtml(entry.user_agent)}</div>` : ''}
+                ${entry.details ? `<div class="detail-item"><strong>Details:</strong> ${escapeHtml(entry.details)}</div>` : ''}
             </div>
         `;
+        
+        // Add click handler for expandable details
+        const logEntry = li.querySelector('.log-entry.clickable');
+        logEntry.addEventListener('click', () => {
+            const details = li.querySelector('.log-details');
+            const expand = li.querySelector('.log-expand');
+            
+            if (details.style.display === 'none') {
+                details.style.display = 'block';
+                expand.textContent = '-';
+                logEntry.classList.add('expanded');
+            } else {
+                details.style.display = 'none';
+                expand.textContent = '+';
+                logEntry.classList.remove('expanded');
+            }
+        });
+        
         ul.appendChild(li);
     });
 }
@@ -4922,6 +5663,20 @@ function bindToolEvents() {
     // Tool execution buttons
     $$('.tool-btn').forEach(btn => {
         btn.addEventListener('click', () => executeTool(btn.dataset.tool));
+    });
+    
+    // Manual command execution
+    $('#execute-command')?.addEventListener('click', executeManualCommand);
+    $('#manual-command')?.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') executeManualCommand();
+    });
+    
+    // Command suggestions
+    $$('.cmd-suggestion').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const cmdInput = $('#manual-command');
+            if (cmdInput) cmdInput.value = btn.dataset.cmd;
+        });
     });
 }
 
@@ -5070,6 +5825,62 @@ function saveToolOutput() {
     toast('✓ Output saved to file', 'success');
 }
 
+async function executeManualCommand() {
+    const cmdInput = $('#manual-command');
+    const outputEl = $('#tool-output');
+    const activeToolEl = $('#active-tool');
+    
+    if (!cmdInput || !cmdInput.value.trim()) {
+        toast('⚠️ Please enter a command to execute');
+        return;
+    }
+    
+    const command = cmdInput.value.trim();
+    
+    // Security warning for dangerous commands
+    const dangerousCommands = ['rm ', 'rmdir', 'dd ', 'mkfs', 'format', 'fdisk', 'shutdown', 'reboot', 'init ', 'kill -9'];
+    const isDangerous = dangerousCommands.some(cmd => command.toLowerCase().includes(cmd));
+    
+    if (isDangerous) {
+        if (!confirm(`⚠️ WARNING: "${command}" may be a dangerous command that could damage your system. Are you sure you want to execute it?`)) {
+            return;
+        }
+    }
+    
+    if (activeToolEl) activeToolEl.textContent = `Running: ${command}`;
+    if (outputEl) outputEl.textContent = `Executing: ${command}\n`;
+    
+    try {
+        const response = await fetch('/api/tools/execute', {
+            method: 'POST',
+            headers: { 'X-CSRF': CSRF, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ tool: 'custom', command: command })
+        });
+        
+        if (response.ok) {
+            const data = await response.json();
+            if (outputEl) {
+                outputEl.textContent = `=== COMMAND: ${command} ===\n`;
+                outputEl.textContent += data.output || 'Command executed successfully (no output)';
+                outputEl.textContent += '\n\n=== EXECUTION COMPLETE ===';
+            }
+            
+            toast(`✓ Command executed successfully`, 'success');
+        } else {
+            const error = await response.text();
+            if (outputEl) outputEl.textContent += `\nError: ${error}`;
+            toast(`✗ Command execution failed`, 'error');
+        }
+    } catch (err) {
+        console.error('Manual command execution failed:', err);
+        if (outputEl) outputEl.textContent += `\nError: ${err.message}`;
+        toast(`✗ Command execution failed: ${err.message}`, 'error');
+    }
+    
+    // Clear the input
+    cmdInput.value = '';
+}
+
 // ========== ENHANCED JARVIS AI FUNCTIONALITY ==========
 let conversationHistory = [];
 let userPreferences = {};
@@ -5080,6 +5891,30 @@ function initEnhancedAI() {
     loadJarvisMemory();
     updateAIStats();
     bindAIEvents();
+    initializeVoice();
+}
+
+async function initializeVoice() {
+    try {
+        // Load voice_enabled setting from status API
+        const response = await fetch('/api/status');
+        if (response.ok) {
+            const data = await response.json();
+            voiceEnabled = data.voice_enabled || false;
+        }
+        
+        // Initialize TTS if available and enabled
+        if (voiceEnabled) {
+            const ttsAvailable = initializeTTS();
+            if (!ttsAvailable) {
+                console.warn('Text-to-speech not available in this browser');
+                voiceEnabled = false;
+            }
+        }
+    } catch (error) {
+        console.warn('Failed to initialize voice:', error);
+        voiceEnabled = false;
+    }
 }
 
 function bindAIEvents() {
@@ -5355,7 +6190,7 @@ tabs.forEach(b => {
             if (activeTab === tab && !loadedTabs.has(tab)) {
                 loadedTabs.add(tab);
                 if (tab === 'files') loadFiles();
-                else if (tab === 'terminal') initTerminal();
+                else if (tab === 'terminal') connectTerm();
                 else if (tab === 'config') loadConfig();
                 else if (tab === 'security') loadSecurityLogs();
             }
