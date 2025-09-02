@@ -1737,10 +1737,13 @@ def enc_json_to_file(obj, out_path_enc):
         # Encrypt using OpenSSL
         key_path = aes_key_path()
         if not os.path.exists(key_path):
-            # Generate key if it doesn't exist
+            # Generate key if it doesn't exist with proper permissions
             os.makedirs(os.path.dirname(key_path), exist_ok=True)
             with open(key_path, 'wb') as f:
+                # Generate 64 bytes (512 bits) of entropy for stronger key
                 f.write(os.urandom(64))
+            # Set restrictive permissions on key file
+            os.chmod(key_path, 0o600)
         
         cmd = ['openssl', 'enc', '-aes-256-cbc', '-salt', '-pbkdf2', 
                '-in', tmp_path, '-out', out_path_enc, '-pass', f'file:{key_path}']
@@ -1888,7 +1891,38 @@ def get_session(handler):
         del db[token]
         set_users_db(db)
         return None
+    
+    # Periodic cleanup of expired sessions (every 100th request for efficiency)
+    if random.randint(1, 100) == 1:
+        cleanup_expired_sessions()
+    
     return session
+
+def cleanup_expired_sessions():
+    """Remove all expired sessions from the database."""
+    try:
+        db = users_db()
+        current_time = int(time.time())
+        expired_tokens = []
+        
+        for token, session in db.items():
+            # Skip non-session entries (like _userdb, _2fa)
+            if token.startswith('_'):
+                continue
+            
+            session_expires = session.get('expires', 0) if isinstance(session, dict) else 0
+            if session_expires > 0 and current_time > session_expires:
+                expired_tokens.append(token)
+        
+        # Remove expired sessions
+        for token in expired_tokens:
+            del db[token]
+        
+        if expired_tokens:
+            set_users_db(db)
+            py_alert('INFO', f'Cleaned up {len(expired_tokens)} expired sessions')
+    except Exception as e:
+        py_alert('WARN', f'Failed to cleanup expired sessions: {str(e)}')
 
 def require_auth(handler):
     client_ip = handler.client_address[0]
@@ -2782,6 +2816,35 @@ def save_ai_response(username, reply, user_memory, memory_size):
         patterns = user_memory["memory"]["learning_patterns"]
         patterns["last_interaction"] = now
         patterns["total_interactions"] = patterns.get("total_interactions", 0) + 1
+        
+        # Track command preferences for better learning
+        if "command_preferences" not in patterns:
+            patterns["command_preferences"] = {}
+        
+        # Analyze reply for tool usage patterns
+        if isinstance(reply, dict) and 'action' in reply:
+            action = reply['action']
+            if action.get('type') == 'execute_tool':
+                tool = action.get('tool', '')
+                if tool:
+                    patterns["command_preferences"][tool] = patterns["command_preferences"].get(tool, 0) + 1
+        
+        # Track conversation topics for personalization
+        if "conversation_topics" not in patterns:
+            patterns["conversation_topics"] = {}
+        
+        reply_text = reply.get('text', reply) if isinstance(reply, dict) else reply
+        # Simple topic detection based on keywords
+        topics = {
+            'security': ['security', 'scan', 'vulnerability', 'breach', 'attack', 'threat'],
+            'system': ['system', 'cpu', 'memory', 'disk', 'performance', 'status'],
+            'network': ['network', 'ping', 'connection', 'ip', 'dns'],
+            'tools': ['tool', 'nmap', 'netstat', 'ps', 'execute', 'run']
+        }
+        
+        for topic, keywords in topics.items():
+            if any(keyword in reply_text.lower() for keyword in keywords):
+                patterns["conversation_topics"][topic] = patterns["conversation_topics"].get(topic, 0) + 1
         
         # Save the updated memory
         save_user_memory(username, user_memory)
@@ -4273,6 +4336,28 @@ class Handler(SimpleHTTPRequestHandler):
             user_ip = self.client_address[0]
             
             try:
+                # Load user memory and save the user prompt for learning
+                user_memory = load_user_memory(username)
+                
+                # Save user prompt to memory
+                now = time.strftime('%Y-%m-%d %H:%M:%S')
+                user_memory["history"].append({
+                    "timestamp": now,
+                    "type": "user",
+                    "user": username,
+                    "prompt": prompt,
+                    "context": {
+                        "ip": user_ip,
+                        "prompt_length": len(prompt)
+                    }
+                })
+                
+                # Keep conversation history manageable
+                memory_size = cfg_get('jarvis.memory_size', 50)
+                if len(user_memory["history"]) > memory_size * 2:  # *2 for user+AI pairs
+                    user_memory["history"] = user_memory["history"][-memory_size * 2:]
+                
+                # Generate AI reply
                 reply = ai_reply(prompt, username, user_ip)
                 voice_enabled = cfg_get('jarvis.voice_enabled', False)
                 
@@ -8245,16 +8330,44 @@ async function sendChat() {
                     outputEl.scrollTop = outputEl.scrollHeight;
                 }
                 
-                // Add a follow-up message
+                // ENHANCED: Display actual tool results in chat interface as requested
+                const toolOutput = toolData.output || 'Command executed successfully';
                 const followUp = document.createElement('div');
                 followUp.className = 'jarvis-msg';
-                followUp.textContent = 'Jarvis: Tool execution completed. Results are displayed in the Tool Output panel.';
+                
+                // Create a formatted result display
+                const resultDiv = document.createElement('div');
+                resultDiv.style.cssText = 'background: rgba(0,255,255,0.1); border-left: 3px solid #00ffff; padding: 8px; margin: 5px 0; font-family: monospace; white-space: pre-wrap; font-size: 12px; max-height: 300px; overflow-y: auto;';
+                
+                const header = document.createElement('div');
+                header.style.cssText = 'color: #00ffff; font-weight: bold; margin-bottom: 5px;';
+                header.textContent = `Tool Execution: ${j.action.tool.toUpperCase()} ${j.action.args || ''}`;
+                
+                const output = document.createElement('div');
+                output.style.cssText = 'color: #e0e0e0; line-height: 1.4;';
+                // Truncate very long output for chat display
+                const truncated = toolOutput.length > 1000 ? toolOutput.substring(0, 1000) + '\n... (output truncated, see Tools tab for full results)' : toolOutput;
+                output.textContent = truncated;
+                
+                resultDiv.appendChild(header);
+                resultDiv.appendChild(output);
+                
+                followUp.innerHTML = '<span style="color: #00ffff;">Jarvis:</span> Tool execution completed successfully!';
+                followUp.appendChild(resultDiv);
+                
                 log.appendChild(followUp);
                 log.scrollTop = log.scrollHeight;
             } else {
+                const errorText = await toolResponse.text();
                 const followUp = document.createElement('div');
                 followUp.className = 'jarvis-msg';
-                followUp.textContent = 'Jarvis: Sorry, I encountered an error executing that tool. Please try manually in the Tools tab.';
+                
+                const errorDiv = document.createElement('div');
+                errorDiv.style.cssText = 'background: rgba(255,0,0,0.1); border-left: 3px solid #ff0000; padding: 8px; margin: 5px 0; font-family: monospace; color: #ffcccc;';
+                errorDiv.textContent = `Error executing ${j.action.tool}: ${errorText}`;
+                
+                followUp.innerHTML = '<span style="color: #00ffff;">Jarvis:</span> Sorry, I encountered an error executing that tool.';
+                followUp.appendChild(errorDiv);
                 log.appendChild(followUp);
                 log.scrollTop = log.scrollHeight;
             }
