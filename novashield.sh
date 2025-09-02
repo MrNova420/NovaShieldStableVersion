@@ -2804,8 +2804,9 @@ class Handler(SimpleHTTPRequestHandler):
                 audit(f'UNAUTHORIZED_ACCESS ip={client_ip}')
             
             # Implement strict reload auth: when AUTH_STRICT is enabled (default),
-            # clear NSSESS cookie on GET '/' to force re-login on browser refresh
-            if AUTH_STRICT:
+            # clear NSSESS cookie on GET '/' only if no valid session exists
+            # This prevents clearing valid sessions while allowing forced re-login on refresh
+            if AUTH_STRICT and not sess:
                 self._set_headers(200, 'text/html; charset=utf-8', {'Set-Cookie': 'NSSESS=deleted; Path=/; HttpOnly; Max-Age=0; SameSite=Strict'})
             else:
                 self._set_headers(200, 'text/html; charset=utf-8')
