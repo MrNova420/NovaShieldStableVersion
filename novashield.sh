@@ -2616,6 +2616,18 @@ class Handler(SimpleHTTPRequestHandler):
             mirror_terminal(self); return
 
         if parsed.path == '/':
+            # Log dashboard access for security monitoring
+            client_ip = self.client_address[0]
+            user_agent = self.headers.get('User-Agent', 'Unknown')[:100]
+            sess = get_session(self)
+            if sess:
+                user = sess.get('user', 'unknown')
+                py_alert('INFO', f'DASHBOARD_ACCESS user={user} ip={client_ip} user_agent={user_agent}')
+                audit(f'DASHBOARD_ACCESS user={user} ip={client_ip}')
+            else:
+                py_alert('INFO', f'UNAUTHORIZED_ACCESS ip={client_ip} user_agent={user_agent}')
+                audit(f'UNAUTHORIZED_ACCESS ip={client_ip}')
+            
             # Implement strict reload auth: when AUTH_STRICT is enabled (default),
             # clear NSSESS cookie on GET '/' to force re-login on browser refresh
             if AUTH_STRICT:
@@ -3426,9 +3438,10 @@ write_dashboard(){
     <div class="brand">
       <div class="ring"></div>
       <h1>NovaShield <span class="mini">JARVIS</span></h1>
-      <div class="by">by niteas aka MrNova420</div>
+      <div class="by">Created by @MrNova420</div>
     </div>
     <div class="actions">
+      <button id="btn-420-theme" type="button" title="Toggle 420 themed colors (purple, green, blue)">🌿 420 Mode</button>
       <button id="btn-refresh" type="button" title="Refresh all dashboard data and status information">Refresh Dashboard</button>
       <button data-act="backup" type="button" title="Create a backup of important system files and configurations">Create Backup</button>
       <button data-act="version" type="button" title="Create a system snapshot with current state and version info">Create Snapshot</button>
@@ -3836,8 +3849,29 @@ HTML
 
   write_file "${NS_WWW}/style.css" 644 <<'CSS'
 :root { --bg:#0a1a3d; --card:#0f1d42; --text:#e1f3ff; --muted:#8bb4d9; --ok:#00d884; --warn:#ffb347; --crit:#ff5757; --accent:#00c4f7; --ring:#00ffe1; --info:#00a8ff; --success:#16a34a; }
+
+/* 420 Theme Variables */
+:root.theme-420 { 
+  --bg:#0a0f1a; 
+  --card:#1a0f2a; 
+  --text:#e1ffe1; 
+  --muted:#b9d9b9; 
+  --ok:#7fff00; 
+  --warn:#ff8c00; 
+  --crit:#ff4500; 
+  --accent:#9370db; 
+  --ring:#7fff00; 
+  --info:#8a2be2; 
+  --success:#32cd32; 
+  --purple-bright: #e9b3ff;
+  --green-bright: #7fff00;
+  --blue-bright: #4169e1;
+}
 *{box-sizing:border-box}
 body{margin:0;background:radial-gradient(1400px 700px at 15% -25%,rgba(0,159,255,.15),transparent),linear-gradient(180deg,#021933,#0d1b3a 40%,#1a2b5c 100%);color:var(--text);font-family:ui-sans-serif,system-ui,Segoe UI,Roboto,Arial}
+
+/* 420 Theme Body Background */
+.theme-420 body{background:radial-gradient(1400px 700px at 15% -25%,rgba(147,112,219,.15),transparent),linear-gradient(180deg,#0a0a0a,#1a0f2a 40%,#2a1a4a 100%)}
 header{display:flex;align-items:center;justify-content:space-between;padding:14px 18px;border-bottom:1px solid #0e223a;background:linear-gradient(180deg,rgba(0,208,255,.06),transparent)}
 .brand{display:flex;align-items:center;gap:12px}
 .brand h1{margin:0;font-size:20px;letter-spacing:.6px}
@@ -3903,6 +3937,61 @@ textarea#wcontent{width:100%;height:160px;background:#0b1830;color:#d7e3ff;borde
 .log-level.warning{background:var(--warn);color:#000}
 .log-level.error{background:var(--crit);color:#fff}
 .log-level.info{background:var(--accent);color:#000}
+
+/* Enhanced clickable log entries */
+.log-entry.clickable {
+    cursor: pointer;
+    transition: all 0.2s ease;
+    position: relative;
+}
+
+.log-entry.clickable:hover {
+    background: rgba(13, 35, 57, 0.6);
+    border-radius: 4px;
+}
+
+.log-entry.expanded {
+    background: rgba(13, 35, 57, 0.8);
+    border-radius: 4px 4px 0 0;
+}
+
+.log-expand {
+    color: var(--accent);
+    font-weight: bold;
+    font-size: 14px;
+    margin-left: 8px;
+    user-select: none;
+}
+
+.log-details {
+    padding: 12px;
+    background: rgba(5, 15, 25, 0.8);
+    border: 1px solid #143055;
+    border-top: none;
+    border-radius: 0 0 4px 4px;
+    font-size: 11px;
+    line-height: 1.5;
+}
+
+.detail-item {
+    margin: 4px 0;
+    display: flex;
+    gap: 8px;
+}
+
+.detail-item strong {
+    color: var(--accent);
+    min-width: 80px;
+    flex-shrink: 0;
+}
+
+.detail-item:first-child {
+    margin-top: 0;
+}
+
+.detail-item:last-child {
+    margin-bottom: 0;
+}
 
 /* Enhanced alert level badges */
 .alert-badge{display:inline-block;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px}
@@ -4439,6 +4528,37 @@ let CSRF = '';
 
 $('#btn-refresh').onclick = () => location.reload();
 
+// 420 Theme Toggle
+$('#btn-420-theme').onclick = () => {
+  const root = document.documentElement;
+  const btn = $('#btn-420-theme');
+  const is420Active = root.classList.contains('theme-420');
+  
+  if (is420Active) {
+    root.classList.remove('theme-420');
+    btn.textContent = '🌿 420 Mode';
+    btn.title = 'Toggle 420 themed colors (purple, green, blue)';
+    localStorage.setItem('theme-420', 'false');
+    toast('🌿 420 Theme Disabled');
+  } else {
+    root.classList.add('theme-420');
+    btn.textContent = '🌿 Classic';
+    btn.title = 'Switch back to classic blue theme';
+    localStorage.setItem('theme-420', 'true');
+    toast('🌿 420 Theme Activated - Purple & Green Power!');
+  }
+};
+
+// Initialize 420 theme on page load
+if (localStorage.getItem('theme-420') === 'true') {
+  document.documentElement.classList.add('theme-420');
+  const btn = $('#btn-420-theme');
+  if (btn) {
+    btn.textContent = '🌿 Classic';
+    btn.title = 'Switch back to classic blue theme';
+  }
+}
+
 // Header actions
 $$('header .actions button[data-act]').forEach(btn=>{
   btn.onclick = async () => {
@@ -4792,12 +4912,32 @@ function connectTerm() {
         ws = new WebSocket(`${proto}://${location.host}/ws/term`);
         const term = $('#term');
         const termInput = $('#terminal-input');
-        term.textContent = '';
+        term.textContent = 'Connecting to terminal...\n';
         ws.binaryType = 'arraybuffer';
         
         ws.onopen = () => { 
+            term.textContent = '';
             // Ensure terminal is focusable and focused
             term.setAttribute('tabindex', '0');
+            term.focus();
+            
+            // Focus hidden input for mobile keyboard support
+            if (termInput) {
+                termInput.focus();
+                // Re-focus on click
+                term.addEventListener('click', () => {
+                    termInput.focus();
+                });
+            }
+            
+            // Send initial resize
+            const termRect = term.getBoundingClientRect();
+            const cols = Math.floor(termRect.width / 8) || 80;
+            const rows = Math.floor(termRect.height / 16) || 24;
+            ws.send(JSON.stringify({type: 'resize', cols, rows}));
+            
+            toast('✓ Terminal connected');
+        };
             term.focus(); 
             setupTerminalInput();
             toast('Terminal connected'); 
@@ -5083,16 +5223,46 @@ function updateLogList(selector, logEntries) {
         return;
     }
     
-    logEntries.forEach(entry => {
+    logEntries.forEach((entry, index) => {
         const li = document.createElement('li');
         const levelClass = entry.level || 'info';
+        const entryId = `entry-${selector.replace('#', '')}-${index}`;
+        
         li.innerHTML = `
-            <div class="log-entry">
+            <div class="log-entry clickable" data-entry-id="${entryId}">
                 <span class="log-time">${entry.timestamp}</span>
                 <span class="log-message">${escapeHtml(entry.message)}</span>
                 <span class="log-level ${levelClass}">${levelClass}</span>
+                <span class="log-expand">+</span>
+            </div>
+            <div class="log-details" id="${entryId}-details" style="display: none;">
+                <div class="detail-item"><strong>Timestamp:</strong> ${entry.timestamp}</div>
+                <div class="detail-item"><strong>Level:</strong> ${entry.level || 'info'}</div>
+                <div class="detail-item"><strong>Message:</strong> ${escapeHtml(entry.message)}</div>
+                ${entry.ip ? `<div class="detail-item"><strong>IP Address:</strong> ${entry.ip}</div>` : ''}
+                ${entry.user ? `<div class="detail-item"><strong>User:</strong> ${entry.user}</div>` : ''}
+                ${entry.user_agent ? `<div class="detail-item"><strong>User Agent:</strong> ${escapeHtml(entry.user_agent)}</div>` : ''}
+                ${entry.details ? `<div class="detail-item"><strong>Details:</strong> ${escapeHtml(entry.details)}</div>` : ''}
             </div>
         `;
+        
+        // Add click handler for expandable details
+        const logEntry = li.querySelector('.log-entry.clickable');
+        logEntry.addEventListener('click', () => {
+            const details = li.querySelector('.log-details');
+            const expand = li.querySelector('.log-expand');
+            
+            if (details.style.display === 'none') {
+                details.style.display = 'block';
+                expand.textContent = '-';
+                logEntry.classList.add('expanded');
+            } else {
+                details.style.display = 'none';
+                expand.textContent = '+';
+                logEntry.classList.remove('expanded');
+            }
+        });
+        
         ul.appendChild(li);
     });
 }
