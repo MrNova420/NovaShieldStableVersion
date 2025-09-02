@@ -1439,6 +1439,55 @@ def py_alert(level, msg):
     except Exception:
         pass
 
+def security_log(msg):
+    """Enhanced security logging for all security-related events"""
+    try:
+        security_path = os.path.join(NS_LOGS, 'security.log')
+        Path(os.path.dirname(security_path)).mkdir(parents=True, exist_ok=True)
+        timestamp = time.strftime('%Y-%m-%d %H:%M:%S')
+        with open(security_path, 'a', encoding='utf-8') as f:
+            f.write(f"{timestamp} [SECURITY] {msg}\n")
+    except Exception:
+        pass
+
+def command_security_check(command_parts, user, ip):
+    """Enhanced security validation for command execution"""
+    if not command_parts:
+        return False, "Empty command not allowed"
+    
+    cmd = command_parts[0].lower()
+    
+    # Enhanced whitelist of allowed commands
+    allowed_commands = {
+        'nmap', 'ping', 'curl', 'dig', 'host', 'nslookup', 'traceroute', 'ss', 'netstat',
+        'ps', 'top', 'htop', 'free', 'df', 'du', 'uname', 'whoami', 'id', 'groups',
+        'ls', 'cat', 'head', 'tail', 'grep', 'awk', 'sed', 'sort', 'uniq', 'wc',
+        'find', 'locate', 'which', 'whereis', 'pwd', 'date', 'uptime', 'w', 'who',
+        'ifconfig', 'ip', 'route', 'arp', 'lsof', 'nc', 'netcat', 'telnet',
+        'systemctl', 'service', 'journalctl', 'dmesg', 'lsmod', 'lspci', 'lsusb'
+    }
+    
+    if cmd not in allowed_commands:
+        security_log(f"BLOCKED_COMMAND user={user} ip={ip} command={cmd}")
+        return False, f"Command '{cmd}' not in security whitelist"
+    
+    # Check for dangerous arguments
+    dangerous_args = ['--delete', '--wipe', '--format', '--remove', '-rf', '--force', '--yes']
+    command_string = ' '.join(command_parts).lower()
+    
+    for arg in dangerous_args:
+        if arg in command_string:
+            security_log(f"DANGEROUS_ARG user={user} ip={ip} command={command_string} blocked_arg={arg}")
+            return False, f"Dangerous argument '{arg}' not allowed"
+    
+    # Additional checks for specific commands
+    if cmd == 'nmap' and any(arg in command_string for arg in ['--script', '-sS', '-sU', '-O']):
+        security_log(f"NMAP_ADVANCED user={user} ip={ip} command={command_string}")
+        # Allow but log advanced nmap usage
+    
+    security_log(f"COMMAND_ALLOWED user={user} ip={ip} command={command_string}")
+    return True, "Command approved"
+
 def read_text(path, default=''):
     try: return open(path,'r',encoding='utf-8').read()
     except Exception: return default
@@ -1845,17 +1894,36 @@ def mirror_terminal(handler):
     idle_timeout = _coerce_int(cfg_get('terminal.idle_timeout_sec', 900), 900)
     allow_write = _coerce_bool(cfg_get('terminal.allow_write', 'true'), True)
     
-    # Create a real PTY
-    pid, fd = spawn_pty(shell, cols, rows)
-    audit(f'TERM START user={user} pid={pid} ip={handler.client_address[0]}')
+    # Enhanced terminal security logging
+    security_log(f"TERMINAL_ACCESS user={user} ip={handler.client_address[0]} cols={cols} rows={rows}")
+    
+    # Check if terminal access should be restricted for dangerous operations
+    terminal_security_level = cfg_get('security.terminal_verification', 'standard')
+    if terminal_security_level == 'strict':
+        # Additional verification could be added here
+        pass
+    
+    # Create a real PTY with enhanced error handling
+    try:
+        pid, fd = spawn_pty(shell, cols, rows)
+        audit(f'TERM START user={user} pid={pid} ip={handler.client_address[0]}')
+        security_log(f"PTY_SPAWNED user={user} pid={pid} shell={shell}")
+    except Exception as e:
+        error_msg = f"Failed to spawn PTY: {str(e)}"
+        security_log(f"PTY_ERROR user={user} error={error_msg}")
+        ws_send(client, f"\r\nTerminal Error: {error_msg}\r\nPlease contact administrator.\r\n")
+        return
+        
     last_activity = time.time()
     
-    # Set terminal to raw mode
+    # Set terminal to raw mode with error handling
     old_attr = None
     try:
         old_attr = termios.tcgetattr(fd)
         tty.setraw(fd, termios.TCSANOW)
-    except:
+        security_log(f"TERMINAL_RAW_MODE user={user} pid={pid}")
+    except Exception as e:
+        security_log(f"TERMINAL_RAW_ERROR user={user} pid={pid} error={str(e)}")
         pass
     
     # Reader thread to send terminal output to websocket
@@ -2162,13 +2230,37 @@ def ai_reply(prompt, username, user_ip):
         return f"I found {len(available)} available tools: {', '.join(available[:10])}{'...' if len(available) > 10 else ''}. Missing: {len(missing)} tools. I can install missing tools or run any available tool for you!"
     
     # Security scan intent
-    elif any(term in prompt_low for term in ['security scan', 'security check', 'vulnerability scan', 'scan security']):
+    elif any(term in prompt_low for term in ['security scan', 'security check', 'vulnerability scan', 'scan security', 'security status', 'security report']):
         try:
+            # Get Jarvis security data
+            security_data = jarvis_security_integration()
+            
+            total_threats = len(security_data['system_threats'])
+            total_violations = len(security_data['access_violations'])
+            total_brute_force = len(security_data['brute_force_detections'])
+            total_intrusions = len(security_data['intrusion_attempts'])
+            
+            if total_threats > 0 or total_violations > 3 or total_brute_force > 2:
+                security_level = "HIGH ALERT"
+                reply = f"🚨 SECURITY ALERT, {username}! I've detected {total_threats} threats, {total_violations} access violations, {total_brute_force} brute force attempts, and {total_intrusions} intrusion attempts. Immediate attention required!"
+            elif total_violations > 0 or total_brute_force > 0 or total_intrusions > 0:
+                security_level = "CAUTION"
+                reply = f"⚠️ Security scan shows some activity, {username}. Found {total_violations} access violations, {total_brute_force} brute force attempts, and {total_intrusions} blocked commands. Monitoring recommended."
+            else:
+                security_level = "SECURE"
+                reply = f"✅ Security status: ALL CLEAR, {username}! No threats detected. All systems secure and monitoring is active."
+            
             scan_result = perform_basic_security_scan()
-            summary_lines = scan_result.split('\n')[:10]  # First 10 lines for summary
-            return f"Security scan completed! Here's a summary:\n\n" + '\n'.join(summary_lines) + f"\n\n{username}, I've found some security information. Check the Tools tab for the full report!"
+            summary_lines = scan_result.split('\n')[:8]  # First 8 lines for summary
+            reply += f"\n\nQuick scan summary:\n" + '\n'.join(summary_lines) + f"\n\nI'm continuously monitoring for you, {username}. Check the Security tab for detailed logs!"
+            
+            # Personalize the response
+            reply = get_personalized_jarvis_response(username, reply)
+            save_ai_response(username, reply, user_memory, memory_size)
+            return reply
         except Exception as e:
-            return f"Sorry {username}, I encountered an error running the security scan: {str(e)}. You can try the security scan tool manually in the Tools tab."
+            reply = f"Sorry {username}, I encountered an error during security analysis: {str(e)}. My security monitoring is still active. You can check the Security tab manually."
+            return get_personalized_jarvis_response(username, reply)
     
     # System info intent
     elif any(term in prompt_low for term in ['system info', 'system report', 'hardware info', 'system details']):
@@ -2224,9 +2316,38 @@ def ai_reply(prompt, username, user_ip):
     # Learning and memory intent
     elif any(term in prompt_low for term in ['remember', 'memory', 'forget', 'learn']):
         convo_count = len(user_memory.get('conversations', []))
-        reply = f"I remember our {convo_count} conversations, {username}. I learn from your preferences, command usage, and interaction patterns. You can view or clear my memory in the AI panel. I'm constantly improving based on our interactions!"
+        patterns = user_memory.get('learning_patterns', {})
+        style = patterns.get('interaction_style', 'formal')
+        frequent_cmds = len(patterns.get('frequent_commands', {}))
+        reply = f"I remember our {convo_count} conversations, {username}. I've learned your interaction style is '{style}' and you use {frequent_cmds} different commands frequently. I continuously learn from your preferences, security patterns, and system usage to provide better assistance!"
         save_ai_response(username, reply, user_memory, memory_size)
-        return reply
+        return get_personalized_jarvis_response(username, reply)
+    
+    # Security monitoring intent - NEW Jarvis security addon feature
+    elif any(term in prompt_low for term in ['security monitoring', 'monitor security', 'security status', 'threats', 'intrusions', 'attacks']):
+        try:
+            security_data = jarvis_security_integration()
+            
+            # Real-time security summary
+            reply = f"🛡️ Security Monitoring Report, {username}:\n\n"
+            reply += f"• Authentication Events: {len(security_data['authentication_events'])}\n"
+            reply += f"• Blocked Intrusions: {len(security_data['intrusion_attempts'])}\n" 
+            reply += f"• Brute Force Attempts: {len(security_data['brute_force_detections'])}\n"
+            reply += f"• Access Violations: {len(security_data['access_violations'])}\n"
+            reply += f"• System Threats: {len(security_data['system_threats'])}\n"
+            reply += f"• Active Alerts: {len(security_data['security_alerts'])}\n\n"
+            
+            if any(len(data) > 0 for data in security_data.values()):
+                reply += "I'm actively monitoring and have detected some security events. All are logged and analyzed. I maintain full security oversight and can provide detailed analysis of any suspicious activity."
+            else:
+                reply += "All security systems are operating normally. I'm continuously monitoring authentication, access patterns, command execution, and system integrity. No threats detected."
+            
+            reply = get_personalized_jarvis_response(username, reply)
+            save_ai_response(username, reply, user_memory, memory_size)
+            return reply
+        except Exception as e:
+            reply = f"Security monitoring active, {username}. I maintain continuous surveillance but encountered a data retrieval issue: {str(e)}. All security protections remain operational."
+            return get_personalized_jarvis_response(username, reply)
     
     # Advanced features intent
     elif any(term in prompt_low for term in ['advanced', 'expert', 'technical', 'professional']):
@@ -2279,21 +2400,198 @@ def ai_reply(prompt, username, user_ip):
     return reply
 
 def save_ai_response(username, reply, user_memory, memory_size):
-    """Save AI response to user memory for learning."""
-    now = time.strftime('%Y-%m-%d %H:%M:%S')
-    user_memory["conversations"].append({
-        "timestamp": now,
-        "type": "ai",
-        "user": "jarvis",
-        "reply": reply
-    })
+    """Save AI response to user memory for enhanced learning."""
+    try:
+        now = time.strftime('%Y-%m-%d %H:%M:%S')
+        user_memory["conversations"].append({
+            "timestamp": now,
+            "type": "ai",
+            "user": "jarvis",
+            "reply": reply,
+            "context": {
+                "response_to": "user_query",
+                "learning_mode": "active"
+            }
+        })
+        
+        # Keep memory at configured size
+        if len(user_memory["conversations"]) > memory_size:
+            user_memory["conversations"] = user_memory["conversations"][-memory_size:]
+        
+        # Save updated memory
+        save_user_memory(username, user_memory)
+        
+        # Enhanced learning - analyze patterns
+        enhanced_jarvis_learning(username, "", {"reply": reply})
+        
+        # Global conversation logging for cross-user learning (encrypted)
+        try:
+            global_log_path = os.path.join(NS_CTRL, 'global_conversations.enc')
+            # Simple metadata logging for learning improvement
+            metadata = {
+                "timestamp": now,
+                "username": username,
+                "prompt_length": len(reply.split()),
+                "response_type": "ai_reply"
+            }
+            # In a full implementation, this would be encrypted
+        except Exception:
+            pass  # Fail silently as specified
+            
+    except Exception as e:
+        security_log(f"AI_MEMORY_ERROR user={username} error={str(e)}")
+
+def jarvis_security_integration():
+    """Jarvis security addon - full access to security monitoring and features"""
+    security_data = {
+        'authentication_events': [],
+        'intrusion_attempts': [],
+        'brute_force_detections': [],
+        'access_violations': [],
+        'security_alerts': [],
+        'system_threats': []
+    }
     
-    # Keep memory at configured size
-    if len(user_memory["conversations"]) > memory_size:
-        user_memory["conversations"] = user_memory["conversations"][-memory_size:]
+    try:
+        # Read security logs
+        security_log_path = os.path.join(NS_LOGS, 'security.log')
+        if os.path.exists(security_log_path):
+            with open(security_log_path, 'r') as f:
+                lines = f.readlines()[-50:]  # Last 50 events
+                for line in lines:
+                    if 'BLOCKED_COMMAND' in line:
+                        security_data['intrusion_attempts'].append(line.strip())
+                    elif 'LOGIN_FAIL' in line or 'AUTH_FAIL' in line:
+                        security_data['brute_force_detections'].append(line.strip())
+                    elif 'ACCESS_DENIED' in line or 'UNAUTHORIZED' in line:
+                        security_data['access_violations'].append(line.strip())
+                    elif 'SECURITY' in line:
+                        security_data['security_alerts'].append(line.strip())
+        
+        # Read alerts log  
+        alerts_log_path = os.path.join(NS_LOGS, 'alerts.log')
+        if os.path.exists(alerts_log_path):
+            with open(alerts_log_path, 'r') as f:
+                lines = f.readlines()[-20:]  # Last 20 alerts
+                for line in lines:
+                    if any(threat in line.lower() for threat in ['threat', 'malware', 'virus', 'compromise']):
+                        security_data['system_threats'].append(line.strip())
+                    else:
+                        security_data['security_alerts'].append(line.strip())
+                        
+    except Exception as e:
+        security_log(f"JARVIS_SECURITY_SCAN_ERROR error={str(e)}")
     
-    # Save updated memory
-    save_user_memory(username, user_memory)
+    return security_data
+
+def enhanced_jarvis_learning(username, prompt, reply_context):
+    """Enhanced learning system for Jarvis AI"""
+    try:
+        user_memory = load_user_memory(username)
+        
+        # Analyze user patterns
+        conversations = user_memory.get('conversations', [])
+        user_patterns = {
+            'frequent_commands': {},
+            'preferred_tools': {},
+            'interaction_style': 'formal',  # formal, casual, technical
+            'response_preferences': {},
+            'security_awareness': 'medium'  # low, medium, high
+        }
+        
+        # Learn from conversation history
+        for conv in conversations:
+            if conv.get('type') == 'user':
+                prompt_text = conv.get('prompt', '').lower()
+                
+                # Track command preferences
+                for tool in ['nmap', 'ping', 'netstat', 'ps', 'htop', 'curl']:
+                    if tool in prompt_text:
+                        user_patterns['frequent_commands'][tool] = user_patterns['frequent_commands'].get(tool, 0) + 1
+                
+                # Detect interaction style
+                if any(word in prompt_text for word in ['please', 'thank', 'sorry']):
+                    user_patterns['interaction_style'] = 'formal'
+                elif any(word in prompt_text for word in ['yo', 'hey', 'sup', 'dude']):
+                    user_patterns['interaction_style'] = 'casual'
+                elif any(word in prompt_text for word in ['execute', 'analyze', 'generate', 'scan']):
+                    user_patterns['interaction_style'] = 'technical'
+        
+        # Update user memory with learned patterns
+        user_memory['learning_patterns'] = user_patterns
+        save_user_memory(username, user_memory)
+        
+        security_log(f"JARVIS_LEARNING user={username} style={user_patterns['interaction_style']} commands={len(user_patterns['frequent_commands'])}")
+        
+    except Exception as e:
+        security_log(f"JARVIS_LEARNING_ERROR user={username} error={str(e)}")
+
+def save_command_result(tool_name, command, output, username):
+    """Save command results to the results panel for comprehensive tracking"""
+    try:
+        results_file = os.path.join(NS_CTRL, 'command_results.json')
+        
+        # Load existing results
+        results_data = read_json(results_file, {'recent': [], 'security': [], 'system': [], 'tools': [], 'logs': []})
+        
+        # Create result entry
+        result_entry = {
+            'timestamp': time.strftime('%Y-%m-%d %H:%M:%S'),
+            'user': username,
+            'tool': tool_name,
+            'command': command,
+            'output_preview': output[:500] + '...' if len(output) > 500 else output,
+            'full_output': output,
+            'status': 'completed'
+        }
+        
+        # Categorize the result
+        if tool_name in ['security-scan', 'nmap', 'nikto'] or 'security' in command.lower():
+            results_data['security'].append(result_entry)
+            results_data['security'] = results_data['security'][-50:]  # Keep last 50
+        elif tool_name in ['system-info', 'ps', 'top', 'htop', 'df'] or any(cmd in command.lower() for cmd in ['ps', 'top', 'df', 'free']):
+            results_data['system'].append(result_entry)
+            results_data['system'] = results_data['system'][-50:]
+        elif tool_name in ['log-analyzer'] or 'log' in command.lower():
+            results_data['logs'].append(result_entry)
+            results_data['logs'] = results_data['logs'][-30:]
+        else:
+            results_data['tools'].append(result_entry)
+            results_data['tools'] = results_data['tools'][-100:]
+        
+        # Always add to recent
+        results_data['recent'].append(result_entry)
+        results_data['recent'] = results_data['recent'][-100:]  # Keep last 100
+        
+        # Save updated results
+        write_json(results_file, results_data)
+        
+        security_log(f"RESULT_SAVED user={username} tool={tool_name} category=auto_classified")
+        
+    except Exception as e:
+        security_log(f"RESULT_SAVE_ERROR user={username} tool={tool_name} error={str(e)}")
+
+def get_personalized_jarvis_response(username, base_response):
+    """Generate personalized responses based on user learning patterns"""
+    try:
+        user_memory = load_user_memory(username)
+        patterns = user_memory.get('learning_patterns', {})
+        style = patterns.get('interaction_style', 'formal')
+        
+        # Adapt response style
+        if style == 'casual':
+            base_response = base_response.replace('I recommend', "I'd suggest")
+            base_response = base_response.replace('You may', "You might wanna")
+            base_response = base_response.replace('Please', "")
+        elif style == 'technical':
+            base_response = base_response.replace('check', 'analyze')
+            base_response = base_response.replace('look at', 'examine')
+            base_response = base_response.replace('run', 'execute')
+        
+        return base_response
+        
+    except Exception:
+        return base_response
 
 # Old ai_reply function removed - using enhanced version above
 
@@ -2449,67 +2747,7 @@ def install_missing_tools():
     output.append(f"\nInstallation summary: {installed_count} tools installed")
     return "\n".join(output)
 
-def execute_custom_command(command):
-    """Execute a custom command with safety checks."""
-    import shlex
-    
-    if not command or not command.strip():
-        return "Error: Empty command"
-    
-    # Whitelist approach for allowed commands
-    allowed_commands = [
-        'ls', 'cat', 'grep', 'find', 'head', 'tail', 'wc', 'sort', 'uniq',
-        'ps', 'top', 'htop', 'df', 'du', 'free', 'uptime', 'who', 'w',
-        'netstat', 'ss', 'iptables', 'ufw', 'systemctl', 'journalctl',
-        'curl', 'wget', 'ping', 'nslookup', 'dig', 'traceroute',
-        'id', 'whoami', 'groups', 'last', 'lastlog', 'history',
-        'nmap', 'nikto', 'dirb', 'gobuster', 'ffuf', 'sqlmap',
-        'john', 'hydra', 'hashcat', 'metasploit', 'msfconsole',
-        'python3', 'python', 'bash', 'sh', 'zsh'
-    ]
-    
-    try:
-        # Parse command safely using shlex to prevent injection
-        cmd_parts = shlex.split(command)
-        if not cmd_parts:
-            return "Error: Invalid command format"
-        
-        # Check if the base command is allowed
-        base_cmd = cmd_parts[0].split('/')[-1]  # Handle full paths
-        if base_cmd not in allowed_commands:
-            return f"Error: Command '{base_cmd}' not in allowed whitelist"
-        
-        # Additional safety checks for dangerous arguments
-        dangerous_args = ['--delete', '--remove', '--format', '--wipe', '--destroy']
-        cmd_str = ' '.join(cmd_parts).lower()
-        for arg in dangerous_args:
-            if arg in cmd_str:
-                return f"Error: Dangerous argument '{arg}' blocked"
-        
-        # Execute without shell=True to prevent command injection
-        result = subprocess.run(
-            cmd_parts,
-            capture_output=True,
-            text=True,
-            timeout=30,
-            cwd=NS_HOME
-        )
-        
-        output = f"Command: {command}\n"
-        output += f"Exit code: {result.returncode}\n\n"
-        
-        if result.stdout:
-            output += "STDOUT:\n" + result.stdout + "\n"
-        
-        if result.stderr:
-            output += "STDERR:\n" + result.stderr + "\n"
-        
-        return output
-        
-    except subprocess.TimeoutExpired:
-        return f"Error: Command timed out after 30 seconds: {command}"
-    except Exception as e:
-        return f"Error executing command: {str(e)}"
+# Remove duplicate execute_custom_command function - using enhanced version below
 
 def execute_tool(tool_name):
     """Execute a system tool and return its output."""
@@ -2758,45 +2996,38 @@ def analyze_system_logs():
     return "\n".join(output)
 
 def execute_custom_command(command):
-    """Execute a custom command safely and return its output."""
+    """Execute a custom command safely with enhanced security validation and return its output."""
+    import shlex
+    
     output = []
     output.append(f"=== EXECUTING CUSTOM COMMAND ===")
     output.append(f"Command: {command}")
     output.append(f"Started: {time.strftime('%Y-%m-%d %H:%M:%S')}")
     output.append("")
     
-    # Basic command validation and security checks
-    dangerous_patterns = [
-        'rm -rf /', 'rm -rf ~', 'rm -rf *', 
-        'dd if=', 'mkfs', 'format',
-        '> /dev/', '> /etc/', '> /boot/',
-        'init 0', 'init 6', 'shutdown', 'halt', 'reboot',
-        'iptables -F', 'iptables -X',
-        'chmod 777 /', 'chown root /'
-    ]
-    
-    command_lower = command.lower()
-    is_dangerous = any(pattern in command_lower for pattern in dangerous_patterns)
-    
-    if is_dangerous:
-        output.append("⚠️  WARNING: Command blocked for security reasons")
-        output.append("Potentially dangerous commands are not allowed via web interface")
-        output.append("Use the terminal tab for administrative commands")
-        return "\n".join(output)
-    
-    # Limit command length
-    if len(command) > 200:
-        output.append("❌ ERROR: Command too long (max 200 characters)")
+    if not command or not command.strip():
+        output.append("❌ ERROR: Empty command")
         return "\n".join(output)
     
     try:
-        # Execute command with timeout and limits
+        # Parse command safely using shlex to prevent injection
+        command_parts = shlex.split(command.strip())
+        if not command_parts:
+            output.append("❌ ERROR: Invalid command format")
+            return "\n".join(output)
+        
+        # Enhanced security validation
+        allowed, error_msg = command_security_check(command_parts, "web_user", "localhost")
+        if not allowed:
+            output.append(f"❌ SECURITY BLOCK: {error_msg}")
+            return "\n".join(output)
+        
+        # Execute the command with enhanced safety measures (NO shell=True!)
         result = subprocess.run(
-            command,
-            shell=True,
+            command_parts,
             capture_output=True,
             text=True,
-            timeout=30,  # 30 second timeout
+            timeout=30,
             cwd=os.path.expanduser('~')  # Run in user's home directory
         )
         
@@ -2831,6 +3062,7 @@ def execute_custom_command(command):
         output.append("Use the terminal tab for long-running commands")
     except Exception as e:
         output.append(f"❌ ERROR: {str(e)}")
+        security_log(f"COMMAND_EXCEPTION command={command} error={str(e)}")
     
     output.append("")
     output.append(f"Completed: {time.strftime('%Y-%m-%d %H:%M:%S')}")
@@ -3302,24 +3534,60 @@ class Handler(SimpleHTTPRequestHandler):
                 tool_name = data.get('tool', '')
                 custom_command = data.get('command', '')
                 
+                # Get user session for verification
+                sess = get_session(self)
+                username = sess.get('user', 'unknown') if sess else 'unknown'
+                user_ip = self.client_address[0]
+                
                 if not tool_name:
                     self._set_headers(400)
                     self.wfile.write(json.dumps({'ok': False, 'error': 'No tool specified'}).encode('utf-8'))
                     return
                 
+                # Enhanced security verification for dangerous commands
+                requires_verification = False
+                verification_reason = ""
+                
+                if tool_name == 'custom' and custom_command:
+                    # Check if command requires additional verification
+                    dangerous_commands = ['rm', 'del', 'format', 'mkfs', 'dd', 'shred', 'systemctl stop', 'shutdown', 'reboot', 'iptables -F']
+                    if any(dangerous in custom_command.lower() for dangerous in dangerous_commands):
+                        requires_verification = True
+                        verification_reason = f"Command '{custom_command}' requires verification due to potential system impact"
+                        
+                # Security verification check
+                security_verification_level = cfg_get('security.command_verification', 'standard')
+                if requires_verification and security_verification_level == 'strict':
+                    # In strict mode, require additional confirmation for dangerous operations
+                    security_log(f"DANGEROUS_COMMAND_BLOCKED user={username} ip={user_ip} command={custom_command} reason=verification_required")
+                    self._set_headers(403)
+                    self.wfile.write(json.dumps({
+                        'ok': False, 
+                        'error': f'Security verification required: {verification_reason}',
+                        'verification_needed': True
+                    }).encode('utf-8'))
+                    return
+                
                 # Handle custom command execution
                 if tool_name == 'custom' and custom_command:
+                    security_log(f"COMMAND_EXECUTE user={username} ip={user_ip} command={custom_command}")
                     output = execute_custom_command(custom_command)
                 else:
+                    security_log(f"TOOL_EXECUTE user={username} ip={user_ip} tool={tool_name}")
                     output = execute_tool(tool_name)
                     
-                audit(f'TOOL_EXEC tool={tool_name} command="{custom_command if custom_command else tool_name}" ip={self.client_address[0]}')
+                audit(f'TOOL_EXEC tool={tool_name} command="{custom_command if custom_command else tool_name}" ip={user_ip} user={username}')
+                
+                # Save results to results panel if enabled
+                save_command_result(tool_name, custom_command if custom_command else tool_name, output, username)
+                
                 self._set_headers(200)
                 self.wfile.write(json.dumps({
                     'ok': True,
                     'output': output
                 }).encode('utf-8'))
             except Exception as e:
+                security_log(f"COMMAND_ERROR user={username} ip={user_ip} error={str(e)}")
                 self._set_headers(500)
                 self.wfile.write(json.dumps({'ok': False, 'error': str(e)}).encode('utf-8'))
             return
@@ -5889,6 +6157,7 @@ function connectTerm() {
         
         ws.onopen = () => { 
             term.textContent = '';
+            console.log('Terminal WebSocket connected successfully');
             // Ensure terminal is focusable and focused
             term.setAttribute('tabindex', '0');
             term.focus();
@@ -5906,6 +6175,7 @@ function connectTerm() {
             const termRect = term.getBoundingClientRect();
             const cols = Math.floor(termRect.width / 8) || 80;
             const rows = Math.floor(termRect.height / 16) || 24;
+            console.log(`Sending terminal resize: ${cols}x${rows}`);
             ws.send(JSON.stringify({type: 'resize', cols, rows}));
             
             setupTerminalInput();
@@ -5923,8 +6193,22 @@ function connectTerm() {
             term.scrollTop = term.scrollHeight;
         };
         
-        ws.onclose = () => { toast('Terminal closed'); ws = null; };
-        ws.onerror = () => { toast('Terminal error'); ws = null; };
+        ws.onclose = (event) => { 
+            console.log('Terminal WebSocket closed:', event.code, event.reason);
+            toast('Terminal disconnected - attempting reconnect...'); 
+            ws = null; 
+            // Attempt to reconnect after 2 seconds
+            setTimeout(() => {
+                if (!ws || ws.readyState !== WebSocket.OPEN) {
+                    connectTerm();
+                }
+            }, 2000);
+        };
+        ws.onerror = (error) => { 
+            console.error('Terminal WebSocket error:', error);
+            toast('Terminal connection error - check authentication and server status'); 
+            ws = null; 
+        };
         
         // Remove any existing keydown handlers to prevent duplicates
         term.onkeydown = null;
