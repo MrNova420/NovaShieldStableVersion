@@ -1767,15 +1767,20 @@ def spawn_pty(shell=None, cols=120, rows=32):
             if shell is None or not shell:
                 shell = os.environ.get('SHELL','')
             if not shell:
-                for cand in ('/data/data/com.termux/files/usr/bin/bash','/bin/bash','/system/bin/sh','/bin/sh'):
+                # Improved shell resolution with Termux bash preference
+                for cand in ('/data/data/com.termux/files/usr/bin/bash','/bin/bash','/bin/zsh','/system/bin/sh','/bin/sh'):
                     if os.path.exists(cand): shell=cand; break
             os.execv(shell, [shell, '-l'])
         except Exception as e:
             os.write(1, f'Failed to start shell: {e}\n'.encode())
             os._exit(1)
     # Parent
+    # Ensure proper window size is set
     winsz = struct.pack("HHHH", rows, cols, 0, 0)
-    fcntl.ioctl(fd, tty.TIOCSWINSZ, winsz)
+    try:
+        fcntl.ioctl(fd, tty.TIOCSWINSZ, winsz)
+    except Exception:
+        pass
     return pid, fd
 
 def mirror_terminal(handler):
@@ -1865,6 +1870,104 @@ def save_jarvis_memory(memory):
     """Save Jarvis conversation memory."""
     write_json(JARVIS_MEM, memory)
 
+def sanitize_username(username):
+    """Sanitize username for safe filename usage."""
+    import re
+    # Keep only alphanumeric, underscore, hyphen, and dots
+    safe_name = re.sub(r'[^a-zA-Z0-9._-]', '_', str(username))
+    # Limit length and ensure it's not empty
+    safe_name = safe_name[:50] if safe_name else 'anonymous'
+    return safe_name
+
+def user_memory_path(username):
+    """Get the path to a user's encrypted memory file."""
+    safe_username = sanitize_username(username)
+    return os.path.join(NS_CTRL, f'memory_{safe_username}.enc')
+
+def load_user_memory(username):
+    """Load per-user encrypted memory, fallback to plaintext if encryption fails."""
+    safe_username = sanitize_username(username)
+    enc_path = user_memory_path(username)
+    json_path = os.path.join(NS_CTRL, f'memory_{safe_username}.json')
+    
+    # Default empty memory structure
+    default_memory = {
+        "conversations": [],
+        "preferences": {"theme": "jarvis-dark", "last_active_tab": "ai"},
+        "last_seen": time.strftime('%Y-%m-%d %H:%M:%S')
+    }
+    
+    # Try to load encrypted file first
+    if os.path.exists(enc_path):
+        try:
+            # Use openssl to decrypt
+            aes_key_path = os.path.join(NS_KEYS, 'aes.key')
+            if os.path.exists(aes_key_path):
+                # Read the key
+                with open(aes_key_path, 'rb') as f:
+                    aes_key = f.read().strip()
+                
+                # Decrypt using openssl
+                cmd = ['openssl', 'aes-256-cbc', '-d', '-salt', '-pbkdf2', '-in', enc_path, '-pass', f'file:{aes_key_path}']
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+                
+                if result.returncode == 0 and result.stdout.strip():
+                    return json.loads(result.stdout)
+        except Exception as e:
+            # Log error but continue with fallback
+            py_alert('WARN', f'Failed to decrypt user memory for {username}: {str(e)}')
+    
+    # Fallback to plaintext JSON file
+    if os.path.exists(json_path):
+        try:
+            return read_json(json_path, default_memory)
+        except Exception:
+            pass
+    
+    # Return default memory if no file exists
+    return default_memory
+
+def save_user_memory(username, data):
+    """Save per-user encrypted memory, fallback to plaintext if encryption fails."""
+    safe_username = sanitize_username(username)
+    enc_path = user_memory_path(username)
+    json_path = os.path.join(NS_CTRL, f'memory_{safe_username}.json')
+    
+    # Ensure data has required structure
+    if not isinstance(data, dict):
+        data = {"conversations": [], "preferences": {}, "last_seen": time.strftime('%Y-%m-%d %H:%M:%S')}
+    
+    # Ensure directory exists
+    Path(NS_CTRL).mkdir(parents=True, exist_ok=True)
+    
+    # Try to encrypt and save
+    aes_key_path = os.path.join(NS_KEYS, 'aes.key')
+    if os.path.exists(aes_key_path):
+        try:
+            # Convert data to JSON
+            json_data = json.dumps(data)
+            
+            # Encrypt using openssl
+            cmd = ['openssl', 'aes-256-cbc', '-salt', '-pbkdf2', '-out', enc_path, '-pass', f'file:{aes_key_path}']
+            result = subprocess.run(cmd, input=json_data, text=True, capture_output=True, timeout=10)
+            
+            if result.returncode == 0:
+                # Successfully encrypted, remove any old plaintext file
+                if os.path.exists(json_path):
+                    try:
+                        os.remove(json_path)
+                    except Exception:
+                        pass
+                return
+        except Exception as e:
+            py_alert('WARN', f'Failed to encrypt user memory for {username}: {str(e)}')
+    
+    # Fallback to plaintext JSON
+    try:
+        write_json(json_path, data)
+    except Exception as e:
+        py_alert('ERROR', f'Failed to save user memory for {username}: {str(e)}')
+
 def get_jarvis_personality():
     """Get the configured Jarvis personality type."""
     personality = cfg_get('jarvis.personality', 'helpful').lower()
@@ -1880,16 +1983,8 @@ def ai_reply(prompt, username, user_ip):
     prompt_low = prompt.lower()
     now = time.strftime('%Y-%m-%d %H:%M:%S')
     
-    # Load per-user memory
-    memory = load_jarvis_memory()
-    if username not in memory:
-        memory[username] = {
-            "conversations": [],
-            "preferences": {"theme": "jarvis-dark", "last_active_tab": "ai"},
-            "last_seen": now
-        }
-    
-    user_memory = memory[username]
+    # Load per-user memory using new encrypted system
+    user_memory = load_user_memory(username)
     user_memory["last_seen"] = now
     
     # Status data collection
@@ -1919,7 +2014,7 @@ def ai_reply(prompt, username, user_ip):
     if len(user_memory["conversations"]) > memory_size:
         user_memory["conversations"] = user_memory["conversations"][-memory_size:]
     
-    save_jarvis_memory(memory)
+    save_user_memory(username, user_memory)
     
     # Expanded intents processing
     # Status intent
@@ -2569,7 +2664,8 @@ class Handler(SimpleHTTPRequestHandler):
                 'projects_count': len([x for x in os.listdir(os.path.join(NS_HOME,'projects')) if not x.startswith('.')]) if os.path.exists(os.path.join(NS_HOME,'projects')) else 0,
                 'modules_count': len([x for x in os.listdir(os.path.join(NS_HOME,'modules')) if not x.startswith('.')]) if os.path.exists(os.path.join(NS_HOME,'modules')) else 0,
                 'version': read_text(os.path.join(NS_HOME,'version.txt'),'unknown'),
-                'csrf': sess.get('csrf','') if auth_enabled() else 'public'
+                'csrf': sess.get('csrf','') if auth_enabled() else 'public',
+                'voice_enabled': cfg_get('jarvis.voice_enabled', False)
             }
             self._set_headers(200); self.wfile.write(json.dumps(data).encode('utf-8')); return
 
@@ -3038,13 +3134,19 @@ class Handler(SimpleHTTPRequestHandler):
             
             try:
                 reply = ai_reply(prompt, username, user_ip)
+                voice_enabled = cfg_get('jarvis.voice_enabled', False)
+                
                 # Log to chat.log with username
                 try: 
                     open(CHATLOG,'a',encoding='utf-8').write(f'{time.strftime("%Y-%m-%d %H:%M:%S")} User:{username} IP:{user_ip} Q:{prompt} A:{reply}\n')
                 except Exception: 
                     py_alert('WARN', f'Failed to write chat log for {username}@{user_ip}')
                     
-                self._set_headers(200); self.wfile.write(json.dumps({'ok':True,'reply':reply}).encode('utf-8')); return
+                response_data = {'ok': True, 'reply': reply}
+                if voice_enabled:
+                    response_data['speak'] = True
+                    
+                self._set_headers(200); self.wfile.write(json.dumps(response_data).encode('utf-8')); return
             except Exception as e:
                 py_alert('ERROR', f'Chat AI error for {user_ip}: {str(e)}')
                 self._set_headers(500); self.wfile.write(json.dumps({'ok':False,'error':'ai error'}).encode('utf-8')); return
@@ -3056,17 +3158,15 @@ class Handler(SimpleHTTPRequestHandler):
             username = sess.get('user', 'public') if sess else 'public'
             
             if self.command == 'GET':
-                # Load user's Jarvis memory
+                # Load user's encrypted memory
                 try:
-                    with open(JARVIS_MEM, 'r') as f:
-                        all_memory = json.load(f)
-                    user_memory = all_memory.get(username, {})
+                    user_memory = load_user_memory(username)
                     self._set_headers(200)
                     self.wfile.write(json.dumps({
                         'ok': True,
                         'memory': user_memory.get('memory', {}),
                         'preferences': user_memory.get('preferences', {}),
-                        'history': user_memory.get('history', [])
+                        'history': user_memory.get('conversations', [])  # Use 'conversations' as history
                     }).encode('utf-8'))
                 except Exception:
                     self._set_headers(200)
@@ -3079,32 +3179,28 @@ class Handler(SimpleHTTPRequestHandler):
                 return
             
             if self.command == 'POST':
-                # Save user's Jarvis memory
+                # Save user's encrypted memory
                 try:
                     data = json.loads(body or '{}')
                     
-                    # Load existing memory file or create new
-                    try:
-                        with open(JARVIS_MEM, 'r') as f:
-                            all_memory = json.load(f)
-                    except Exception:
-                        all_memory = {}
+                    # Load existing memory or start with default
+                    user_memory = load_user_memory(username)
                     
-                    # Update user's memory
-                    all_memory[username] = {
-                        'memory': data.get('memory', {}),
-                        'preferences': data.get('preferences', {}),
-                        'history': data.get('history', []),
-                        'last_updated': time.time()
-                    }
+                    # Update user's memory with new data
+                    user_memory['memory'] = data.get('memory', {})
+                    user_memory['preferences'] = data.get('preferences', {})
+                    # Use 'conversations' instead of 'history' for consistency with ai_reply
+                    user_memory['conversations'] = data.get('history', [])
+                    user_memory['last_updated'] = time.time()
+                    user_memory['last_seen'] = time.strftime('%Y-%m-%d %H:%M:%S')
                     
-                    # Save updated memory
-                    with open(JARVIS_MEM, 'w') as f:
-                        json.dump(all_memory, f, indent=2)
+                    # Save encrypted memory
+                    save_user_memory(username, user_memory)
                     
                     self._set_headers(200)
                     self.wfile.write(json.dumps({'ok': True}).encode('utf-8'))
                 except Exception as e:
+                    py_alert('ERROR', f'Failed to save memory for {username}: {str(e)}')
                     self._set_headers(500)
                     self.wfile.write(json.dumps({'ok': False, 'error': str(e)}).encode('utf-8'))
                 return
@@ -3614,7 +3710,14 @@ write_dashboard(){
       <div class="panel">
         <h3>Web Terminal</h3>
         <p class="panel-description">Interactive command-line terminal access through your web browser. Provides full shell access with real-time input/output, command history, and proper keyboard handling. Automatically connects when you switch to this tab.</p>
-        <div id="term" tabindex="0"></div>
+        <div class="terminal-controls">
+          <button id="terminal-fullscreen" type="button" title="Toggle fullscreen mode">🔲 Fullscreen</button>
+          <button id="terminal-reconnect" type="button" title="Reconnect to terminal">🔄 Reconnect</button>
+        </div>
+        <div class="terminal-wrapper">
+          <div id="term" tabindex="0"></div>
+          <input id="terminal-input" type="text" style="position: absolute; left: -9999px; opacity: 0;" autocomplete="off" />
+        </div>
         <div class="term-hint">Type commands here. Press Ctrl-C to interrupt running processes. Terminal has idle timeout for security.</div>
       </div>
     </section>
@@ -3860,14 +3963,22 @@ body.login-active header, body.login-active nav, body.login-active main{
 
 #chatlog .user-msg {
     margin-bottom: 8px;
-    color: #cfe6ff;
+    color: #e9b3ff;
+    font-weight: 500;
+    padding: 6px 10px;
+    background: rgba(233, 179, 255, 0.1);
+    border-radius: 12px;
+    border-left: 3px solid #e9b3ff;
 }
 
 #chatlog .jarvis-msg {
     margin-bottom: 12px;
-    color: #00ffe1;
+    color: #7fff00;
     position: relative;
-    padding-left: 22px;
+    padding: 6px 10px 6px 22px;
+    background: rgba(127, 255, 0, 0.1);
+    border-radius: 12px;
+    border-left: 3px solid #7fff00;
 }
 
 #chatlog .jarvis-msg::before {
@@ -3890,6 +4001,50 @@ body.login-active header, body.login-active nav, body.login-active main{
 }
 
 /* Terminal improvements */
+.terminal-controls {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 12px;
+    align-items: center;
+}
+
+.terminal-controls button {
+    padding: 6px 12px;
+    border-radius: 6px;
+    border: 1px solid #143055;
+    background: #0e1726;
+    color: #d7e3ff;
+    cursor: pointer;
+    font-size: 12px;
+    transition: all 0.3s ease;
+}
+
+.terminal-controls button:hover {
+    background: #173764;
+    border-color: #1e5a96;
+}
+
+.terminal-wrapper {
+    position: relative;
+}
+
+.terminal-wrapper.fullscreen {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 9999;
+    background: #000;
+    padding: 20px;
+}
+
+.terminal-wrapper.fullscreen #term {
+    height: calc(100vh - 80px);
+    width: 100%;
+    max-width: none;
+}
+
 #term {
     font-family: 'Courier New', monospace;
     white-space: pre-wrap;
@@ -3901,6 +4056,11 @@ body.login-active header, body.login-active nav, body.login-active main{
     border: 1px solid rgba(0, 208, 255, 0.4);
     border-radius: 8px;
     box-shadow: inset 0 0 20px rgba(0, 0, 0, 0.5);
+    overflow: auto;
+    outline: none;
+    resize: vertical;
+    min-height: 200px;
+}
     overflow-y: auto;
 }
 
@@ -4158,6 +4318,51 @@ CSS
   write_file "${NS_WWW}/app.js" 644 <<'JS'
 const $ = sel => document.querySelector(sel);
 const $$ = sel => Array.from(document.querySelectorAll(sel));
+
+// Text-to-Speech functionality
+let voiceEnabled = false;
+let speechSynthesis = null;
+
+// Initialize text-to-speech
+function initializeTTS() {
+    if ('speechSynthesis' in window) {
+        speechSynthesis = window.speechSynthesis;
+        // Test if voices are available
+        const voices = speechSynthesis.getVoices();
+        return true;
+    }
+    return false;
+}
+
+// Speak text if voice is enabled
+function speak(text) {
+    if (!voiceEnabled || !speechSynthesis || !text) return;
+    
+    try {
+        // Cancel any ongoing speech
+        speechSynthesis.cancel();
+        
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.rate = 0.9;
+        utterance.pitch = 1.0;
+        utterance.volume = 0.8;
+        
+        // Try to select a voice (prefer female for Jarvis)
+        const voices = speechSynthesis.getVoices();
+        const femaleVoice = voices.find(voice => 
+            voice.name.toLowerCase().includes('female') || 
+            voice.name.toLowerCase().includes('zira') ||
+            voice.name.toLowerCase().includes('hazel')
+        );
+        if (femaleVoice) {
+            utterance.voice = femaleVoice;
+        }
+        
+        speechSynthesis.speak(utterance);
+    } catch (error) {
+        console.warn('Text-to-speech failed:', error);
+    }
+}
 
 // Tab lazy loading and polling management
 let activeTab = 'ai';
@@ -4552,10 +4757,24 @@ if (btnSave) btnSave.onclick=async()=>{
 // Jarvis chat
 $('#send').onclick=async()=>{
   const prompt = $('#prompt').value.trim(); if(!prompt) return;
-  const log = $('#chatlog'); const you = document.createElement('div'); you.textContent='You: '+prompt; log.appendChild(you);
+  const log = $('#chatlog'); 
+  const you = document.createElement('div'); 
+  you.className = 'user-msg';
+  you.textContent='You: '+prompt; 
+  log.appendChild(you);
   try{
     const j = await (await api('/api/chat',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF':CSRF},body:JSON.stringify({prompt})})).json();
-    const ai = document.createElement('div'); ai.textContent='Jarvis: '+j.reply; log.appendChild(ai); $('#prompt').value=''; log.scrollTop=log.scrollHeight;
+    const ai = document.createElement('div'); 
+    ai.className = 'jarvis-msg';
+    ai.textContent='Jarvis: '+j.reply; 
+    log.appendChild(ai); 
+    $('#prompt').value=''; 
+    log.scrollTop=log.scrollHeight;
+    
+    // Speak the reply if voice is enabled and speak flag is set
+    if (j.speak && voiceEnabled) {
+      speak(j.reply);
+    }
   }catch(e){ console.error(e); }
 };
 
@@ -4572,6 +4791,7 @@ function connectTerm() {
         const proto = location.protocol === 'https:' ? 'wss' : 'ws';
         ws = new WebSocket(`${proto}://${location.host}/ws/term`);
         const term = $('#term');
+        const termInput = $('#terminal-input');
         term.textContent = '';
         ws.binaryType = 'arraybuffer';
         
@@ -4579,6 +4799,7 @@ function connectTerm() {
             // Ensure terminal is focusable and focused
             term.setAttribute('tabindex', '0');
             term.focus(); 
+            setupTerminalInput();
             toast('Terminal connected'); 
         };
         
@@ -4638,6 +4859,87 @@ function connectTerm() {
         ws = null;
     }
 }
+
+function setupTerminalInput() {
+    const term = $('#term');
+    const termInput = $('#terminal-input');
+    
+    // Mobile keyboard support
+    term.onclick = () => {
+        term.focus();
+        // On mobile, also focus the hidden input to trigger virtual keyboard
+        if (isMobile()) {
+            termInput.focus();
+            // Quickly refocus back to terminal to maintain visual focus
+            setTimeout(() => term.focus(), 50);
+        }
+    };
+    
+    // Mirror hidden input to WebSocket
+    termInput.oninput = () => {
+        if (ws && ws.readyState === WebSocket.OPEN && termInput.value) {
+            ws.send(new TextEncoder().encode(termInput.value));
+            termInput.value = '';
+        }
+    };
+    
+    // Handle special keys from hidden input
+    termInput.onkeydown = (e) => {
+        if (!ws || ws.readyState !== WebSocket.OPEN) return;
+        
+        let out = '';
+        if (e.key === 'Enter') out = '\r';
+        else if (e.key === 'Backspace') out = '\x7f';
+        else if (e.key === 'Tab') { out = '\t'; e.preventDefault(); }
+        
+        if (out) {
+            ws.send(new TextEncoder().encode(out));
+            e.preventDefault();
+        }
+    };
+}
+
+function isMobile() {
+    return /Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) ||
+           (window.innerWidth <= 768);
+}
+
+function toggleTerminalFullscreen() {
+    const wrapper = $('.terminal-wrapper');
+    const btn = $('#terminal-fullscreen');
+    
+    if (wrapper.classList.contains('fullscreen')) {
+        wrapper.classList.remove('fullscreen');
+        btn.textContent = '🔲 Fullscreen';
+        document.removeEventListener('keydown', handleFullscreenEscape);
+    } else {
+        wrapper.classList.add('fullscreen');
+        btn.textContent = '❌ Exit Fullscreen';
+        document.addEventListener('keydown', handleFullscreenEscape);
+        // Refocus terminal in fullscreen
+        setTimeout(() => $('#term').focus(), 100);
+    }
+}
+
+function handleFullscreenEscape(e) {
+    if (e.key === 'Escape') {
+        const wrapper = $('.terminal-wrapper');
+        if (wrapper.classList.contains('fullscreen')) {
+            toggleTerminalFullscreen();
+            e.preventDefault();
+        }
+    }
+}
+
+// Terminal control event listeners
+$('#terminal-fullscreen')?.addEventListener('click', toggleTerminalFullscreen);
+$('#terminal-reconnect')?.addEventListener('click', () => {
+    if (ws) {
+        ws.close();
+        ws = null;
+    }
+    setTimeout(connectTerm, 500);
+});
 
 function showLogin() {
     $('#login').style.display = 'flex';
@@ -5080,6 +5382,30 @@ function initEnhancedAI() {
     loadJarvisMemory();
     updateAIStats();
     bindAIEvents();
+    initializeVoice();
+}
+
+async function initializeVoice() {
+    try {
+        // Load voice_enabled setting from status API
+        const response = await fetch('/api/status');
+        if (response.ok) {
+            const data = await response.json();
+            voiceEnabled = data.voice_enabled || false;
+        }
+        
+        // Initialize TTS if available and enabled
+        if (voiceEnabled) {
+            const ttsAvailable = initializeTTS();
+            if (!ttsAvailable) {
+                console.warn('Text-to-speech not available in this browser');
+                voiceEnabled = false;
+            }
+        }
+    } catch (error) {
+        console.warn('Failed to initialize voice:', error);
+        voiceEnabled = false;
+    }
 }
 
 function bindAIEvents() {
