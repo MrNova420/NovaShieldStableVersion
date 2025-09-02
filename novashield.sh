@@ -378,6 +378,8 @@ security:
   tls_enabled: false
   tls_cert: "keys/tls.crt"
   tls_key: "keys/tls.key"
+  session_ttl_minutes: 120  # Session timeout in minutes (default: 2 hours)
+  force_login_on_reload: false  # Force login on every page reload
 
 terminal:
   enabled: true
@@ -1437,6 +1439,184 @@ def py_alert(level, msg):
     except Exception:
         pass
 
+def security_log(msg):
+    """Enhanced security logging for all security-related events"""
+    try:
+        security_path = os.path.join(NS_LOGS, 'security.log')
+        Path(os.path.dirname(security_path)).mkdir(parents=True, exist_ok=True)
+        timestamp = time.strftime('%Y-%m-%d %H:%M:%S')
+        with open(security_path, 'a', encoding='utf-8') as f:
+            f.write(f"{timestamp} [SECURITY] {msg}\n")
+    except Exception:
+        pass
+
+def security_verification_required(command_parts, user):
+    """Check if a command requires additional security verification"""
+    if not command_parts:
+        return False, "N/A"
+    
+    cmd = command_parts[0].lower()
+    command_string = ' '.join(command_parts).lower()
+    
+    # Commands that always require verification
+    high_risk_commands = {
+        'rm', 'rmdir', 'del', 'erase', 'format', 'mkfs', 'fdisk', 'parted',
+        'dd', 'shred', 'wipe', 'shutdown', 'reboot', 'halt', 'poweroff'
+    }
+    
+    if cmd in high_risk_commands:
+        return True, f"High-risk command '{cmd}' requires verification"
+    
+    # Check for dangerous argument combinations
+    dangerous_patterns = [
+        ('rm', '-rf'),
+        ('systemctl', 'stop'),
+        ('systemctl', 'disable'),
+        ('iptables', '-F'),
+        ('ufw', 'disable'),
+        ('service', 'stop')
+    ]
+    
+    for base_cmd, dangerous_arg in dangerous_patterns:
+        if cmd == base_cmd and dangerous_arg in command_string:
+            return True, f"Dangerous operation '{base_cmd} {dangerous_arg}' requires verification"
+    
+    # Check for system-critical file access
+    critical_paths = ['/etc/passwd', '/etc/shadow', '/etc/sudoers', '/boot/', '/sys/', '/proc/']
+    for path in critical_paths:
+        if path in command_string:
+            return True, f"Access to critical path '{path}' requires verification"
+    
+    return False, "No verification required"
+
+def perform_security_verification(user, command, verification_method='session'):
+    """Perform additional security verification for dangerous commands"""
+    verification_level = cfg_get('security.verification_level', 'standard')
+    
+    if verification_level == 'disabled':
+        return True, "Verification disabled in configuration"
+    
+    # For now, we'll implement session-based verification
+    # In a real implementation, you might want additional auth methods
+    session_file = os.path.join(NS_CTRL, f'verification_{sanitize_username(user)}.json')
+    
+    try:
+        # Check if user has recent verification
+        if os.path.exists(session_file):
+            verification_data = read_json(session_file, {})
+            last_verification = verification_data.get('last_verification', 0)
+            verification_window = _coerce_int(cfg_get('security.verification_window_minutes', 5), 5) * 60
+            
+            if time.time() - last_verification < verification_window:
+                return True, "Recent verification valid"
+        
+        # If strict mode, always require fresh verification
+        if verification_level == 'strict':
+            return False, "Strict mode requires fresh verification for each dangerous command"
+        
+        # For standard mode, create a verification session
+        verification_data = {
+            'user': user,
+            'last_verification': time.time(),
+            'command': command,
+            'timestamp': time.strftime('%Y-%m-%d %H:%M:%S')
+        }
+        write_json(session_file, verification_data)
+        
+        security_log(f"SECURITY_VERIFICATION_GRANTED user={user} command={command} method={verification_method}")
+        return True, "Verification granted"
+        
+    except Exception as e:
+        security_log(f"SECURITY_VERIFICATION_ERROR user={user} command={command} error={str(e)}")
+        return False, f"Verification failed: {str(e)}"
+
+def command_security_check(command_parts, user, ip):
+    """Enhanced security validation for command execution with multi-level verification"""
+    if not command_parts:
+        return False, "Empty command not allowed"
+    
+    cmd = command_parts[0].lower()
+    command_string = ' '.join(command_parts).lower()
+    
+    # Enhanced whitelist of allowed commands with categories
+    system_tools = {
+        'nmap', 'ping', 'curl', 'dig', 'host', 'nslookup', 'traceroute', 'ss', 'netstat',
+        'telnet', 'nc', 'netcat', 'arp', 'route', 'ifconfig', 'ip'
+    }
+    
+    monitoring_tools = {
+        'ps', 'top', 'htop', 'free', 'df', 'du', 'uname', 'whoami', 'id', 'groups',
+        'uptime', 'w', 'who', 'lsof', 'vmstat', 'iostat', 'sar'
+    }
+    
+    file_tools = {
+        'ls', 'cat', 'head', 'tail', 'grep', 'awk', 'sed', 'sort', 'uniq', 'wc',
+        'find', 'locate', 'which', 'whereis', 'pwd', 'date', 'file', 'stat'
+    }
+    
+    system_info = {
+        'systemctl', 'service', 'journalctl', 'dmesg', 'lsmod', 'lspci', 'lsusb',
+        'lscpu', 'lsmem', 'lsblk', 'mount', 'fdisk'
+    }
+    
+    allowed_commands = system_tools | monitoring_tools | file_tools | system_info
+    
+    if cmd not in allowed_commands:
+        security_log(f"BLOCKED_COMMAND user={user} ip={ip} command={cmd} reason=not_whitelisted")
+        return False, f"Command '{cmd}' not in security whitelist"
+    
+    # Enhanced dangerous arguments detection
+    dangerous_args = [
+        '--delete', '--wipe', '--format', '--remove', '-rf', '--force', '--yes',
+        '--destroy', '--erase', '--purge', '--clean', '--reset', '--factory',
+        '--zero', '--shred', '--overwrite', 'rm -rf', 'del /f', 'format c:'
+    ]
+    
+    for arg in dangerous_args:
+        if arg in command_string:
+            security_log(f"DANGEROUS_ARG_BLOCKED user={user} ip={ip} command={command_string} blocked_arg={arg}")
+            return False, f"Dangerous argument '{arg}' requires additional verification"
+    
+    # Command-specific security checks
+    if cmd == 'nmap':
+        # Check for potentially dangerous nmap scans
+        dangerous_nmap = ['--script', '-sS', '-sU', '-O', '--scanflags', '--spoof-mac']
+        if any(flag in command_string for flag in dangerous_nmap):
+            security_log(f"NMAP_ADVANCED_SCAN user={user} ip={ip} command={command_string}")
+            # Allow but require verification for advanced scans
+            verification_level = cfg_get('security.command_verification', 'standard')
+            if verification_level == 'strict':
+                return False, f"Advanced nmap scan requires verification in strict mode"
+    
+    elif cmd == 'systemctl':
+        # Check for dangerous systemctl operations
+        dangerous_systemctl = ['stop', 'disable', 'mask', 'poweroff', 'reboot', 'halt']
+        if any(op in command_string for op in dangerous_systemctl):
+            security_log(f"SYSTEMCTL_DANGEROUS user={user} ip={ip} command={command_string}")
+            verification_level = cfg_get('security.command_verification', 'standard')
+            if verification_level == 'strict':
+                return False, f"Systemctl operation '{cmd}' requires verification in strict mode"
+    
+    elif cmd in ['fdisk', 'parted', 'mkfs']:
+        # Disk operations always require verification
+        security_log(f"DISK_OPERATION_BLOCKED user={user} ip={ip} command={command_string}")
+        return False, f"Disk operation '{cmd}' requires administrator verification"
+    
+    # Check for command chaining attempts
+    chain_indicators = [';', '&&', '||', '|', '>', '>>', '<', '`', '$(' ]
+    for indicator in chain_indicators:
+        if indicator in command_string:
+            security_log(f"COMMAND_CHAINING_BLOCKED user={user} ip={ip} command={command_string} indicator={indicator}")
+            return False, f"Command chaining not allowed for security reasons"
+    
+    # Path traversal protection
+    if '..' in command_string or '/etc/passwd' in command_string or '/etc/shadow' in command_string:
+        security_log(f"PATH_TRAVERSAL_BLOCKED user={user} ip={ip} command={command_string}")
+        return False, "Path traversal attempts not allowed"
+    
+    security_log(f"COMMAND_APPROVED user={user} ip={ip} command={command_string}")
+    return True, "Command approved by security validation"
+
 def read_text(path, default=''):
     try: return open(path,'r',encoding='utf-8').read()
     except Exception: return default
@@ -1602,7 +1782,10 @@ def new_session(username):
     token = hashlib.sha256(f'{username}:{time.time()}:{os.urandom(8)}'.encode()).hexdigest()
     csrf  = hashlib.sha256(f'csrf:{token}:{os.urandom(8)}'.encode()).hexdigest()
     db = users_db()
-    db[token]={'user':username,'ts':int(time.time()),'csrf':csrf}
+    # Add session TTL support
+    session_ttl_minutes = _coerce_int(cfg_get('security.session_ttl_minutes', 120), 120)
+    expires = int(time.time()) + (session_ttl_minutes * 60)
+    db[token]={'user':username,'ts':int(time.time()),'csrf':csrf,'expires':expires}
     set_users_db(db)
     return token, csrf
 
@@ -1614,7 +1797,18 @@ def get_session(handler):
     if 'NSSESS' not in C: return None
     token = C['NSSESS'].value
     db = users_db()
-    return db.get(token)
+    session = db.get(token)
+    if not session:
+        return None
+    # Check session expiry
+    current_time = int(time.time())
+    session_expires = session.get('expires', 0)
+    if session_expires > 0 and current_time > session_expires:
+        # Session expired, remove it
+        del db[token]
+        set_users_db(db)
+        return None
+    return session
 
 def require_auth(handler):
     client_ip = handler.client_address[0]
@@ -1759,18 +1953,6 @@ def last_lines(path, n=100):
 # Old ai_reply function removed - using enhanced version below
 
 # ------------------------------- WebSocket PTY -------------------------------
-def ws_handshake(handler):
-    key = handler.headers.get('Sec-WebSocket-Key')
-    if not key: return False
-    accept = base64.b64encode(hashlib.sha1((key+GUID).encode()).digest()).decode()
-    headers = {
-        'Upgrade': 'websocket',
-        'Connection': 'Upgrade',
-        'Sec-WebSocket-Accept': accept,
-        'Sec-WebSocket-Protocol': 'chat'
-    }
-    handler._set_headers(101, 'application/octet-stream', headers)
-    return True
 
 def ws_recv(sock):
     hdr = sock.recv(2)
@@ -1806,27 +1988,78 @@ def ws_send(sock, data, opcode=1):
     sock.send(bytes(hdr)+data)
 
 def spawn_pty(shell=None, cols=120, rows=32):
-    pid, fd = pty.fork()
-    if pid==0:
-    # Child
-        try:
-            if shell is None or not shell:
-                shell = os.environ.get('SHELL','')
-            if not shell:
-                # Improved shell resolution with Termux bash preference
-                for cand in ('/data/data/com.termux/files/usr/bin/bash','/bin/bash','/bin/zsh','/system/bin/sh','/bin/sh'):
-                    if os.path.exists(cand): shell=cand; break
-            os.execv(shell, [shell, '-l'])
-        except Exception as e:
-            os.write(1, f'Failed to start shell: {e}\n'.encode())
-            os._exit(1)
-    # Parent
-    # Ensure proper window size is set
-    winsz = struct.pack("HHHH", rows, cols, 0, 0)
+    """Enhanced PTY spawning with better cross-platform support and error handling"""
     try:
+        pid, fd = pty.fork()
+    except Exception as e:
+        raise Exception(f"PTY fork failed: {str(e)}")
+    
+    if pid == 0:
+        # Child process
+        try:
+            # Set environment variables for better terminal behavior
+            os.environ['TERM'] = 'xterm-256color'
+            os.environ['COLUMNS'] = str(cols)
+            os.environ['LINES'] = str(rows)
+            
+            if shell is None or not shell:
+                shell = os.environ.get('SHELL', '')
+            
+            if not shell or not os.path.exists(shell):
+                # Enhanced shell detection with better Termux and system support
+                shell_candidates = [
+                    '/data/data/com.termux/files/usr/bin/bash',  # Termux bash
+                    '/data/data/com.termux/files/usr/bin/sh',   # Termux sh
+                    '/bin/bash',                                # Standard Linux bash
+                    '/usr/bin/bash',                            # Alternative bash location
+                    '/bin/zsh',                                 # ZSH
+                    '/usr/bin/zsh',                            # Alternative ZSH
+                    '/bin/sh',                                  # POSIX shell
+                    '/system/bin/sh',                          # Android system shell
+                    '/usr/bin/sh',                             # Alternative sh
+                ]
+                
+                shell = None
+                for candidate in shell_candidates:
+                    if os.path.exists(candidate) and os.access(candidate, os.X_OK):
+                        shell = candidate
+                        break
+                
+                if not shell:
+                    raise Exception("No suitable shell found")
+            
+            # Verify shell is executable
+            if not os.access(shell, os.X_OK):
+                raise Exception(f"Shell {shell} is not executable")
+            
+            # Execute shell with login flag for proper environment setup
+            os.execv(shell, [shell, '-l'])
+            
+        except Exception as e:
+            error_msg = f'Failed to start shell: {str(e)}\n'
+            try:
+                os.write(1, error_msg.encode())
+            except: pass
+            os._exit(1)
+    
+    # Parent process
+    try:
+        # Set proper window size with error handling
+        winsz = struct.pack("HHHH", rows, cols, 0, 0)
         fcntl.ioctl(fd, tty.TIOCSWINSZ, winsz)
+    except Exception as e:
+        # Log but don't fail - window size setting is not critical
+        try:
+            security_log(f"PTY_WINSZ_ERROR pid={pid} error={str(e)}")
+        except: pass
+    
+    # Set non-blocking mode for better responsiveness
+    try:
+        fcntl.fcntl(fd, fcntl.F_SETFL, os.O_NONBLOCK)
     except Exception:
+        # Not critical if this fails
         pass
+    
     return pid, fd
 
 def mirror_terminal(handler):
@@ -1841,84 +2074,197 @@ def mirror_terminal(handler):
     idle_timeout = _coerce_int(cfg_get('terminal.idle_timeout_sec', 900), 900)
     allow_write = _coerce_bool(cfg_get('terminal.allow_write', 'true'), True)
     
-    # Create a real PTY
-    pid, fd = spawn_pty(shell, cols, rows)
-    audit(f'TERM START user={user} pid={pid} ip={handler.client_address[0]}')
-    last_activity = time.time()
+    # Enhanced terminal security logging
+    security_log(f"TERMINAL_ACCESS user={user} ip={handler.client_address[0]} cols={cols} rows={rows}")
     
-    # Set terminal to raw mode
+    # Check if terminal access should be restricted for dangerous operations
+    terminal_security_level = cfg_get('security.terminal_verification', 'standard')
+    if terminal_security_level == 'strict':
+        # Additional verification could be added here
+        pass
+    
+    # Send initial connection confirmation
+    try:
+        ws_send(client, f"\r\n🔗 NovaShield Terminal - Connecting as {user}...\r\n")
+    except Exception:
+        security_log(f"TERMINAL_WEBSOCKET_ERROR user={user} stage=initial_send")
+        return
+    
+    # Create a real PTY with enhanced error handling and cross-platform support
+    try:
+        pid, fd = spawn_pty(shell, cols, rows)
+        audit(f'TERM START user={user} pid={pid} ip={handler.client_address[0]}')
+        security_log(f"PTY_SPAWNED user={user} pid={pid} shell={shell}")
+        
+        # Send success notification
+        ws_send(client, f"\r\n✅ Terminal connected (PID: {pid})\r\n")
+        
+    except Exception as e:
+        error_msg = f"Failed to spawn PTY: {str(e)}"
+        security_log(f"PTY_ERROR user={user} error={error_msg}")
+        try:
+            ws_send(client, f"\r\n❌ Terminal Error: {error_msg}\r\n")
+            ws_send(client, f"\r\nTrying alternative shell configuration...\r\n")
+            
+            # Try fallback shell options
+            fallback_shells = ['/bin/bash', '/bin/sh', '/system/bin/sh']
+            for fallback_shell in fallback_shells:
+                if os.path.exists(fallback_shell):
+                    try:
+                        pid, fd = spawn_pty(fallback_shell, cols, rows)
+                        security_log(f"PTY_FALLBACK_SUCCESS user={user} pid={pid} shell={fallback_shell}")
+                        ws_send(client, f"\r\n✅ Terminal connected with fallback shell: {fallback_shell} (PID: {pid})\r\n")
+                        break
+                    except Exception:
+                        continue
+            else:
+                ws_send(client, f"\r\n❌ All terminal options failed. Please contact administrator.\r\n")
+                return
+        except Exception:
+            security_log(f"TERMINAL_CRITICAL_ERROR user={user} cannot_send_websocket_message")
+            return
+        
+    last_activity = time.time()
+    connection_stable = True
+    
+    # Set terminal to raw mode with enhanced error handling
     old_attr = None
     try:
         old_attr = termios.tcgetattr(fd)
         tty.setraw(fd, termios.TCSANOW)
-    except:
+        security_log(f"TERMINAL_RAW_MODE user={user} pid={pid}")
+    except Exception as e:
+        security_log(f"TERMINAL_RAW_ERROR user={user} pid={pid} error={str(e)}")
+        # Continue without raw mode if it fails
         pass
     
-    # Reader thread to send terminal output to websocket
+    # Enhanced reader thread with better error handling
     def reader():
+        nonlocal connection_stable
         try:
-            while True:
-                r, _, _ = select.select([fd], [], [], 0.1)
-                if fd in r:
-                    try:
-                        data = os.read(fd, 8192)
-                        if not data: break
-                        ws_send(client, data, opcode=2)
-                    except OSError:
-                        break
+            while connection_stable:
+                try:
+                    # Use select with timeout for better responsiveness
+                    r, _, _ = select.select([fd], [], [], 0.1)
+                    if fd in r:
+                        try:
+                            data = os.read(fd, 8192)
+                            if not data: 
+                                break
+                            # Send as binary data for better terminal compatibility
+                            ws_send(client, data, opcode=2)
+                        except OSError as e:
+                            security_log(f"TERMINAL_READ_ERROR user={user} pid={pid} error={str(e)}")
+                            break
+                        except Exception as e:
+                            security_log(f"TERMINAL_SEND_ERROR user={user} pid={pid} error={str(e)}")
+                            connection_stable = False
+                            break
+                except Exception as e:
+                    security_log(f"TERMINAL_SELECT_ERROR user={user} pid={pid} error={str(e)}")
+                    break
         finally:
+            # Cleanup resources
+            connection_stable = False
+            try: 
+                if old_attr:
+                    termios.tcsetattr(fd, termios.TCSANOW, old_attr)
+            except: pass
             try: os.close(fd)
             except: pass
             try: os.kill(pid, signal.SIGTERM)
             except: pass
+            security_log(f"TERMINAL_READER_CLEANUP user={user} pid={pid}")
     
-    t = threading.Thread(target=reader, daemon=True)
-    t.start()
+    reader_thread = threading.Thread(target=reader, daemon=True)
+    reader_thread.start()
     
-    # Process websocket input
+    # Enhanced WebSocket input processing with better error handling
+    # Enhanced WebSocket input processing with better error handling
     try:
-        while True:
-            if time.time() - last_activity > idle_timeout:
-                ws_send(client, '\r\n[Session idle timeout]\r\n')
-                break
-                
-            opcode, data = ws_recv(client)
-            if opcode is None: break
-            last_activity = time.time()
-            
-            if opcode == 8:  # Close frame
-                break
-                
-            if opcode in (1, 2) and allow_write:  # Text/binary frame
-                try:
-                    # Try to parse as JSON for resize frames
-                    if opcode == 1:  # Text frame
-                        try:
-                            frame_text = data.decode('utf-8')
-                            frame_data = json.loads(frame_text)
-                            if frame_data.get('type') == 'resize' and 'cols' in frame_data and 'rows' in frame_data:
-                                # Handle terminal resize
-                                cols = int(frame_data['cols'])
-                                rows = int(frame_data['rows'])
-                                winsz = struct.pack("HHHH", rows, cols, 0, 0)
-                                fcntl.ioctl(fd, tty.TIOCSWINSZ, winsz)
-                                continue  # Don't write JSON to PTY
-                        except (UnicodeDecodeError, json.JSONDecodeError, ValueError):
-                            # Not JSON, treat as regular terminal input
-                            pass
-                    
-                    # Regular terminal input - write to PTY
-                    os.write(fd, data)
-                except Exception:
+        while connection_stable and reader_thread.is_alive():
+            try:
+                if time.time() - last_activity > idle_timeout:
+                    try:
+                        ws_send(client, '\r\n[Session idle timeout - disconnecting]\r\n')
+                    except: pass
                     break
-    except Exception:
-        pass
+                    
+                # Receive WebSocket frame with timeout
+                try:
+                    opcode, data = ws_recv(client)
+                except Exception as e:
+                    security_log(f"TERMINAL_RECV_ERROR user={user} pid={pid} error={str(e)}")
+                    break
+                    
+                if opcode is None: 
+                    security_log(f"TERMINAL_DISCONNECT user={user} pid={pid} reason=opcode_none")
+                    break
+                    
+                last_activity = time.time()
+                
+                if opcode == 8:  # Close frame
+                    security_log(f"TERMINAL_CLOSE_FRAME user={user} pid={pid}")
+                    break
+                    
+                if opcode in (1, 2) and allow_write:  # Text/binary frame
+                    try:
+                        # Handle JSON commands (like resize)
+                        if opcode == 1:  # Text frame
+                            try:
+                                frame_text = data.decode('utf-8', errors='ignore')
+                                if frame_text.startswith('{'):
+                                    frame_data = json.loads(frame_text)
+                                    if frame_data.get('type') == 'resize':
+                                        cols = max(1, min(300, int(frame_data.get('cols', cols))))
+                                        rows = max(1, min(100, int(frame_data.get('rows', rows))))
+                                        winsz = struct.pack("HHHH", rows, cols, 0, 0)
+                                        try:
+                                            fcntl.ioctl(fd, tty.TIOCSWINSZ, winsz)
+                                            security_log(f"TERMINAL_RESIZE user={user} pid={pid} cols={cols} rows={rows}")
+                                        except Exception as e:
+                                            security_log(f"TERMINAL_RESIZE_ERROR user={user} pid={pid} error={str(e)}")
+                                        continue  # Don't write JSON to PTY
+                            except (UnicodeDecodeError, json.JSONDecodeError, ValueError):
+                                # Not JSON, treat as regular terminal input
+                                pass
+                        
+                        # Write input to PTY with error handling
+                        try:
+                            if isinstance(data, str):
+                                data = data.encode('utf-8')
+                            os.write(fd, data)
+                        except Exception as e:
+                            security_log(f"TERMINAL_WRITE_ERROR user={user} pid={pid} error={str(e)}")
+                            break
+                            
+                    except Exception as e:
+                        security_log(f"TERMINAL_FRAME_ERROR user={user} pid={pid} opcode={opcode} error={str(e)}")
+                        break
+                        
+            except Exception as e:
+                security_log(f"TERMINAL_LOOP_ERROR user={user} pid={pid} error={str(e)}")
+                break
+                
+    except Exception as e:
+        security_log(f"TERMINAL_MAIN_ERROR user={user} pid={pid} error={str(e)}")
     finally:
-        try: ws_send(client, '\r\n[Session ended]\r\n')
+        connection_stable = False
+        try: 
+            ws_send(client, '\r\n[Terminal session ended]\r\n')
         except: pass
+        
+        # Wait for reader thread to finish
+        try:
+            reader_thread.join(timeout=2.0)
+        except: pass
+        
+        # Final cleanup
         try: os.kill(pid, signal.SIGTERM)
         except: pass
+        
         audit(f'TERM END user={user} pid={pid} ip={handler.client_address[0]}')
+        security_log(f"TERMINAL_SESSION_END user={user} pid={pid}")
 
 # Add these functions before the Handler class:
 def load_jarvis_memory():
@@ -2065,6 +2411,8 @@ def ai_reply(prompt, username, user_ip):
     memory_size = _coerce_int(cfg_get('jarvis.memory_size', 10), 10)
     user_memory["conversations"].append({
         "timestamp": now,
+        "type": "user",
+        "user": username,
         "prompt": prompt,
         "context": {
             "cpu_load": status['cpu'].get('load1','?'),
@@ -2087,11 +2435,14 @@ def ai_reply(prompt, username, user_ip):
         disk_pct = status['disk'].get('use_pct', '?')
         
         if personality == 'snarky':
-            return f"Systems are running, {username}. CPU: {cpu_load}, Memory: {mem_pct}%, Disk: {disk_pct}%. Anything else you need to micromanage?"
+            reply = f"Systems are running, {username}. CPU: {cpu_load}, Memory: {mem_pct}%, Disk: {disk_pct}%. Anything else you need to micromanage?"
         elif personality == 'professional':
-            return f"System status report: CPU load {cpu_load}, Memory usage {mem_pct}%, Disk usage {disk_pct}%. All systems operational."
+            reply = f"System status report: CPU load {cpu_load}, Memory usage {mem_pct}%, Disk usage {disk_pct}%. All systems operational."
         else:
-            return f"All systems running smoothly, {username}. CPU load: {cpu_load}, Memory: {mem_pct}%, Disk: {disk_pct}%."
+            reply = f"All systems running smoothly, {username}. CPU load: {cpu_load}, Memory: {mem_pct}%, Disk: {disk_pct}%."
+        
+        save_ai_response(username, reply, user_memory, memory_size)
+        return reply
     
     # Backup intent
     elif any(term in prompt_low for term in ['backup', 'create backup']):
@@ -2141,7 +2492,9 @@ def ai_reply(prompt, username, user_ip):
     # Help intent
     elif any(term in prompt_low for term in ['help', 'what can you do', 'commands']):
         tools_count = len(scan_system_tools())
-        return f"I can help with: system status, backups, version info, restart monitors, show IP info, alerts, logs, terminal access, file management, web generation, and {tools_count} system tools. I also remember our conversations and learn from them, {username}! Try asking about 'tools', 'security scan', or 'system info'."
+        reply = f"I can help with: system status, backups, version info, restart monitors, show IP info, alerts, logs, terminal access, file management, web generation, and {tools_count} system tools. I also remember our conversations and learn from them, {username}! Try asking about 'tools', 'security scan', or 'system info'."
+        save_ai_response(username, reply, user_memory, memory_size)
+        return reply
     
     # Tools intent
     elif any(term in prompt_low for term in ['tools', 'scan tools', 'available tools', 'what tools']):
@@ -2151,13 +2504,37 @@ def ai_reply(prompt, username, user_ip):
         return f"I found {len(available)} available tools: {', '.join(available[:10])}{'...' if len(available) > 10 else ''}. Missing: {len(missing)} tools. I can install missing tools or run any available tool for you!"
     
     # Security scan intent
-    elif any(term in prompt_low for term in ['security scan', 'security check', 'vulnerability scan', 'scan security']):
+    elif any(term in prompt_low for term in ['security scan', 'security check', 'vulnerability scan', 'scan security', 'security status', 'security report']):
         try:
+            # Get Jarvis security data
+            security_data = jarvis_security_integration()
+            
+            total_threats = len(security_data['system_threats'])
+            total_violations = len(security_data['access_violations'])
+            total_brute_force = len(security_data['brute_force_detections'])
+            total_intrusions = len(security_data['intrusion_attempts'])
+            
+            if total_threats > 0 or total_violations > 3 or total_brute_force > 2:
+                security_level = "HIGH ALERT"
+                reply = f"🚨 SECURITY ALERT, {username}! I've detected {total_threats} threats, {total_violations} access violations, {total_brute_force} brute force attempts, and {total_intrusions} intrusion attempts. Immediate attention required!"
+            elif total_violations > 0 or total_brute_force > 0 or total_intrusions > 0:
+                security_level = "CAUTION"
+                reply = f"⚠️ Security scan shows some activity, {username}. Found {total_violations} access violations, {total_brute_force} brute force attempts, and {total_intrusions} blocked commands. Monitoring recommended."
+            else:
+                security_level = "SECURE"
+                reply = f"✅ Security status: ALL CLEAR, {username}! No threats detected. All systems secure and monitoring is active."
+            
             scan_result = perform_basic_security_scan()
-            summary_lines = scan_result.split('\n')[:10]  # First 10 lines for summary
-            return f"Security scan completed! Here's a summary:\n\n" + '\n'.join(summary_lines) + f"\n\n{username}, I've found some security information. Check the Tools tab for the full report!"
+            summary_lines = scan_result.split('\n')[:8]  # First 8 lines for summary
+            reply += f"\n\nQuick scan summary:\n" + '\n'.join(summary_lines) + f"\n\nI'm continuously monitoring for you, {username}. Check the Security tab for detailed logs!"
+            
+            # Personalize the response
+            reply = get_personalized_jarvis_response(username, reply)
+            save_ai_response(username, reply, user_memory, memory_size)
+            return reply
         except Exception as e:
-            return f"Sorry {username}, I encountered an error running the security scan: {str(e)}. You can try the security scan tool manually in the Tools tab."
+            reply = f"Sorry {username}, I encountered an error during security analysis: {str(e)}. My security monitoring is still active. You can check the Security tab manually."
+            return get_personalized_jarvis_response(username, reply)
     
     # System info intent
     elif any(term in prompt_low for term in ['system info', 'system report', 'hardware info', 'system details']):
@@ -2213,7 +2590,38 @@ def ai_reply(prompt, username, user_ip):
     # Learning and memory intent
     elif any(term in prompt_low for term in ['remember', 'memory', 'forget', 'learn']):
         convo_count = len(user_memory.get('conversations', []))
-        return f"I remember our {convo_count} conversations, {username}. I learn from your preferences, command usage, and interaction patterns. You can view or clear my memory in the AI panel. I'm constantly improving based on our interactions!"
+        patterns = user_memory.get('learning_patterns', {})
+        style = patterns.get('interaction_style', 'formal')
+        frequent_cmds = len(patterns.get('frequent_commands', {}))
+        reply = f"I remember our {convo_count} conversations, {username}. I've learned your interaction style is '{style}' and you use {frequent_cmds} different commands frequently. I continuously learn from your preferences, security patterns, and system usage to provide better assistance!"
+        save_ai_response(username, reply, user_memory, memory_size)
+        return get_personalized_jarvis_response(username, reply)
+    
+    # Security monitoring intent - NEW Jarvis security addon feature
+    elif any(term in prompt_low for term in ['security monitoring', 'monitor security', 'security status', 'threats', 'intrusions', 'attacks']):
+        try:
+            security_data = jarvis_security_integration()
+            
+            # Real-time security summary
+            reply = f"🛡️ Security Monitoring Report, {username}:\n\n"
+            reply += f"• Authentication Events: {len(security_data['authentication_events'])}\n"
+            reply += f"• Blocked Intrusions: {len(security_data['intrusion_attempts'])}\n" 
+            reply += f"• Brute Force Attempts: {len(security_data['brute_force_detections'])}\n"
+            reply += f"• Access Violations: {len(security_data['access_violations'])}\n"
+            reply += f"• System Threats: {len(security_data['system_threats'])}\n"
+            reply += f"• Active Alerts: {len(security_data['security_alerts'])}\n\n"
+            
+            if any(len(data) > 0 for data in security_data.values()):
+                reply += "I'm actively monitoring and have detected some security events. All are logged and analyzed. I maintain full security oversight and can provide detailed analysis of any suspicious activity."
+            else:
+                reply += "All security systems are operating normally. I'm continuously monitoring authentication, access patterns, command execution, and system integrity. No threats detected."
+            
+            reply = get_personalized_jarvis_response(username, reply)
+            save_ai_response(username, reply, user_memory, memory_size)
+            return reply
+        except Exception as e:
+            reply = f"Security monitoring active, {username}. I maintain continuous surveillance but encountered a data retrieval issue: {str(e)}. All security protections remain operational."
+            return get_personalized_jarvis_response(username, reply)
     
     # Advanced features intent
     elif any(term in prompt_low for term in ['advanced', 'expert', 'technical', 'professional']):
@@ -2253,12 +2661,662 @@ def ai_reply(prompt, username, user_ip):
             return f"Generating detailed system report, {username}. Check the Tools tab for comprehensive system information and diagnostics."
     
     # Fallback responses based on personality
+    reply = ""
     if personality == 'snarky':
-        return f"I'm not sure what you want, {username}. Try asking about status, backups, or saying 'help' for available commands."
+        reply = f"I'm not sure what you want, {username}. Try asking about status, backups, or saying 'help' for available commands."
     elif personality == 'professional':
-        return f"I don't recognize that request, {username}. Please try asking about system status, backups, or type 'help' for available commands."
+        reply = f"I don't recognize that request, {username}. Please try asking about system status, backups, or type 'help' for available commands."
     else:
-        return f"I'm here to help, {username}! Try asking about system status, creating backups, or say 'help' to see what I can do."
+        reply = f"I'm here to help, {username}! Try asking about system status, creating backups, or say 'help' to see what I can do."
+    
+    # Apply personalization to the response
+    reply = get_personalized_jarvis_response(username, reply)
+    
+    # Save AI response to memory
+    save_ai_response(username, reply, user_memory, memory_size)
+    return reply
+
+def save_ai_response(username, reply, user_memory, memory_size):
+    """Save AI response to user memory with enhanced learning and personalization."""
+    try:
+        now = time.strftime('%Y-%m-%d %H:%M:%S')
+        user_memory["conversations"].append({
+            "timestamp": now,
+            "type": "ai",
+            "user": "jarvis",
+            "reply": reply,
+            "context": {
+                "response_to": "user_query",
+                "learning_mode": "active",
+                "personality": get_jarvis_personality(),
+                "session_length": len(user_memory["conversations"])
+            }
+        })
+        
+        # Enhanced learning: analyze conversation patterns
+        if "learning_patterns" not in user_memory:
+            user_memory["learning_patterns"] = {}
+        
+        patterns = user_memory["learning_patterns"]
+        
+        # Track interaction frequency
+        patterns["total_interactions"] = patterns.get("total_interactions", 0) + 1
+        
+        # Analyze conversation topics
+        if "topics" not in patterns:
+            patterns["topics"] = {}
+        
+        # Simple topic extraction based on response content
+        reply_lower = reply.lower()
+        if "security" in reply_lower:
+            patterns["topics"]["security"] = patterns["topics"].get("security", 0) + 1
+        if "system" in reply_lower:
+            patterns["topics"]["system"] = patterns["topics"].get("system", 0) + 1
+        if "status" in reply_lower:
+            patterns["topics"]["status"] = patterns["topics"].get("status", 0) + 1
+        if "tool" in reply_lower:
+            patterns["topics"]["tools"] = patterns["topics"].get("tools", 0) + 1
+        
+        # Track interaction style preferences
+        if len(reply) > 200:
+            patterns["prefers_detailed"] = patterns.get("prefers_detailed", 0) + 1
+        else:
+            patterns["prefers_concise"] = patterns.get("prefers_concise", 0) + 1
+        
+        # Determine interaction style preference
+        detailed = patterns.get("prefers_detailed", 0)
+        concise = patterns.get("prefers_concise", 0)
+        if detailed > concise * 1.5:
+            patterns["interaction_style"] = "detailed"
+        elif concise > detailed * 1.5:
+            patterns["interaction_style"] = "concise"
+        else:
+            patterns["interaction_style"] = "balanced"
+        
+        # Track time patterns for personalization
+        current_hour = int(time.strftime('%H'))
+        if "active_hours" not in patterns:
+            patterns["active_hours"] = {}
+        patterns["active_hours"][str(current_hour)] = patterns["active_hours"].get(str(current_hour), 0) + 1
+        
+        # Keep memory at configured size
+        if len(user_memory["conversations"]) > memory_size:
+            user_memory["conversations"] = user_memory["conversations"][-memory_size:]
+        
+        # Save updated memory with enhanced data
+        save_user_memory(username, user_memory)
+        
+        # Enhanced learning - analyze patterns for future responses
+        enhanced_jarvis_learning(username, "", {"reply": reply})
+        
+        # Global conversation logging for cross-user learning (encrypted)
+        try:
+            global_log_path = os.path.join(NS_CTRL, 'global_conversations.enc')
+            metadata = {
+                "timestamp": now,
+                "username": username,
+                "prompt_length": len(reply.split()),
+                "response_type": "ai_reply",
+                "topics": list(patterns.get("topics", {}).keys()),
+                "interaction_style": patterns.get("interaction_style", "balanced")
+            }
+            # In a full implementation, this would be encrypted
+        except Exception:
+            pass  # Fail silently for global logging
+            
+    except Exception as e:
+        security_log(f"AI_MEMORY_ERROR user={username} error={str(e)}")
+
+def get_personalized_jarvis_response(username, base_response):
+    """Enhance response with personalization based on user learning patterns"""
+    try:
+        user_memory = load_user_memory(username)
+        patterns = user_memory.get("learning_patterns", {})
+        
+        # Personalize based on interaction style
+        style = patterns.get("interaction_style", "balanced")
+        personality = get_jarvis_personality()
+        
+        # Add personal touches based on learning
+        total_interactions = patterns.get("total_interactions", 0)
+        
+        if total_interactions > 50:
+            experience_level = "experienced"
+        elif total_interactions > 10:
+            experience_level = "familiar"
+        else:
+            experience_level = "new"
+        
+        # Modify response based on personality and experience
+        if personality == "helpful" and experience_level == "experienced":
+            if not any(phrase in base_response.lower() for phrase in [username.lower(), "as always", "you know"]):
+                base_response = base_response.replace(f"{username}!", f"{username}, as always!")
+        
+        # Add contextual information based on preferred topics
+        favorite_topics = patterns.get("topics", {})
+        if favorite_topics:
+            top_topic = max(favorite_topics.items(), key=lambda x: x[1])[0]
+            if top_topic == "security" and "security" not in base_response.lower():
+                base_response += f" (Also, I'm keeping an eye on security metrics for you as usual.)"
+        
+        return base_response
+        
+    except Exception:
+        return base_response
+
+def verify_storage_and_memory_systems():
+    """Comprehensive verification of storage and memory systems"""
+    verification_results = {
+        "storage_health": "unknown",
+        "memory_encryption": "unknown", 
+        "file_permissions": "unknown",
+        "directory_structure": "unknown",
+        "backup_systems": "unknown",
+        "issues": [],
+        "recommendations": []
+    }
+    
+    try:
+        # Check directory structure and permissions
+        critical_dirs = [NS_HOME, NS_CTRL, NS_LOGS, NS_KEYS, NS_WWW]
+        missing_dirs = []
+        permission_issues = []
+        
+        for dir_path in critical_dirs:
+            if not os.path.exists(dir_path):
+                missing_dirs.append(dir_path)
+                verification_results["issues"].append(f"Missing directory: {dir_path}")
+            else:
+                # Check if directory is writable
+                if not os.access(dir_path, os.W_OK):
+                    permission_issues.append(dir_path)
+                    verification_results["issues"].append(f"No write permission: {dir_path}")
+        
+        if not missing_dirs and not permission_issues:
+            verification_results["directory_structure"] = "healthy"
+            verification_results["file_permissions"] = "correct"
+        else:
+            verification_results["directory_structure"] = "issues_found"
+            verification_results["file_permissions"] = "issues_found"
+        
+        # Check encryption key availability
+        aes_key_path = os.path.join(NS_KEYS, 'aes.key')
+        if os.path.exists(aes_key_path):
+            try:
+                with open(aes_key_path, 'rb') as f:
+                    key_data = f.read()
+                if len(key_data) >= 32:  # Minimum for AES-256
+                    verification_results["memory_encryption"] = "available"
+                else:
+                    verification_results["memory_encryption"] = "key_too_short"
+                    verification_results["issues"].append("Encryption key is too short")
+            except Exception as e:
+                verification_results["memory_encryption"] = "key_read_error"
+                verification_results["issues"].append(f"Cannot read encryption key: {str(e)}")
+        else:
+            verification_results["memory_encryption"] = "no_key"
+            verification_results["issues"].append("No encryption key found")
+        
+        # Test memory persistence functionality
+        test_user = "verification_test"
+        test_data = {
+            "test": True,
+            "timestamp": time.strftime('%Y-%m-%d %H:%M:%S'),
+            "conversations": [{"test": "verification"}]
+        }
+        
+        try:
+            # Test save/load cycle
+            save_user_memory(test_user, test_data)
+            loaded_data = load_user_memory(test_user)
+            
+            if loaded_data and loaded_data.get("test") == True:
+                verification_results["storage_health"] = "functional"
+                
+                # Clean up test data
+                test_files = [
+                    user_memory_path(test_user),
+                    os.path.join(NS_CTRL, f'memory_{sanitize_username(test_user)}.json')
+                ]
+                for test_file in test_files:
+                    if os.path.exists(test_file):
+                        try:
+                            os.remove(test_file)
+                        except Exception:
+                            pass
+            else:
+                verification_results["storage_health"] = "save_load_failed"
+                verification_results["issues"].append("Memory save/load test failed")
+                
+        except Exception as e:
+            verification_results["storage_health"] = "error"
+            verification_results["issues"].append(f"Memory test error: {str(e)}")
+        
+        # Check backup and recovery capabilities
+        try:
+            # Test if we can create backups
+            backup_test_path = os.path.join(NS_HOME, '.backup_test')
+            with open(backup_test_path, 'w') as f:
+                f.write("backup test")
+            
+            if os.path.exists(backup_test_path):
+                os.remove(backup_test_path)
+                verification_results["backup_systems"] = "functional"
+            else:
+                verification_results["backup_systems"] = "cannot_create"
+                verification_results["issues"].append("Cannot create backup files")
+                
+        except Exception as e:
+            verification_results["backup_systems"] = "error"
+            verification_results["issues"].append(f"Backup test error: {str(e)}")
+        
+        # Generate recommendations
+        if verification_results["memory_encryption"] == "no_key":
+            verification_results["recommendations"].append("Generate encryption key for secure memory storage")
+        
+        if verification_results["file_permissions"] == "issues_found":
+            verification_results["recommendations"].append("Fix directory permissions for proper operation")
+        
+        if verification_results["storage_health"] != "functional":
+            verification_results["recommendations"].append("Investigate memory persistence issues")
+        
+        # Overall health assessment
+        issues_count = len(verification_results["issues"])
+        if issues_count == 0:
+            verification_results["overall_status"] = "excellent"
+        elif issues_count <= 2:
+            verification_results["overall_status"] = "good_with_minor_issues"
+        else:
+            verification_results["overall_status"] = "needs_attention"
+            
+    except Exception as e:
+        verification_results["overall_status"] = "verification_failed"
+        verification_results["issues"].append(f"Verification process error: {str(e)}")
+    
+    return verification_results
+
+def generate_comprehensive_security_report():
+    """Generate a comprehensive security and system status report"""
+    report = []
+    report.append("=== NOVASHIELD COMPREHENSIVE SECURITY REPORT ===")
+    report.append(f"Generated: {time.strftime('%Y-%m-%d %H:%M:%S')}")
+    report.append("")
+    
+    try:
+        # Storage and Memory Verification
+        storage_verification = verify_storage_and_memory_systems()
+        report.append("📁 STORAGE & MEMORY SYSTEMS")
+        report.append(f"Overall Status: {storage_verification['overall_status'].upper()}")
+        report.append(f"Directory Structure: {storage_verification['directory_structure']}")
+        report.append(f"File Permissions: {storage_verification['file_permissions']}")
+        report.append(f"Memory Encryption: {storage_verification['memory_encryption']}")
+        report.append(f"Storage Health: {storage_verification['storage_health']}")
+        report.append(f"Backup Systems: {storage_verification['backup_systems']}")
+        
+        if storage_verification['issues']:
+            report.append("\n⚠️  Issues Found:")
+            for issue in storage_verification['issues']:
+                report.append(f"  • {issue}")
+        
+        if storage_verification['recommendations']:
+            report.append("\n💡 Recommendations:")
+            for rec in storage_verification['recommendations']:
+                report.append(f"  • {rec}")
+        
+        report.append("")
+        
+        # Security Integration
+        security_data = jarvis_security_integration()
+        report.append("🛡️  SECURITY MONITORING")
+        report.append(f"Authentication Events: {len(security_data['authentication_events'])}")
+        report.append(f"Intrusion Attempts: {len(security_data['intrusion_attempts'])}")
+        report.append(f"Brute Force Detections: {len(security_data['brute_force_detections'])}")
+        report.append(f"Access Violations: {len(security_data['access_violations'])}")
+        report.append(f"System Threats: {len(security_data['system_threats'])}")
+        report.append(f"Security Alerts: {len(security_data['security_alerts'])}")
+        
+        # Recent security events
+        if security_data['intrusion_attempts']:
+            report.append("\n🚨 Recent Intrusion Attempts:")
+            for attempt in security_data['intrusion_attempts'][-3:]:  # Last 3
+                report.append(f"  • {attempt}")
+        
+        if security_data['system_threats']:
+            report.append("\n⚠️  System Threats:")
+            for threat in security_data['system_threats'][-3:]:  # Last 3
+                report.append(f"  • {threat}")
+        
+        report.append("")
+        
+        # System Performance
+        report.append("📊 SYSTEM PERFORMANCE")
+        try:
+            # CPU and Memory
+            cpu_data = read_json(os.path.join(NS_LOGS,'cpu.json'), {})
+            mem_data = read_json(os.path.join(NS_LOGS,'memory.json'), {})
+            disk_data = read_json(os.path.join(NS_LOGS,'disk.json'), {})
+            
+            report.append(f"CPU Load: {cpu_data.get('load1', 'N/A')}")
+            report.append(f"Memory Usage: {mem_data.get('used_pct', 'N/A')}%")
+            report.append(f"Disk Usage: {disk_data.get('use_pct', 'N/A')}%")
+        except Exception:
+            report.append("Performance metrics unavailable")
+        
+        report.append("")
+        
+        # Jarvis AI Status
+        report.append("🧠 JARVIS AI SYSTEM")
+        try:
+            # Count total users with memory
+            memory_files = []
+            if os.path.exists(NS_CTRL):
+                for filename in os.listdir(NS_CTRL):
+                    if filename.startswith('memory_') and (filename.endswith('.enc') or filename.endswith('.json')):
+                        memory_files.append(filename)
+            
+            report.append(f"Active User Memories: {len(memory_files)}")
+            report.append(f"Encryption Available: {'Yes' if os.path.exists(os.path.join(NS_KEYS, 'aes.key')) else 'No'}")
+            report.append(f"Learning Mode: Active")
+            report.append(f"Personality: {get_jarvis_personality().title()}")
+        except Exception:
+            report.append("Jarvis status check failed")
+        
+        report.append("")
+        report.append("=== END REPORT ===")
+        
+    except Exception as e:
+        report.append(f"Report generation error: {str(e)}")
+    
+    return "\n".join(report)
+
+def jarvis_security_integration():
+    """Enhanced Jarvis security addon - comprehensive monitoring and threat analysis"""
+    security_data = {
+        'authentication_events': [],
+        'intrusion_attempts': [],
+        'brute_force_detections': [],
+        'access_violations': [],
+        'security_alerts': [],
+        'system_threats': []
+    }
+    
+    try:
+        # Enhanced security log parsing with time-based filtering
+        current_time = time.time()
+        cutoff_time = current_time - (24 * 3600)  # Last 24 hours
+        
+        # Read security logs
+        security_log_path = os.path.join(NS_LOGS, 'security.log')
+        if os.path.exists(security_log_path):
+            with open(security_log_path, 'r', encoding='utf-8') as f:
+                for line in f:
+                    try:
+                        # Parse timestamp and filter recent events
+                        if len(line.split()) < 2:
+                            continue
+                        timestamp_str = line.split()[0] + " " + line.split()[1]
+                        event_time = time.mktime(time.strptime(timestamp_str, '%Y-%m-%d %H:%M:%S'))
+                        
+                        if event_time < cutoff_time:
+                            continue  # Skip old events
+                        
+                        # Enhanced categorization
+                        if any(keyword in line for keyword in ['BLOCKED_COMMAND', 'DANGEROUS_ARG', 'COMMAND_CHAINING']):
+                            security_data['intrusion_attempts'].append(line.strip())
+                        elif any(keyword in line for keyword in ['LOGIN_FAIL', 'AUTH_FAIL', 'MULTIPLE_FAILED']):
+                            security_data['brute_force_detections'].append(line.strip())
+                        elif any(keyword in line for keyword in ['UNAUTHORIZED', 'ACCESS_VIOLATION', 'PERMISSION_DENIED']):
+                            security_data['access_violations'].append(line.strip())
+                        elif any(keyword in line for keyword in ['LOGIN_SUCCESS', 'AUTH_SUCCESS', 'SESSION_START']):
+                            security_data['authentication_events'].append(line.strip())
+                        elif any(keyword in line for keyword in ['THREAT', 'MALWARE', 'VIRUS', 'EXPLOIT']):
+                            security_data['system_threats'].append(line.strip())
+                        elif any(keyword in line for keyword in ['ALERT', 'WARNING', 'CRITICAL']):
+                            security_data['security_alerts'].append(line.strip())
+                    except Exception:
+                        continue  # Skip malformed log lines
+        
+        # Read audit logs for additional security events
+        audit_log_path = NS_AUDIT
+        if os.path.exists(audit_log_path):
+            with open(audit_log_path, 'r', encoding='utf-8') as f:
+                for line in f:
+                    if any(keyword in line.upper() for keyword in ['SECURITY', 'BREACH', 'ATTACK', 'SUSPICIOUS']):
+                        security_data['security_alerts'].append(line.strip())
+        
+        # Read alerts log
+        alerts_log_path = NS_ALERTS
+        if os.path.exists(alerts_log_path):
+            with open(alerts_log_path, 'r', encoding='utf-8') as f:
+                for line in f:
+                    if any(keyword in line.upper() for keyword in ['CRIT', 'ERROR', 'SECURITY']):
+                        security_data['security_alerts'].append(line.strip())
+        
+        # Add real-time system security metrics
+        try:
+            # Check for failed SSH attempts (if available)
+            if os.path.exists('/var/log/auth.log'):
+                ssh_fails = subprocess.run(['grep', 'Failed password', '/var/log/auth.log'], 
+                                         capture_output=True, text=True, timeout=5)
+                if ssh_fails.returncode == 0:
+                    recent_fails = ssh_fails.stdout.strip().split('\n')[-10:]  # Last 10
+                    security_data['brute_force_detections'].extend(recent_fails)
+        except Exception:
+            pass
+        
+        # Check for suspicious processes
+        try:
+            suspicious_processes = []
+            ps_output = subprocess.run(['ps', 'aux'], capture_output=True, text=True, timeout=10)
+            if ps_output.returncode == 0:
+                lines = ps_output.stdout.split('\n')
+                for line in lines:
+                    # Look for potentially suspicious process names
+                    if any(suspicious in line.lower() for suspicious in ['netcat', 'nc -l', 'reverse_shell', 'backdoor']):
+                        suspicious_processes.append(line.strip())
+                        security_data['system_threats'].append(f"Suspicious process detected: {line.strip()}")
+        except Exception:
+            pass
+        
+    except Exception as e:
+        security_data['system_threats'].append(f"Error in security integration: {str(e)}")
+    
+    return security_data
+                    elif 'ACCESS_DENIED' in line or 'UNAUTHORIZED' in line:
+                        security_data['access_violations'].append(line.strip())
+                    elif 'SECURITY' in line:
+                        security_data['security_alerts'].append(line.strip())
+        
+        # Read alerts log  
+        alerts_log_path = os.path.join(NS_LOGS, 'alerts.log')
+        if os.path.exists(alerts_log_path):
+            with open(alerts_log_path, 'r') as f:
+                lines = f.readlines()[-20:]  # Last 20 alerts
+                for line in lines:
+                    if any(threat in line.lower() for threat in ['threat', 'malware', 'virus', 'compromise']):
+                        security_data['system_threats'].append(line.strip())
+                    else:
+                        security_data['security_alerts'].append(line.strip())
+                        
+    except Exception as e:
+        security_log(f"JARVIS_SECURITY_SCAN_ERROR error={str(e)}")
+    
+    return security_data
+
+def enhanced_jarvis_learning(username, prompt, reply_context):
+    """Enhanced learning system for Jarvis AI with advanced pattern analysis"""
+    try:
+        user_memory = load_user_memory(username)
+        
+        if "learning_patterns" not in user_memory:
+            user_memory["learning_patterns"] = {}
+        
+        patterns = user_memory["learning_patterns"]
+        
+        # Enhanced pattern analysis
+        conversations = user_memory.get('conversations', [])
+        
+        # Track command usage patterns
+        if "frequent_commands" not in patterns:
+            patterns["frequent_commands"] = {}
+        
+        # Extract commands from user prompts
+        if prompt:
+            prompt_lower = prompt.lower()
+            command_indicators = ['run ', 'execute ', 'launch ', 'start ', 'scan ', 'check ', 'analyze ']
+            for indicator in command_indicators:
+                if indicator in prompt_lower:
+                    cmd_start = prompt_lower.find(indicator) + len(indicator)
+                    potential_cmd = prompt_lower[cmd_start:].split()[0] if cmd_start < len(prompt_lower) else ''
+                    if potential_cmd:
+                        patterns["frequent_commands"][potential_cmd] = patterns["frequent_commands"].get(potential_cmd, 0) + 1
+        
+        # Analyze AI response patterns
+        if reply_context and "reply" in reply_context:
+            reply = reply_context["reply"]
+            
+            # Track response complexity preferences
+            if "response_complexity" not in patterns:
+                patterns["response_complexity"] = {"simple": 0, "detailed": 0, "technical": 0}
+            
+            if len(reply) > 500:
+                patterns["response_complexity"]["detailed"] += 1
+            elif any(tech_term in reply.lower() for tech_term in ['cpu', 'memory', 'process', 'command', 'log']):
+                patterns["response_complexity"]["technical"] += 1
+            else:
+                patterns["response_complexity"]["simple"] += 1
+            
+            # Track emotional tone preferences (basic sentiment analysis)
+            if "emotional_preferences" not in patterns:
+                patterns["emotional_preferences"] = {"formal": 0, "friendly": 0, "enthusiastic": 0}
+            
+            if any(enthusiastic in reply for enthusiastic in ['!', 'great', 'excellent', 'perfect']):
+                patterns["emotional_preferences"]["enthusiastic"] += 1
+            elif any(friendly in reply for friendly in ['please', 'sure', 'happy to', 'glad to']):
+                patterns["emotional_preferences"]["friendly"] += 1
+            else:
+                patterns["emotional_preferences"]["formal"] += 1
+        
+        # Legacy compatibility - analyze conversation history
+        user_patterns = {
+            'frequent_commands': patterns.get("frequent_commands", {}),
+            'preferred_tools': {},
+            'interaction_style': 'formal',  # formal, casual, technical
+            'response_preferences': {},
+            'security_awareness': 'medium'  # low, medium, high
+        }
+        
+        # Learn from conversation history
+        for conv in conversations:
+            if conv.get('type') == 'user':
+                prompt_text = conv.get('prompt', '').lower()
+                
+                # Track command preferences
+                for tool in ['nmap', 'ping', 'netstat', 'ps', 'htop', 'curl', 'grep', 'find', 'ls']:
+                    if tool in prompt_text:
+                        user_patterns['frequent_commands'][tool] = user_patterns['frequent_commands'].get(tool, 0) + 1
+                
+                # Determine interaction style
+                if any(casual in prompt_text for casual in ['hey', 'hi', 'thanks', 'cool', 'awesome']):
+                    user_patterns['interaction_style'] = 'casual'
+                elif any(tech in prompt_text for tech in ['process', 'thread', 'memory', 'cpu', 'kernel']):
+                    user_patterns['interaction_style'] = 'technical'
+                
+                # Assess security awareness
+                if any(sec in prompt_text for sec in ['security', 'vulnerability', 'threat', 'attack', 'breach']):
+                    user_patterns['security_awareness'] = 'high'
+        
+        # Update patterns with learned data
+        patterns.update(user_patterns)
+        patterns["last_learning_update"] = time.strftime('%Y-%m-%d %H:%M:%S')
+        patterns["learning_sessions"] = patterns.get("learning_sessions", 0) + 1
+        
+        # Save updated learning patterns
+        save_user_memory(username, user_memory)
+                
+                # Detect interaction style
+                if any(word in prompt_text for word in ['please', 'thank', 'sorry']):
+                    user_patterns['interaction_style'] = 'formal'
+                elif any(word in prompt_text for word in ['yo', 'hey', 'sup', 'dude']):
+                    user_patterns['interaction_style'] = 'casual'
+                elif any(word in prompt_text for word in ['execute', 'analyze', 'generate', 'scan']):
+                    user_patterns['interaction_style'] = 'technical'
+        
+        # Update user memory with learned patterns
+        user_memory['learning_patterns'] = user_patterns
+        save_user_memory(username, user_memory)
+        
+        security_log(f"JARVIS_LEARNING user={username} style={user_patterns['interaction_style']} commands={len(user_patterns['frequent_commands'])}")
+        
+    except Exception as e:
+        security_log(f"JARVIS_LEARNING_ERROR user={username} error={str(e)}")
+
+def save_command_result(tool_name, command, output, username):
+    """Save command results to the results panel for comprehensive tracking"""
+    try:
+        results_file = os.path.join(NS_CTRL, 'command_results.json')
+        
+        # Load existing results
+        results_data = read_json(results_file, {'recent': [], 'security': [], 'system': [], 'tools': [], 'logs': []})
+        
+        # Create result entry
+        result_entry = {
+            'timestamp': time.strftime('%Y-%m-%d %H:%M:%S'),
+            'user': username,
+            'tool': tool_name,
+            'command': command,
+            'output_preview': output[:500] + '...' if len(output) > 500 else output,
+            'full_output': output,
+            'status': 'completed'
+        }
+        
+        # Categorize the result
+        if tool_name in ['security-scan', 'nmap', 'nikto'] or 'security' in command.lower():
+            results_data['security'].append(result_entry)
+            results_data['security'] = results_data['security'][-50:]  # Keep last 50
+        elif tool_name in ['system-info', 'ps', 'top', 'htop', 'df'] or any(cmd in command.lower() for cmd in ['ps', 'top', 'df', 'free']):
+            results_data['system'].append(result_entry)
+            results_data['system'] = results_data['system'][-50:]
+        elif tool_name in ['log-analyzer'] or 'log' in command.lower():
+            results_data['logs'].append(result_entry)
+            results_data['logs'] = results_data['logs'][-30:]
+        else:
+            results_data['tools'].append(result_entry)
+            results_data['tools'] = results_data['tools'][-100:]
+        
+        # Always add to recent
+        results_data['recent'].append(result_entry)
+        results_data['recent'] = results_data['recent'][-100:]  # Keep last 100
+        
+        # Save updated results
+        write_json(results_file, results_data)
+        
+        security_log(f"RESULT_SAVED user={username} tool={tool_name} category=auto_classified")
+        
+    except Exception as e:
+        security_log(f"RESULT_SAVE_ERROR user={username} tool={tool_name} error={str(e)}")
+
+def get_personalized_jarvis_response(username, base_response):
+    """Generate personalized responses based on user learning patterns"""
+    try:
+        user_memory = load_user_memory(username)
+        patterns = user_memory.get('learning_patterns', {})
+        style = patterns.get('interaction_style', 'formal')
+        
+        # Adapt response style
+        if style == 'casual':
+            base_response = base_response.replace('I recommend', "I'd suggest")
+            base_response = base_response.replace('You may', "You might wanna")
+            base_response = base_response.replace('Please', "")
+        elif style == 'technical':
+            base_response = base_response.replace('check', 'analyze')
+            base_response = base_response.replace('look at', 'examine')
+            base_response = base_response.replace('run', 'execute')
+        
+        return base_response
+        
+    except Exception:
+        return base_response
 
 # Old ai_reply function removed - using enhanced version above
 
@@ -2413,6 +3471,8 @@ def install_missing_tools():
     
     output.append(f"\nInstallation summary: {installed_count} tools installed")
     return "\n".join(output)
+
+# Remove duplicate execute_custom_command function - using enhanced version below
 
 def execute_tool(tool_name):
     """Execute a system tool and return its output."""
@@ -2661,45 +3721,38 @@ def analyze_system_logs():
     return "\n".join(output)
 
 def execute_custom_command(command):
-    """Execute a custom command safely and return its output."""
+    """Execute a custom command safely with enhanced security validation and return its output."""
+    import shlex
+    
     output = []
     output.append(f"=== EXECUTING CUSTOM COMMAND ===")
     output.append(f"Command: {command}")
     output.append(f"Started: {time.strftime('%Y-%m-%d %H:%M:%S')}")
     output.append("")
     
-    # Basic command validation and security checks
-    dangerous_patterns = [
-        'rm -rf /', 'rm -rf ~', 'rm -rf *', 
-        'dd if=', 'mkfs', 'format',
-        '> /dev/', '> /etc/', '> /boot/',
-        'init 0', 'init 6', 'shutdown', 'halt', 'reboot',
-        'iptables -F', 'iptables -X',
-        'chmod 777 /', 'chown root /'
-    ]
-    
-    command_lower = command.lower()
-    is_dangerous = any(pattern in command_lower for pattern in dangerous_patterns)
-    
-    if is_dangerous:
-        output.append("⚠️  WARNING: Command blocked for security reasons")
-        output.append("Potentially dangerous commands are not allowed via web interface")
-        output.append("Use the terminal tab for administrative commands")
-        return "\n".join(output)
-    
-    # Limit command length
-    if len(command) > 200:
-        output.append("❌ ERROR: Command too long (max 200 characters)")
+    if not command or not command.strip():
+        output.append("❌ ERROR: Empty command")
         return "\n".join(output)
     
     try:
-        # Execute command with timeout and limits
+        # Parse command safely using shlex to prevent injection
+        command_parts = shlex.split(command.strip())
+        if not command_parts:
+            output.append("❌ ERROR: Invalid command format")
+            return "\n".join(output)
+        
+        # Enhanced security validation
+        allowed, error_msg = command_security_check(command_parts, "web_user", "localhost")
+        if not allowed:
+            output.append(f"❌ SECURITY BLOCK: {error_msg}")
+            return "\n".join(output)
+        
+        # Execute the command with enhanced safety measures (NO shell=True!)
         result = subprocess.run(
-            command,
-            shell=True,
+            command_parts,
             capture_output=True,
             text=True,
-            timeout=30,  # 30 second timeout
+            timeout=30,
             cwd=os.path.expanduser('~')  # Run in user's home directory
         )
         
@@ -2734,6 +3787,7 @@ def execute_custom_command(command):
         output.append("Use the terminal tab for long-running commands")
     except Exception as e:
         output.append(f"❌ ERROR: {str(e)}")
+        security_log(f"COMMAND_EXCEPTION command={command} error={str(e)}")
     
     output.append("")
     output.append(f"Completed: {time.strftime('%Y-%m-%d %H:%M:%S')}")
@@ -2803,10 +3857,14 @@ class Handler(SimpleHTTPRequestHandler):
                 py_alert('INFO', f'UNAUTHORIZED_ACCESS ip={client_ip} user_agent={user_agent}')
                 audit(f'UNAUTHORIZED_ACCESS ip={client_ip}')
             
-            # Implement strict reload auth: when AUTH_STRICT is enabled (default),
-            # clear NSSESS cookie on GET '/' only if no valid session exists
-            # This prevents clearing valid sessions while allowing forced re-login on refresh
+            # Enhanced session handling with force_login_on_reload support
+            force_login_on_reload = _coerce_bool(cfg_get('security.force_login_on_reload', False), False)
+            
+            # If AUTH_STRICT is enabled and no valid session, clear session cookie
             if AUTH_STRICT and not sess:
+                self._set_headers(200, 'text/html; charset=utf-8', {'Set-Cookie': 'NSSESS=deleted; Path=/; HttpOnly; Max-Age=0; SameSite=Strict'})
+            # If force_login_on_reload is enabled, clear session cookie (even if session is valid)
+            elif force_login_on_reload:
                 self._set_headers(200, 'text/html; charset=utf-8', {'Set-Cookie': 'NSSESS=deleted; Path=/; HttpOnly; Max-Age=0; SameSite=Strict'})
             else:
                 self._set_headers(200, 'text/html; charset=utf-8')
@@ -2837,6 +3895,11 @@ class Handler(SimpleHTTPRequestHandler):
         if parsed.path == '/api/status':
             if not require_auth(self): return
             sess = get_session(self) or {}
+            
+            # Helper function to check monitor enabled state using NS_CTRL flags
+            def monitor_enabled(name):
+                return not os.path.exists(os.path.join(NS_CTRL, f'{name}.disabled'))
+            
             data = {
                 'ts': time.strftime('%Y-%m-%d %H:%M:%S'),
                 'cpu':   read_json(os.path.join(NS_LOGS, 'cpu.json'), {}),
@@ -2853,7 +3916,19 @@ class Handler(SimpleHTTPRequestHandler):
                 'modules_count': len([x for x in os.listdir(os.path.join(NS_HOME,'modules')) if not x.startswith('.')]) if os.path.exists(os.path.join(NS_HOME,'modules')) else 0,
                 'version': read_text(os.path.join(NS_HOME,'version.txt'),'unknown'),
                 'csrf': sess.get('csrf','') if auth_enabled() else 'public',
-                'voice_enabled': cfg_get('jarvis.voice_enabled', False)
+                'voice_enabled': cfg_get('jarvis.voice_enabled', False),
+                # Add monitor enabled state flags for dashboard UI
+                'integrity_enabled': monitor_enabled('integrity'),
+                'process_enabled': monitor_enabled('process'),
+                'userlogins_enabled': monitor_enabled('userlogins'),
+                'services_enabled': monitor_enabled('services'),
+                'logs_enabled': monitor_enabled('logs'),
+                'network_enabled': monitor_enabled('network'),
+                'cpu_enabled': monitor_enabled('cpu'),
+                'memory_enabled': monitor_enabled('memory'),
+                'disk_enabled': monitor_enabled('disk'),
+                'scheduler_enabled': monitor_enabled('scheduler'),
+                'authenticated': sess is not None and sess.get('user') != 'public'
             }
             self._set_headers(200); self.wfile.write(json.dumps(data).encode('utf-8')); return
 
@@ -2924,251 +3999,6 @@ class Handler(SimpleHTTPRequestHandler):
             if os.path.exists(full):
                 self._set_headers(200, 'text/html; charset=utf-8'); self.wfile.write(read_text(full).encode('utf-8')); return
             self._set_headers(404); self.wfile.write(b'{}'); return
-
-        self._set_headers(404); self.wfile.write(b'{"error":"not found"}')
-
-    def do_POST(self):
-        try:
-            # Read and parse log files
-            auth_logs = []
-            audit_logs = []
-            security_logs = []
-            integrity_logs = []
-            
-            # Parse session log for detailed authentication events
-            session_path = os.path.join(NS_HOME, 'session.log')
-            alerts_path = os.path.join(NS_LOGS, 'alerts.log')
-            security_path = os.path.join(NS_LOGS, 'security.log')
-            audit_path = os.path.join(NS_LOGS, 'audit.log')
-            
-            stats = {
-                'auth_success': 0,
-                'auth_fail': 0,
-                'active_sessions': 0,
-                'audit_count': 0,
-                'security_count': 0,
-                'threat_count': 0,
-                'integrity_files': 0,
-                'integrity_changes': 0,
-                'last_audit': 'Never'
-            }
-            
-            # Parse session log for detailed authentication events
-            if os.path.exists(session_path):
-                try:
-                    with open(session_path, 'r', encoding='utf-8') as f:
-                        lines = f.readlines()[-50:]  # Last 50 lines
-                        for line in lines:
-                            line = line.strip()
-                            if not line: continue
-                            
-                            parts = line.split(' ', 2)
-                            if len(parts) >= 3:
-                                timestamp = f"{parts[0]} {parts[1]}"
-                                message = parts[2]
-                                
-                                log_entry = {
-                                    'timestamp': timestamp,
-                                    'message': message,
-                                    'level': 'info'
-                                }
-                                
-                                if 'SUCCESSFUL_LOGIN' in message:
-                                    stats['auth_success'] += 1
-                                    log_entry['level'] = 'success'
-                                    auth_logs.append(log_entry)
-                                elif 'FAILED_LOGIN' in message:
-                                    stats['auth_fail'] += 1
-                                    log_entry['level'] = 'error'
-                                    auth_logs.append(log_entry)
-                except Exception as e:
-                    print(f"Error reading session log: {e}")
-            
-            # Count active sessions
-            try:
-                sessions_db = read_json(SESSIONS, {})
-                current_time = int(time.time())
-                active_count = 0
-                for session_id, session_data in sessions_db.items():
-                    if isinstance(session_data, dict):
-                        session_expiry = session_data.get('expires', 0)
-                        if session_expiry > current_time:
-                            active_count += 1
-                stats['active_sessions'] = active_count
-            except Exception as e:
-                print(f"Error counting active sessions: {e}")
-                stats['active_sessions'] = 0
-            
-            # Parse security log for dedicated security events
-            if os.path.exists(security_path):
-                try:
-                    with open(security_path, 'r', encoding='utf-8') as f:
-                        lines = f.readlines()[-100:]  # Increased to 100 for comprehensive logs
-                        for line in lines:
-                            line = line.strip()
-                            if not line: continue
-                            
-                            parts = line.split(' ', 3)
-                            if len(parts) >= 4:
-                                timestamp = f"{parts[0]} {parts[1]}"
-                                level_type = parts[2].strip('[]').lower()
-                                message = parts[3]
-                                
-                                log_entry = {
-                                    'timestamp': timestamp,
-                                    'message': message,
-                                    'level': level_type
-                                }
-                                
-                                # Enhanced categorization for new log types
-                                if level_type in ['threat', 'critical']:
-                                    stats['threat_count'] += 1
-                                    log_entry['level'] = 'critical'
-                                elif level_type in ['auth_fail', 'forbidden', 'unauthorized', 'csrf_fail', '2fa_fail']:
-                                    stats['auth_fail'] += 1
-                                    log_entry['level'] = 'error'
-                                    auth_logs.append(log_entry)
-                                elif level_type in ['auth_success']:
-                                    stats['auth_success'] += 1
-                                    log_entry['level'] = 'success'
-                                    auth_logs.append(log_entry)
-                                elif level_type in ['connection', 'post_request']:
-                                    log_entry['level'] = 'info'
-                                elif level_type in ['rate_limit', 'banned_access']:
-                                    log_entry['level'] = 'warning'
-                                    stats['threat_count'] += 1
-                                elif level_type in ['login_attempt', 'login_invalid']:
-                                    log_entry['level'] = 'info'
-                                    auth_logs.append(log_entry)
-                                
-                                security_logs.append(log_entry)
-                                stats['security_count'] += 1
-                except Exception as e:
-                    print(f"Error reading security log: {e}")
-            
-            # Parse audit log for detailed system events
-            if os.path.exists(audit_path):
-                try:
-                    with open(audit_path, 'r', encoding='utf-8') as f:
-                        lines = f.readlines()[-50:]  # Last 50 lines
-                        for line in lines:
-                            line = line.strip()
-                            if not line: continue
-                            
-                            parts = line.split(' ', 2)
-                            if len(parts) >= 3:
-                                timestamp = f"{parts[0]} {parts[1]}"
-                                message = parts[2]
-                                
-                                log_entry = {
-                                    'timestamp': timestamp,
-                                    'message': message,
-                                    'level': 'info'
-                                }
-                                
-                                if 'LOGIN OK' in message or 'LOGIN SUCCESS' in message:
-                                    stats['auth_success'] += 1
-                                    log_entry['level'] = 'success'
-                                    auth_logs.append(log_entry)
-                                elif 'LOGIN FAIL' in message:
-                                    stats['auth_fail'] += 1
-                                    log_entry['level'] = 'error'
-                                    auth_logs.append(log_entry)
-                                elif any(kw in message for kw in ['MONITOR', 'CONTROL', 'FS']):
-                                    audit_logs.append(log_entry)
-                                
-                                stats['audit_count'] += 1
-                                stats['last_audit'] = timestamp
-                except Exception as e:
-                    print(f"Error reading audit log: {e}")
-            
-            # Parse alerts for security events
-            if os.path.exists(alerts_path):
-                try:
-                    with open(alerts_path, 'r', encoding='utf-8') as f:
-                        lines = f.readlines()[-50:]
-                        for line in lines:
-                            line = line.strip()
-                            if not line: continue
-                            
-                            parts = line.split(' ', 3)
-                            if len(parts) >= 4:
-                                timestamp = f"{parts[0]} {parts[1]}"
-                                level = parts[2].strip('[]').lower()
-                                message = parts[3]
-                                
-                                log_entry = {
-                                    'timestamp': timestamp,
-                                    'message': message,
-                                    'level': level
-                                }
-                                
-                                if level in ['crit', 'error']:
-                                    stats['threat_count'] += 1
-                                
-                                # Add to security logs if it's a security-related alert
-                                if any(kw in message.lower() for kw in ['network', 'integrity', 'suspicious', 'attack', 'breach']):
-                                    security_logs.append(log_entry)
-                                    stats['security_count'] += 1
-                except Exception as e:
-                    print(f"Error reading alerts log: {e}")
-            
-            # Check active sessions
-            if os.path.exists(SESSIONS):
-                try:
-                    sessions = read_json(SESSIONS, {})
-                    active_count = 0
-                    current_time = time.time()
-                    for sess_id, sess_data in sessions.items():
-                        if isinstance(sess_data, dict) and sess_data.get('ts', 0) > current_time - 86400:  # 24 hours
-                            active_count += 1
-                    stats['active_sessions'] = active_count
-                except Exception as e:
-                    print(f"Error reading sessions: {e}")
-            
-            # Check integrity monitoring
-            integrity_state_path = os.path.join(NS_CTRL, 'integrity.state')
-            if os.path.exists(integrity_state_path):
-                try:
-                    integrity_data = read_json(integrity_state_path, {})
-                    stats['integrity_files'] = integrity_data.get('files', 0)
-                    stats['integrity_changes'] = integrity_data.get('changes_detected', 0)
-                    
-                    # Add recent integrity events to logs
-                    recent_changes = integrity_data.get('recent_changes', [])
-                    for change in recent_changes[-20:]:  # Last 20 changes
-                        integrity_logs.append({
-                            'timestamp': change.get('timestamp', 'Unknown'),
-                            'message': f"File change detected: {change.get('file', 'unknown')} ({change.get('type', 'modified')})",
-                            'level': 'warning'
-                        })
-                except Exception as e:
-                    print(f"Error reading integrity state: {e}")
-            else:
-                # Fallback to integrity.json
-                integrity_json = read_json(os.path.join(NS_LOGS, 'integrity.json'), {})
-                stats['integrity_files'] = integrity_json.get('files', 0)
-                stats['integrity_changes'] = integrity_json.get('changes', 0)
-            
-            response = {
-                'stats': stats,
-                'logs': {
-                    'auth': auth_logs[-20:],  # Last 20 auth events
-                    'audit': audit_logs[-20:],  # Last 20 audit events  
-                    'security': security_logs[-20:],  # Last 20 security events
-                    'integrity': integrity_logs[-20:]  # Last 20 integrity events
-                }
-            }
-            
-            self._set_headers(200); 
-            self.wfile.write(json.dumps(response).encode('utf-8'))
-            return
-            
-        except Exception as e:
-            print(f"Security API error: {e}")
-            self._set_headers(500); 
-            self.wfile.write(json.dumps({'error': str(e)}).encode('utf-8'))
-            return
 
         self._set_headers(404); self.wfile.write(b'{"error":"not found"}')
 
@@ -3429,24 +4259,60 @@ class Handler(SimpleHTTPRequestHandler):
                 tool_name = data.get('tool', '')
                 custom_command = data.get('command', '')
                 
+                # Get user session for verification
+                sess = get_session(self)
+                username = sess.get('user', 'unknown') if sess else 'unknown'
+                user_ip = self.client_address[0]
+                
                 if not tool_name:
                     self._set_headers(400)
                     self.wfile.write(json.dumps({'ok': False, 'error': 'No tool specified'}).encode('utf-8'))
                     return
                 
+                # Enhanced security verification for dangerous commands
+                requires_verification = False
+                verification_reason = ""
+                
+                if tool_name == 'custom' and custom_command:
+                    # Check if command requires additional verification
+                    dangerous_commands = ['rm', 'del', 'format', 'mkfs', 'dd', 'shred', 'systemctl stop', 'shutdown', 'reboot', 'iptables -F']
+                    if any(dangerous in custom_command.lower() for dangerous in dangerous_commands):
+                        requires_verification = True
+                        verification_reason = f"Command '{custom_command}' requires verification due to potential system impact"
+                        
+                # Security verification check
+                security_verification_level = cfg_get('security.command_verification', 'standard')
+                if requires_verification and security_verification_level == 'strict':
+                    # In strict mode, require additional confirmation for dangerous operations
+                    security_log(f"DANGEROUS_COMMAND_BLOCKED user={username} ip={user_ip} command={custom_command} reason=verification_required")
+                    self._set_headers(403)
+                    self.wfile.write(json.dumps({
+                        'ok': False, 
+                        'error': f'Security verification required: {verification_reason}',
+                        'verification_needed': True
+                    }).encode('utf-8'))
+                    return
+                
                 # Handle custom command execution
                 if tool_name == 'custom' and custom_command:
+                    security_log(f"COMMAND_EXECUTE user={username} ip={user_ip} command={custom_command}")
                     output = execute_custom_command(custom_command)
                 else:
+                    security_log(f"TOOL_EXECUTE user={username} ip={user_ip} tool={tool_name}")
                     output = execute_tool(tool_name)
                     
-                audit(f'TOOL_EXEC tool={tool_name} command="{custom_command if custom_command else tool_name}" ip={self.client_address[0]}')
+                audit(f'TOOL_EXEC tool={tool_name} command="{custom_command if custom_command else tool_name}" ip={user_ip} user={username}')
+                
+                # Save results to results panel if enabled
+                save_command_result(tool_name, custom_command if custom_command else tool_name, output, username)
+                
                 self._set_headers(200)
                 self.wfile.write(json.dumps({
                     'ok': True,
                     'output': output
                 }).encode('utf-8'))
             except Exception as e:
+                security_log(f"COMMAND_ERROR user={username} ip={user_ip} error={str(e)}")
                 self._set_headers(500)
                 self.wfile.write(json.dumps({'ok': False, 'error': str(e)}).encode('utf-8'))
             return
@@ -3516,40 +4382,224 @@ class Handler(SimpleHTTPRequestHandler):
 
         if parsed.path == '/api/security':
             if not require_auth(self): return
-            # Simple security logs response - just return the log files
+            # Comprehensive security dashboard data - moved from duplicate do_POST
             try:
-                security_log_path = os.path.join(NS_LOGS, 'security.log')
-                audit_log_path = os.path.join(NS_LOGS, 'audit.log')
-                alerts_log_path = os.path.join(NS_LOGS, 'alerts.log')
+                # Read and parse log files
+                auth_logs = []
+                audit_logs = []
+                security_logs = []
+                integrity_logs = []
                 
-                def read_last_lines(file_path, num_lines=20):
-                    if not os.path.exists(file_path):
-                        return []
+                # Parse session log for detailed authentication events
+                session_path = os.path.join(NS_HOME, 'session.log')
+                alerts_path = os.path.join(NS_LOGS, 'alerts.log')
+                security_path = os.path.join(NS_LOGS, 'security.log')
+                audit_path = os.path.join(NS_LOGS, 'audit.log')
+                
+                stats = {
+                    'auth_success': 0,
+                    'auth_fail': 0,
+                    'active_sessions': 0,
+                    'audit_count': 0,
+                    'security_count': 0,
+                    'threat_count': 0,
+                    'integrity_files': 0,
+                    'integrity_changes': 0,
+                    'last_audit': 'Never'
+                }
+                
+                # Parse session log for detailed authentication events
+                if os.path.exists(session_path):
                     try:
-                        with open(file_path, 'r', encoding='utf-8') as f:
-                            lines = f.readlines()[-num_lines:]
-                            return [line.strip() for line in lines if line.strip()]
-                    except Exception:
-                        return []
+                        with open(session_path, 'r', encoding='utf-8') as f:
+                            lines = f.readlines()[-50:]  # Last 50 lines
+                            for line in lines:
+                                line = line.strip()
+                                if not line: continue
+                                
+                                parts = line.split(' ', 2)
+                                if len(parts) >= 3:
+                                    timestamp = f"{parts[0]} {parts[1]}"
+                                    message = parts[2]
+                                    
+                                    log_entry = {
+                                        'timestamp': timestamp,
+                                        'message': message,
+                                        'level': 'info'
+                                    }
+                                    
+                                    if 'SUCCESSFUL_LOGIN' in message:
+                                        stats['auth_success'] += 1
+                                        log_entry['level'] = 'success'
+                                        auth_logs.append(log_entry)
+                                    elif 'FAILED_LOGIN' in message:
+                                        stats['auth_fail'] += 1
+                                        log_entry['level'] = 'error'
+                                        auth_logs.append(log_entry)
+                    except Exception as e:
+                        print(f"Error reading session log: {e}")
+                
+                # Count active sessions with expiry check
+                try:
+                    sessions_db = read_json(SESSIONS, {})
+                    current_time = int(time.time())
+                    active_count = 0
+                    for session_id, session_data in sessions_db.items():
+                        if isinstance(session_data, dict):
+                            session_expiry = session_data.get('expires', 0)
+                            if session_expiry > current_time:
+                                active_count += 1
+                    stats['active_sessions'] = active_count
+                except Exception as e:
+                    print(f"Error counting active sessions: {e}")
+                    stats['active_sessions'] = 0
+                
+                # Parse security log for dedicated security events
+                if os.path.exists(security_path):
+                    try:
+                        with open(security_path, 'r', encoding='utf-8') as f:
+                            lines = f.readlines()[-100:]  # Increased to 100 for comprehensive logs
+                            for line in lines:
+                                line = line.strip()
+                                if not line: continue
+                                
+                                parts = line.split(' ', 3)
+                                if len(parts) >= 4:
+                                    timestamp = f"{parts[0]} {parts[1]}"
+                                    level_type = parts[2].strip('[]').lower()
+                                    message = parts[3]
+                                    
+                                    log_entry = {
+                                        'timestamp': timestamp,
+                                        'message': message,
+                                        'level': level_type
+                                    }
+                                    
+                                    # Enhanced categorization for new log types
+                                    if level_type in ['threat', 'critical']:
+                                        stats['threat_count'] += 1
+                                        log_entry['level'] = 'critical'
+                                    elif level_type in ['auth_fail', 'forbidden', 'unauthorized', 'csrf_fail', '2fa_fail']:
+                                        stats['auth_fail'] += 1
+                                        log_entry['level'] = 'error'
+                                        auth_logs.append(log_entry)
+                                    elif level_type in ['auth_success']:
+                                        stats['auth_success'] += 1
+                                        log_entry['level'] = 'success'
+                                        auth_logs.append(log_entry)
+                                    elif level_type in ['connection', 'post_request']:
+                                        log_entry['level'] = 'info'
+                                    elif level_type in ['rate_limit', 'banned_access']:
+                                        log_entry['level'] = 'warning'
+                                        stats['threat_count'] += 1
+                                    elif level_type in ['login_attempt', 'login_invalid']:
+                                        log_entry['level'] = 'info'
+                                        auth_logs.append(log_entry)
+                                    
+                                    security_logs.append(log_entry)
+                                    stats['security_count'] += 1
+                    except Exception as e:
+                        print(f"Error reading security log: {e}")
+                
+                # Parse audit log for detailed system events
+                if os.path.exists(audit_path):
+                    try:
+                        with open(audit_path, 'r', encoding='utf-8') as f:
+                            lines = f.readlines()[-50:]  # Last 50 lines
+                            for line in lines:
+                                line = line.strip()
+                                if not line: continue
+                                
+                                parts = line.split(' ', 2)
+                                if len(parts) >= 3:
+                                    timestamp = f"{parts[0]} {parts[1]}"
+                                    message = parts[2]
+                                    
+                                    log_entry = {
+                                        'timestamp': timestamp,
+                                        'message': message,
+                                        'level': 'info'
+                                    }
+                                    
+                                    if 'LOGIN OK' in message or 'LOGIN SUCCESS' in message:
+                                        stats['auth_success'] += 1
+                                        log_entry['level'] = 'success'
+                                        auth_logs.append(log_entry)
+                                    elif 'LOGIN FAIL' in message:
+                                        stats['auth_fail'] += 1
+                                        log_entry['level'] = 'error'
+                                        auth_logs.append(log_entry)
+                                    elif any(kw in message for kw in ['MONITOR', 'CONTROL', 'FS']):
+                                        audit_logs.append(log_entry)
+                                    
+                                    stats['audit_count'] += 1
+                                    stats['last_audit'] = timestamp
+                    except Exception as e:
+                        print(f"Error reading audit log: {e}")
+                
+                # Parse alerts for security events
+                if os.path.exists(alerts_path):
+                    try:
+                        with open(alerts_path, 'r', encoding='utf-8') as f:
+                            lines = f.readlines()[-50:]
+                            for line in lines:
+                                line = line.strip()
+                                if not line: continue
+                                
+                                parts = line.split(' ', 3)
+                                if len(parts) >= 4:
+                                    timestamp = f"{parts[0]} {parts[1]}"
+                                    level = parts[2].strip('[]').lower()
+                                    message = parts[3]
+                                    
+                                    log_entry = {
+                                        'timestamp': timestamp,
+                                        'message': message,
+                                        'level': level
+                                    }
+                                    
+                                    if level in ['crit', 'error']:
+                                        stats['threat_count'] += 1
+                                    
+                                    # Add to security logs if it's a security-related alert
+                                    if any(kw in message.lower() for kw in ['network', 'integrity', 'suspicious', 'attack', 'breach']):
+                                        security_logs.append(log_entry)
+                                        stats['security_count'] += 1
+                    except Exception as e:
+                        print(f"Error reading alerts log: {e}")
+                
+                # Check integrity monitoring
+                integrity_state_path = os.path.join(NS_CTRL, 'integrity.state')
+                if os.path.exists(integrity_state_path):
+                    try:
+                        integrity_data = read_json(integrity_state_path, {})
+                        stats['integrity_files'] = integrity_data.get('files', 0)
+                        stats['integrity_changes'] = integrity_data.get('changes_detected', 0)
+                        
+                        # Add recent integrity events to logs
+                        recent_changes = integrity_data.get('recent_changes', [])
+                        for change in recent_changes[-20:]:  # Last 20 changes
+                            integrity_logs.append({
+                                'timestamp': change.get('timestamp', 'Unknown'),
+                                'message': f"File change detected: {change.get('file', 'unknown')} ({change.get('type', 'modified')})",
+                                'level': 'warning'
+                            })
+                    except Exception as e:
+                        print(f"Error reading integrity state: {e}")
+                else:
+                    # Fallback to integrity.json
+                    integrity_json = read_json(os.path.join(NS_LOGS, 'integrity.json'), {})
+                    stats['integrity_files'] = integrity_json.get('files', 0)
+                    stats['integrity_changes'] = integrity_json.get('changes', 0)
                 
                 response = {
                     'ok': True,
-                    'stats': {
-                        'auth_success': 0,
-                        'auth_fail': 0,
-                        'active_sessions': 0,
-                        'audit_count': 0,
-                        'security_count': len(read_last_lines(security_log_path, 100)),
-                        'threat_count': 0,
-                        'integrity_files': 0,
-                        'integrity_changes': 0,
-                        'last_audit': 'Recent'
-                    },
+                    'stats': stats,
                     'logs': {
-                        'auth': [],
-                        'audit': read_last_lines(audit_log_path),
-                        'security': read_last_lines(security_log_path),
-                        'integrity': read_last_lines(alerts_log_path)
+                        'auth': auth_logs[-20:],  # Last 20 auth events
+                        'audit': audit_logs[-20:],  # Last 20 audit events  
+                        'security': security_logs[-20:],  # Last 20 security events
+                        'integrity': integrity_logs[-20:]  # Last 20 integrity events
                     }
                 }
                 
@@ -3558,6 +4608,7 @@ class Handler(SimpleHTTPRequestHandler):
                 return
                 
             except Exception as e:
+                print(f"Security API error: {e}")
                 self._set_headers(500); 
                 self.wfile.write(json.dumps({'error': str(e)}).encode('utf-8'))
                 return
@@ -3645,11 +4696,69 @@ write_dashboard(){
     <button data-tab="terminal" type="button">Terminal</button>
     <button data-tab="webgen" type="button">Web Builder</button>
     <button data-tab="config" type="button">Config</button>
+    <button data-tab="results" type="button">Results</button>
   </nav>
 
   <main>
     <section id="tab-status" class="tab" aria-labelledby="Status">
       <p class="section-description">Real-time system monitoring dashboard showing CPU load, memory usage, disk space, network connectivity, and security status. Use the monitor controls below to enable/disable specific monitoring modules.</p>
+      
+      <!-- Live Monitoring Stats Section -->
+      <section class="live-stats-panel">
+        <h2 class="stats-title">🔴 Live System Metrics</h2>
+        <div class="stats-grid">
+          <div class="stat-card">
+            <div class="stat-header">CPU Load</div>
+            <div class="stat-visual">
+              <div class="progress-bar">
+                <div class="progress-fill" id="cpu-progress"></div>
+              </div>
+              <span class="stat-value" id="cpu-stat">0%</span>
+            </div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-header">Memory</div>
+            <div class="stat-visual">
+              <div class="progress-bar">
+                <div class="progress-fill" id="mem-progress"></div>
+              </div>
+              <span class="stat-value" id="mem-stat">0%</span>
+            </div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-header">Disk</div>
+            <div class="stat-visual">
+              <div class="progress-bar">
+                <div class="progress-fill" id="disk-progress"></div>
+              </div>
+              <span class="stat-value" id="disk-stat">0%</span>
+            </div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-header">Network</div>
+            <div class="stat-visual">
+              <div class="status-indicator" id="net-indicator"></div>
+              <span class="stat-value" id="net-stat">Checking...</span>
+            </div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-header">Security</div>
+            <div class="stat-visual">
+              <div class="status-indicator" id="sec-indicator"></div>
+              <span class="stat-value" id="sec-stat">Monitoring</span>
+            </div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-header">Monitors</div>
+            <div class="stat-visual">
+              <div class="monitor-count" id="monitor-count">
+                <span class="active" id="monitors-active">0</span>/<span id="monitors-total">0</span>
+              </div>
+              <span class="stat-value" id="monitor-stat">Active</span>
+            </div>
+          </div>
+        </div>
+      </section>
       
       <section class="grid">
         <div class="card" id="card-cpu" title="System CPU load averages with warning and critical thresholds"><h2>CPU Load</h2><div class="value" id="cpu"></div></div>
@@ -3682,9 +4791,41 @@ write_dashboard(){
 
     <section id="tab-alerts" class="tab" aria-labelledby="Alerts">
       <div class="panel">
-        <h3>System Alerts</h3>
-        <p class="panel-description">Critical system alerts and notifications. Shows warnings about high resource usage, security threats, failed services, and other important system events that require attention.</p>
-        <ul id="alerts"></ul>
+        <h3>🚨 Critical Security Alerts</h3>
+        <p class="panel-description">High-priority security alerts including breach attempts, brute force attacks, suspicious activity, and critical system warnings. Only urgent events requiring immediate attention are displayed here.</p>
+        
+        <!-- Security Alert Categories -->
+        <div class="alert-categories">
+          <div class="alert-category critical">
+            <h4>🔴 Critical Threats</h4>
+            <div class="alert-count" id="critical-count">0</div>
+            <ul id="critical-alerts" class="alert-list"></ul>
+          </div>
+          
+          <div class="alert-category warning">
+            <h4>🟡 Security Warnings</h4>
+            <div class="alert-count" id="warning-count">0</div>
+            <ul id="warning-alerts" class="alert-list"></ul>
+          </div>
+          
+          <div class="alert-category brute-force">
+            <h4>🛡️ Brute Force Attempts</h4>
+            <div class="alert-count" id="brute-force-count">0</div>
+            <ul id="brute-force-alerts" class="alert-list"></ul>
+          </div>
+          
+          <div class="alert-category breach">
+            <h4>⚠️ Access Violations</h4>
+            <div class="alert-count" id="breach-count">0</div>
+            <ul id="breach-alerts" class="alert-list"></ul>
+          </div>
+        </div>
+        
+        <!-- Legacy Alert List (for backwards compatibility) -->
+        <div class="legacy-alerts">
+          <h4>All System Alerts</h4>
+          <ul id="alerts"></ul>
+        </div>
       </div>
     </section>
 
@@ -4019,6 +5160,81 @@ write_dashboard(){
         <h3>Configuration Viewer</h3>
         <p class="panel-description">View current NovaShield configuration settings including enabled features, monitoring thresholds, security options, and system paths. This is a read-only view - edit the configuration file directly to make changes.</p>
         <pre id="config" style="white-space:pre-wrap;"></pre>
+      </div>
+    </section>
+
+    <section id="tab-results" class="tab" aria-labelledby="Results">
+      <div class="panel">
+        <h3>📊 Analysis Results & Reports</h3>
+        <p class="panel-description">Comprehensive results from security scans, system analysis, tool executions, and automated reports. View detailed outputs, historical analysis data, and generated system reports.</p>
+        
+        <!-- Results Categories -->
+        <div class="results-categories">
+          <div class="results-nav">
+            <button class="result-category-btn active" data-category="recent">Recent Results</button>
+            <button class="result-category-btn" data-category="security">Security Scans</button>
+            <button class="result-category-btn" data-category="system">System Reports</button>
+            <button class="result-category-btn" data-category="tools">Tool Outputs</button>
+            <button class="result-category-btn" data-category="logs">Log Analysis</button>
+          </div>
+          
+          <div class="results-content">
+            <!-- Recent Results -->
+            <div class="result-category-content active" id="recent-results">
+              <h4>Recent Analysis Results</h4>
+              <div class="results-list" id="recent-results-list">
+                <div class="no-results">No recent results available. Run some tools or security scans to see results here.</div>
+              </div>
+            </div>
+            
+            <!-- Security Scan Results -->
+            <div class="result-category-content" id="security-results">
+              <h4>Security Scan Results</h4>
+              <div class="results-actions">
+                <button onclick="runSecurityScan()" class="action-btn">🔒 Run Security Scan</button>
+                <button onclick="runVulnerabilityCheck()" class="action-btn">🛡️ Vulnerability Check</button>
+              </div>
+              <div class="results-list" id="security-results-list">
+                <div class="no-results">No security scan results yet. Click "Run Security Scan" to generate a comprehensive security report.</div>
+              </div>
+            </div>
+            
+            <!-- System Reports -->
+            <div class="result-category-content" id="system-results">
+              <h4>System Analysis Reports</h4>
+              <div class="results-actions">
+                <button onclick="generateSystemReport()" class="action-btn">📋 Generate System Report</button>
+                <button onclick="runPerformanceAnalysis()" class="action-btn">⚡ Performance Analysis</button>
+              </div>
+              <div class="results-list" id="system-results-list">
+                <div class="no-results">No system reports available. Generate a comprehensive system report to see detailed analysis.</div>
+              </div>
+            </div>
+            
+            <!-- Tool Outputs -->
+            <div class="result-category-content" id="tools-results">
+              <h4>Tool Execution Results</h4>
+              <div class="results-actions">
+                <button onclick="showTab('tools')" class="action-btn">🔧 Go to Tools Panel</button>
+              </div>
+              <div class="results-list" id="tools-results-list">
+                <div class="no-results">No tool execution results yet. Use the Tools panel to run system commands and tools.</div>
+              </div>
+            </div>
+            
+            <!-- Log Analysis -->
+            <div class="result-category-content" id="logs-results">
+              <h4>Log Analysis Results</h4>
+              <div class="results-actions">
+                <button onclick="analyzeSecurityLogs()" class="action-btn">🔍 Analyze Security Logs</button>
+                <button onclick="analyzeSystemLogs()" class="action-btn">📜 Analyze System Logs</button>
+              </div>
+              <div class="results-list" id="logs-results-list">
+                <div class="no-results">No log analysis results yet. Run log analysis to identify patterns and potential issues.</div>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     </section>
   </main>
@@ -4671,6 +5887,297 @@ body.login-active header, body.login-active nav, body.login-active main{
     border-radius: 50%;
     width: 36px;
 }
+
+/* Live Stats Panel */
+.live-stats-panel {
+    margin-bottom: 20px;
+    background: rgba(5, 15, 25, 0.6);
+    border: 1px solid #173764;
+    border-radius: 12px;
+    padding: 16px;
+}
+
+.stats-title {
+    margin: 0 0 15px 0;
+    color: var(--accent);
+    font-size: 16px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 12px;
+}
+
+.stat-card {
+    background: rgba(13, 35, 57, 0.6);
+    border: 1px solid #173764;
+    border-radius: 8px;
+    padding: 12px;
+    text-align: center;
+}
+
+.stat-header {
+    font-size: 11px;
+    color: #94a3b8;
+    margin-bottom: 8px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.stat-visual {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+}
+
+.progress-bar {
+    width: 100%;
+    height: 6px;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 3px;
+    overflow: hidden;
+}
+
+.progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #10b981 0%, #3b82f6 50%, #f59e0b 80%, #ef4444 100%);
+    width: 0%;
+    transition: width 0.3s ease;
+    border-radius: 3px;
+}
+
+.status-indicator {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: #10b981;
+    animation: pulse 2s infinite;
+}
+
+.status-indicator.warning { background: #f59e0b; }
+.status-indicator.critical { background: #ef4444; }
+
+.monitor-count {
+    font-size: 18px;
+    font-weight: bold;
+    color: var(--accent);
+}
+
+.monitor-count .active {
+    color: #10b981;
+}
+
+.stat-value {
+    font-size: 12px;
+    color: #cfe6ff;
+    font-weight: 500;
+}
+
+/* Enhanced Alerts Panel */
+.alert-categories {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 15px;
+    margin-bottom: 20px;
+}
+
+.alert-category {
+    background: rgba(13, 35, 57, 0.6);
+    border: 1px solid #173764;
+    border-radius: 8px;
+    padding: 14px;
+}
+
+.alert-category.critical { border-left: 4px solid #ef4444; }
+.alert-category.warning { border-left: 4px solid #f59e0b; }
+.alert-category.brute-force { border-left: 4px solid #8b5cf6; }
+.alert-category.breach { border-left: 4px solid #f97316; }
+
+.alert-category h4 {
+    margin: 0 0 10px 0;
+    font-size: 14px;
+    color: var(--accent);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.alert-count {
+    background: rgba(255, 255, 255, 0.1);
+    color: #cfe6ff;
+    padding: 2px 8px;
+    border-radius: 12px;
+    font-size: 11px;
+    font-weight: bold;
+}
+
+.alert-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    max-height: 120px;
+    overflow-y: auto;
+}
+
+.alert-list li {
+    padding: 6px 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    font-size: 11px;
+    color: #94a3b8;
+}
+
+.alert-list li:last-child {
+    border-bottom: none;
+}
+
+.legacy-alerts {
+    margin-top: 20px;
+    padding-top: 20px;
+    border-top: 1px solid #173764;
+}
+
+.legacy-alerts h4 {
+    margin: 0 0 10px 0;
+    color: #94a3b8;
+    font-size: 13px;
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+}
+
+/* Results Page Styles */
+.results-categories {
+    margin-top: 15px;
+}
+
+.results-nav {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 20px;
+    flex-wrap: wrap;
+}
+
+.result-category-btn {
+    background: rgba(13, 35, 57, 0.6);
+    color: #94a3b8;
+    border: 1px solid #173764;
+    border-radius: 6px;
+    padding: 8px 16px;
+    cursor: pointer;
+    font-size: 12px;
+    transition: all 0.2s;
+}
+
+.result-category-btn:hover {
+    border-color: var(--accent);
+    color: #cfe6ff;
+}
+
+.result-category-btn.active {
+    background: var(--accent);
+    color: #0f172a;
+    border-color: var(--accent);
+}
+
+.result-category-content {
+    display: none;
+}
+
+.result-category-content.active {
+    display: block;
+}
+
+.result-category-content h4 {
+    margin: 0 0 15px 0;
+    color: var(--accent);
+    font-size: 16px;
+}
+
+.results-actions {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 20px;
+    flex-wrap: wrap;
+}
+
+.action-btn {
+    background: rgba(13, 35, 57, 0.8);
+    color: var(--accent);
+    border: 1px solid #173764;
+    border-radius: 6px;
+    padding: 8px 12px;
+    cursor: pointer;
+    font-size: 11px;
+    transition: all 0.2s;
+}
+
+.action-btn:hover {
+    background: var(--accent);
+    color: #0f172a;
+    border-color: var(--accent);
+}
+
+.results-list {
+    background: rgba(5, 15, 25, 0.6);
+    border: 1px solid #173764;
+    border-radius: 8px;
+    padding: 15px;
+    max-height: 400px;
+    overflow-y: auto;
+}
+
+.result-item {
+    background: rgba(13, 35, 57, 0.6);
+    border: 1px solid #173764;
+    border-radius: 6px;
+    padding: 12px;
+    margin-bottom: 10px;
+}
+
+.result-item:last-child {
+    margin-bottom: 0;
+}
+
+.result-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+}
+
+.result-title {
+    color: var(--accent);
+    font-weight: 500;
+    font-size: 13px;
+}
+
+.result-timestamp {
+    color: #94a3b8;
+    font-size: 10px;
+}
+
+.result-content {
+    color: #cfe6ff;
+    font-size: 11px;
+    line-height: 1.4;
+    white-space: pre-wrap;
+    font-family: monospace;
+}
+
+.no-results {
+    color: #94a3b8;
+    text-align: center;
+    padding: 20px;
+    font-style: italic;
+}
+
 CSS
 
   write_file "${NS_WWW}/app.js" 644 <<'JS'
@@ -4887,12 +6394,102 @@ async function api(path, opts){
 function human(val, unit=''){ if(val===undefined || val===null) return '?'; return `${val}${unit}`; }
 function setCard(id, text){ const el = $('#'+id); if(el) el.textContent = text; }
 
+// Update Live Stats Panel with real-time monitoring data
+function updateLiveStats(data) {
+    // CPU Stats
+    const cpu = data.cpu || {};
+    const cpuLoad = parseFloat(cpu.load1 || 0);
+    const cpuPercent = Math.min(Math.max(cpuLoad * 25, 0), 100); // Rough conversion to percentage
+    updateStatProgress('cpu', cpuPercent, `${cpu.load1 || '0.0'} (1m)`);
+    
+    // Memory Stats
+    const mem = data.memory || {};
+    const memPercent = parseFloat(mem.used_pct || 0);
+    updateStatProgress('mem', memPercent, `${memPercent}%`);
+    
+    // Disk Stats
+    const disk = data.disk || {};
+    const diskPercent = parseFloat(disk.use_pct || 0);
+    updateStatProgress('disk', diskPercent, `${diskPercent}%`);
+    
+    // Network Status
+    const net = data.network || {};
+    const netStatus = net.level || 'OK';
+    updateStatusIndicator('net', netStatus, `${netStatus} (${net.ip || 'N/A'})`);
+    
+    // Security Status
+    const security = data.integrity || {};
+    const secStatus = security.level || 'OK';
+    updateStatusIndicator('sec', secStatus, `${secStatus}`);
+    
+    // Monitor Counts
+    let activeMonitors = 0;
+    let totalMonitors = 8; // Total possible monitors
+    const monitors = ['cpu_enabled', 'memory_enabled', 'disk_enabled', 'network_enabled', 
+                     'integrity_enabled', 'process_enabled', 'userlogins_enabled', 'services_enabled'];
+    monitors.forEach(monitor => {
+        if (data[monitor]) activeMonitors++;
+    });
+    
+    updateMonitorCount(activeMonitors, totalMonitors);
+}
+
+function updateStatProgress(type, percent, value) {
+    const progressEl = $(`#${type}-progress`);
+    const valueEl = $(`#${type}-stat`);
+    
+    if (progressEl) {
+        progressEl.style.width = `${Math.min(percent, 100)}%`;
+        // Color coding based on percentage
+        if (percent >= 90) {
+            progressEl.style.background = '#ef4444'; // Red
+        } else if (percent >= 75) {
+            progressEl.style.background = '#f59e0b'; // Yellow
+        } else if (percent >= 50) {
+            progressEl.style.background = '#3b82f6'; // Blue
+        } else {
+            progressEl.style.background = '#10b981'; // Green
+        }
+    }
+    
+    if (valueEl) valueEl.textContent = value;
+}
+
+function updateStatusIndicator(type, status, value) {
+    const indicatorEl = $(`#${type}-indicator`);
+    const valueEl = $(`#${type}-stat`);
+    
+    if (indicatorEl) {
+        indicatorEl.className = 'status-indicator';
+        if (status === 'WARN' || status === 'WARNING') {
+            indicatorEl.classList.add('warning');
+        } else if (status === 'CRIT' || status === 'CRITICAL' || status === 'ERROR') {
+            indicatorEl.classList.add('critical');
+        }
+    }
+    
+    if (valueEl) valueEl.textContent = value;
+}
+
+function updateMonitorCount(active, total) {
+    const activeEl = $('#monitors-active');
+    const totalEl = $('#monitors-total');
+    const statEl = $('#monitor-stat');
+    
+    if (activeEl) activeEl.textContent = active;
+    if (totalEl) totalEl.textContent = total;
+    if (statEl) statEl.textContent = `${active}/${total} Active`;
+}
+
 async function refresh(){
   try{
     const r = await api('/api/status'); const j = await r.json();
     CSRF = j.csrf || '';
     // If we got here successfully, ensure login overlay is off
     hideLogin();
+
+    // Update Live Stats Panel
+    updateLiveStats(j);
 
     // Enhanced CPU information
     const cpu = j.cpu || {};
@@ -4992,6 +6589,7 @@ async function loadAlerts() {
     
     const alertsEl = $('#alerts');
     if (alertsEl && j.alerts) {
+      // Legacy alerts list
       alertsEl.innerHTML = '';
       const alerts = j.alerts.slice(-10); // Show last 10 alerts
       if (alerts.length === 0) {
@@ -5005,10 +6603,87 @@ async function loadAlerts() {
           alertsEl.appendChild(li);
         });
       }
+      
+      // Categorize alerts for enhanced display
+      categorizeAlerts(j.alerts || []);
     }
   } catch(e) {
     console.error('Failed to load alerts:', e);
   }
+}
+
+// Categorize alerts into security threat levels
+function categorizeAlerts(alerts) {
+    const critical = [];
+    const warnings = [];
+    const bruteForce = [];
+    const breaches = [];
+    
+    alerts.forEach(alert => {
+        const alertLower = alert.toLowerCase();
+        
+        // Critical threats (immediate danger)
+        if (alertLower.includes('breach') || alertLower.includes('compromised') || 
+            alertLower.includes('intrusion') || alertLower.includes('malware') ||
+            alertLower.includes('critical') || alertLower.includes('emergency')) {
+            critical.push(alert);
+        }
+        // Brute force attempts
+        else if (alertLower.includes('brute') || alertLower.includes('failed login') ||
+                 alertLower.includes('multiple attempts') || alertLower.includes('suspicious login') ||
+                 alertLower.includes('rate limit') || alertLower.includes('blocked ip')) {
+            bruteForce.push(alert);
+        }
+        // Access violations and unauthorized attempts
+        else if (alertLower.includes('unauthorized') || alertLower.includes('access denied') ||
+                 alertLower.includes('permission') || alertLower.includes('forbidden') ||
+                 alertLower.includes('invalid token') || alertLower.includes('session expired')) {
+            breaches.push(alert);
+        }
+        // General warnings
+        else if (alertLower.includes('warn') || alertLower.includes('suspicious') ||
+                 alertLower.includes('unusual') || alertLower.includes('high usage') ||
+                 alertLower.includes('threshold')) {
+            warnings.push(alert);
+        }
+        // If doesn't match any category, put in warnings
+        else {
+            warnings.push(alert);
+        }
+    });
+    
+    // Update alert categories
+    updateAlertCategory('critical', critical, 'No critical threats detected');
+    updateAlertCategory('warning', warnings, 'No warnings');
+    updateAlertCategory('brute-force', bruteForce, 'No brute force attempts');
+    updateAlertCategory('breach', breaches, 'No access violations');
+}
+
+function updateAlertCategory(categoryId, alerts, emptyMessage) {
+    const countEl = $(`#${categoryId}-count`);
+    const listEl = $(`#${categoryId}-alerts`);
+    
+    if (countEl) {
+        countEl.textContent = alerts.length;
+    }
+    
+    if (listEl) {
+        listEl.innerHTML = '';
+        
+        if (alerts.length === 0) {
+            const li = document.createElement('li');
+            li.textContent = emptyMessage;
+            li.style.color = '#10b981'; // Green for good news
+            listEl.appendChild(li);
+        } else {
+            // Show last 5 alerts for this category
+            alerts.slice(-5).forEach(alert => {
+                const li = document.createElement('li');
+                li.textContent = alert;
+                listEl.appendChild(li);
+            });
+        }
+    }
 }
 
 // Load configuration data
@@ -5188,9 +6863,12 @@ $('#prompt').addEventListener('keypress', (e) => {
   }
 });
 
-// Web Terminal
+// Enhanced Web Terminal with improved connection stability
 let ws = null;
 let termBuffer = '';
+let reconnectAttempts = 0;
+let maxReconnectAttempts = 5;
+let reconnectDelay = 2000;
 
 function connectTerm() {
     if (ws && ws.readyState === WebSocket.OPEN) {
@@ -5202,11 +6880,16 @@ function connectTerm() {
         ws = new WebSocket(`${proto}://${location.host}/ws/term`);
         const term = $('#term');
         const termInput = $('#terminal-input');
-        term.textContent = 'Connecting to terminal...\n';
+        
+        // Show connection status
+        term.textContent = '🔗 Connecting to terminal...\n';
         ws.binaryType = 'arraybuffer';
         
         ws.onopen = () => { 
             term.textContent = '';
+            console.log('Terminal WebSocket connected successfully');
+            reconnectAttempts = 0; // Reset counter on successful connection
+            
             // Ensure terminal is focusable and focused
             term.setAttribute('tabindex', '0');
             term.focus();
@@ -5220,37 +6903,110 @@ function connectTerm() {
                 });
             }
             
-            // Send initial resize
-            const termRect = term.getBoundingClientRect();
-            const cols = Math.floor(termRect.width / 8) || 80;
-            const rows = Math.floor(termRect.height / 16) || 24;
-            ws.send(JSON.stringify({type: 'resize', cols, rows}));
+            // Send initial resize with error handling
+            try {
+                const termRect = term.getBoundingClientRect();
+                const cols = Math.floor(termRect.width / 8) || 80;
+                const rows = Math.floor(termRect.height / 16) || 24;
+                console.log(`Sending terminal resize: ${cols}x${rows}`);
+                ws.send(JSON.stringify({type: 'resize', cols, rows}));
+            } catch (e) {
+                console.warn('Failed to send initial resize:', e);
+            }
             
             setupTerminalInput();
-            toast('✓ Terminal connected');
+            toast('✅ Terminal connected');
         };
         
         ws.onmessage = (ev) => {
-            if (ev.data instanceof ArrayBuffer) {
-                const dec = new TextDecoder('utf-8', {fatal: false});
-                const txt = dec.decode(new Uint8Array(ev.data));
-                term.textContent += txt;
-            } else {
-                term.textContent += ev.data;
+            try {
+                if (ev.data instanceof ArrayBuffer) {
+                    const dec = new TextDecoder('utf-8', {fatal: false});
+                    const txt = dec.decode(new Uint8Array(ev.data));
+                    term.textContent += txt;
+                } else {
+                    term.textContent += ev.data;
+                }
+                term.scrollTop = term.scrollHeight;
+            } catch (e) {
+                console.error('Error processing terminal message:', e);
             }
-            term.scrollTop = term.scrollHeight;
         };
         
-        ws.onclose = () => { toast('Terminal closed'); ws = null; };
-        ws.onerror = () => { toast('Terminal error'); ws = null; };
+        ws.onclose = (event) => { 
+            console.log('Terminal WebSocket closed:', event.code, event.reason);
+            
+            if (reconnectAttempts < maxReconnectAttempts) {
+                const delay = reconnectDelay * Math.pow(1.5, reconnectAttempts); // Exponential backoff
+                toast(`Terminal disconnected - reconnecting in ${Math.round(delay/1000)}s... (${reconnectAttempts + 1}/${maxReconnectAttempts})`); 
+                
+                setTimeout(() => {
+                    reconnectAttempts++;
+                    connectTerm();
+                }, delay);
+            } else {
+                toast('Terminal connection failed - max retry attempts reached. Please refresh the page.', 'error');
+                term.textContent += '\n❌ Connection lost. Please refresh the page to reconnect.\n';
+            }
+            
+            ws = null; 
+        };
+        
+        ws.onerror = (error) => { 
+            console.error('Terminal WebSocket error:', error);
+            
+            if (reconnectAttempts === 0) {
+                toast('Terminal connection error - check authentication and server status'); 
+            }
+            ws = null; 
+        };
         
         // Remove any existing keydown handlers to prevent duplicates
         term.onkeydown = null;
         
-        // Enhanced keydown handler with better key mapping
+        // Enhanced keydown handler with better key mapping and error handling
         term.onkeydown = (e) => {
-            if (!ws || ws.readyState !== WebSocket.OPEN) return;
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                toast('Terminal not connected - attempting reconnect...', 'warning');
+                connectTerm();
+                return;
+            }
+            
             e.preventDefault();
+            
+            try {
+                let out = '';
+                if (e.key === 'Enter') out = '\r';
+                else if (e.key === 'Backspace') out = '\x7f';
+                else if (e.key === 'Tab') out = '\t';
+                else if (e.key === 'ArrowUp') out = '\x1b[A';
+                else if (e.key === 'ArrowDown') out = '\x1b[B';
+                else if (e.key === 'ArrowRight') out = '\x1b[C';
+                else if (e.key === 'ArrowLeft') out = '\x1b[D';
+                else if (e.key === 'Home') out = '\x1b[H';
+                else if (e.key === 'End') out = '\x1b[F';
+                else if (e.key === 'Delete') out = '\x1b[3~';
+                else if (e.key === 'PageUp') out = '\x1b[5~';
+                else if (e.key === 'PageDown') out = '\x1b[6~';
+                else if (e.ctrlKey && e.key === 'c') out = '\x03';
+                else if (e.ctrlKey && e.key === 'd') out = '\x04';
+                else if (e.ctrlKey && e.key === 'z') out = '\x1a';
+                else if (e.key.length === 1) out = e.key;
+                
+                if (out) {
+                    ws.send(new TextEncoder().encode(out));
+                }
+            } catch (err) {
+                console.error('Error sending terminal input:', err);
+                toast('Error sending terminal input', 'error');
+            }
+        };
+        
+    } catch (error) {
+        console.error('Failed to create WebSocket connection:', error);
+        toast('Failed to create terminal connection', 'error');
+    }
+}
             
             let out = '';
             if (e.key === 'Enter') out = '\r';
@@ -5291,39 +7047,126 @@ function setupTerminalInput() {
     const term = $('#term');
     const termInput = $('#terminal-input');
     
-    // Mobile keyboard support
+    if (!term || !termInput) {
+        console.warn('Terminal elements not found during setup');
+        return;
+    }
+    
+    // Enhanced mobile keyboard support with better error handling
     term.onclick = () => {
-        term.focus();
-        // On mobile, also focus the hidden input to trigger virtual keyboard
-        if (isMobile()) {
-            termInput.focus();
-            // Quickly refocus back to terminal to maintain visual focus
-            setTimeout(() => term.focus(), 50);
+        try {
+            term.focus();
+            // On mobile, also focus the hidden input to trigger virtual keyboard
+            if (isMobile()) {
+                termInput.focus();
+                // Quickly refocus back to terminal to maintain visual focus
+                setTimeout(() => {
+                    try {
+                        term.focus();
+                    } catch (e) {
+                        console.warn('Failed to refocus terminal:', e);
+                    }
+                }, 50);
+            }
+        } catch (e) {
+            console.error('Error in terminal click handler:', e);
         }
     };
     
-    // Mirror hidden input to WebSocket
+    // Enhanced input mirroring with connection checking
     termInput.oninput = () => {
-        if (ws && ws.readyState === WebSocket.OPEN && termInput.value) {
-            ws.send(new TextEncoder().encode(termInput.value));
-            termInput.value = '';
+        try {
+            if (ws && ws.readyState === WebSocket.OPEN && termInput.value) {
+                ws.send(new TextEncoder().encode(termInput.value));
+                termInput.value = '';
+            } else if (ws && ws.readyState !== WebSocket.OPEN) {
+                // Attempt reconnection if not connected
+                toast('Terminal disconnected - reconnecting...', 'warning');
+                connectTerm();
+            }
+        } catch (e) {
+            console.error('Error sending terminal input:', e);
+            toast('Error sending input to terminal', 'error');
         }
     };
     
-    // Handle special keys from hidden input
+    // Enhanced special key handling with better key mapping
     termInput.onkeydown = (e) => {
-        if (!ws || ws.readyState !== WebSocket.OPEN) return;
+        if (!ws || ws.readyState !== WebSocket.OPEN) {
+            toast('Terminal not connected', 'warning');
+            return;
+        }
         
-        let out = '';
-        if (e.key === 'Enter') out = '\r';
-        else if (e.key === 'Backspace') out = '\x7f';
-        else if (e.key === 'Tab') { out = '\t'; e.preventDefault(); }
-        
-        if (out) {
-            ws.send(new TextEncoder().encode(out));
-            e.preventDefault();
+        try {
+            let out = '';
+            // Enhanced key mapping for better terminal compatibility
+            switch (e.key) {
+                case 'Enter': out = '\r'; break;
+                case 'Backspace': out = '\x7f'; break;
+                case 'Tab': out = '\t'; e.preventDefault(); break;
+                case 'ArrowUp': out = '\x1b[A'; e.preventDefault(); break;
+                case 'ArrowDown': out = '\x1b[B'; e.preventDefault(); break;
+                case 'ArrowRight': out = '\x1b[C'; e.preventDefault(); break;
+                case 'ArrowLeft': out = '\x1b[D'; e.preventDefault(); break;
+                case 'Home': out = '\x1b[H'; e.preventDefault(); break;
+                case 'End': out = '\x1b[F'; e.preventDefault(); break;
+                case 'Delete': out = '\x1b[3~'; e.preventDefault(); break;
+                case 'Escape': out = '\x1b'; e.preventDefault(); break;
+            }
+            
+            // Handle Ctrl combinations
+            if (e.ctrlKey) {
+                switch (e.key.toLowerCase()) {
+                    case 'c': out = '\x03'; e.preventDefault(); break;
+                    case 'd': out = '\x04'; e.preventDefault(); break;
+                    case 'z': out = '\x1a'; e.preventDefault(); break;
+                    case 'l': out = '\x0c'; e.preventDefault(); break; // Clear screen
+                    case 'a': out = '\x01'; e.preventDefault(); break; // Beginning of line
+                    case 'e': out = '\x05'; e.preventDefault(); break; // End of line
+                    case 'u': out = '\x15'; e.preventDefault(); break; // Kill line
+                    case 'k': out = '\x0b'; e.preventDefault(); break; // Kill to end
+                    case 'w': out = '\x17'; e.preventDefault(); break; // Kill word
+                }
+            }
+            
+            if (out) {
+                ws.send(new TextEncoder().encode(out));
+                e.preventDefault();
+            }
+        } catch (err) {
+            console.error('Error processing terminal key:', err);
+            toast('Error processing terminal input', 'error');
         }
     };
+    
+    // Add paste support
+    term.onpaste = (e) => {
+        try {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                e.preventDefault();
+                const paste = (e.clipboardData || window.clipboardData).getData('text');
+                if (paste) {
+                    ws.send(new TextEncoder().encode(paste));
+                }
+            }
+        } catch (err) {
+            console.error('Error pasting to terminal:', err);
+        }
+    };
+    
+    // Handle window resize for terminal sizing
+    window.addEventListener('resize', () => {
+        try {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                const termRect = term.getBoundingClientRect();
+                const cols = Math.floor(termRect.width / 8) || 80;
+                const rows = Math.floor(termRect.height / 16) || 24;
+                ws.send(JSON.stringify({type: 'resize', cols, rows}));
+            }
+        } catch (e) {
+            console.warn('Failed to send resize on window resize:', e);
+        }
+    });
 }
 
 function isMobile() {
@@ -5956,6 +7799,189 @@ function bindAIEvents() {
     }
 }
 
+// Results page functions
+function initializeResultsPage() {
+    // Bind category navigation
+    $$('.result-category-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            switchResultCategory(btn.dataset.category);
+        });
+    });
+    
+    // Load any existing results
+    loadStoredResults();
+}
+
+function switchResultCategory(category) {
+    // Update active button
+    $$('.result-category-btn').forEach(btn => {
+        btn.classList.remove('active');
+    });
+    $(`.result-category-btn[data-category="${category}"]`).classList.add('active');
+    
+    // Update active content
+    $$('.result-category-content').forEach(content => {
+        content.classList.remove('active');
+    });
+    $(`#${category}-results`).classList.add('active');
+}
+
+function addResult(category, title, content, type = 'info') {
+    const resultsList = $(`#${category}-results-list`);
+    if (!resultsList) return;
+    
+    // Remove "no results" message if present
+    const noResults = resultsList.querySelector('.no-results');
+    if (noResults) noResults.remove();
+    
+    // Create result item
+    const resultItem = document.createElement('div');
+    resultItem.className = 'result-item';
+    resultItem.innerHTML = `
+        <div class="result-header">
+            <span class="result-title">${title}</span>
+            <span class="result-timestamp">${new Date().toLocaleString()}</span>
+        </div>
+        <div class="result-content">${content}</div>
+    `;
+    
+    // Add to top of list
+    resultsList.insertBefore(resultItem, resultsList.firstChild);
+    
+    // Also add to recent results
+    if (category !== 'recent') {
+        addResult('recent', title, content, type);
+    }
+    
+    // Store in localStorage for persistence
+    storeResult(category, title, content, type);
+}
+
+function loadStoredResults() {
+    try {
+        const storedResults = localStorage.getItem('novashield-results');
+        if (storedResults) {
+            const results = JSON.parse(storedResults);
+            results.forEach(result => {
+                addResult(result.category, result.title, result.content, result.type);
+            });
+        }
+    } catch (e) {
+        console.warn('Failed to load stored results:', e);
+    }
+}
+
+function storeResult(category, title, content, type) {
+    try {
+        let results = [];
+        const stored = localStorage.getItem('novashield-results');
+        if (stored) {
+            results = JSON.parse(stored);
+        }
+        
+        results.unshift({
+            category,
+            title,
+            content,
+            type,
+            timestamp: new Date().toISOString()
+        });
+        
+        // Keep only last 50 results
+        results = results.slice(0, 50);
+        
+        localStorage.setItem('novashield-results', JSON.stringify(results));
+    } catch (e) {
+        console.warn('Failed to store result:', e);
+    }
+}
+
+// Security scan functions
+async function runSecurityScan() {
+    try {
+        const result = await executeToolRequest('security-scan');
+        addResult('security', '🔒 Security Scan', result, 'security');
+        toast('Security scan completed');
+    } catch (e) {
+        toast('Security scan failed: ' + e.message);
+    }
+}
+
+async function runVulnerabilityCheck() {
+    try {
+        const result = await executeToolRequest('nmap -sV localhost');
+        addResult('security', '🛡️ Vulnerability Check', result, 'security');
+        toast('Vulnerability check completed');
+    } catch (e) {
+        toast('Vulnerability check failed: ' + e.message);
+    }
+}
+
+// System report functions
+async function generateSystemReport() {
+    try {
+        const result = await executeToolRequest('system-info');
+        addResult('system', '📋 System Report', result, 'system');
+        toast('System report generated');
+    } catch (e) {
+        toast('System report failed: ' + e.message);
+    }
+}
+
+async function runPerformanceAnalysis() {
+    try {
+        const result = await executeToolRequest('ps aux --sort=-%cpu | head -20');
+        addResult('system', '⚡ Performance Analysis', result, 'system');
+        toast('Performance analysis completed');
+    } catch (e) {
+        toast('Performance analysis failed: ' + e.message);
+    }
+}
+
+// Log analysis functions
+async function analyzeSecurityLogs() {
+    try {
+        const result = await executeToolRequest('log-analyzer');
+        addResult('logs', '🔍 Security Log Analysis', result, 'logs');
+        toast('Security log analysis completed');
+    } catch (e) {
+        toast('Security log analysis failed: ' + e.message);
+    }
+}
+
+async function analyzeSystemLogs() {
+    try {
+        const result = await executeToolRequest('tail -n 100 /var/log/syslog');
+        addResult('logs', '📜 System Log Analysis', result, 'logs');
+        toast('System log analysis completed');
+    } catch (e) {
+        toast('System log analysis failed: ' + e.message);
+    }
+}
+
+// Helper function to execute tool requests
+async function executeToolRequest(tool) {
+    const response = await api('/api/tools/execute', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRF': CSRF
+        },
+        body: JSON.stringify({ tool })
+    });
+    
+    if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+    }
+    
+    const data = await response.json();
+    if (!data.ok) {
+        throw new Error(data.error || 'Tool execution failed');
+    }
+    
+    return data.output || 'No output generated';
+}
+
 async function loadJarvisMemory() {
     try {
         const response = await fetch('/api/jarvis/memory');
@@ -6220,6 +8246,11 @@ tabs.forEach(b => {
         if (activeTab === 'ai' && !loadedTabs.has('ai-enhanced')) {
             loadedTabs.add('ai-enhanced');
             initEnhancedAI();
+        }
+        
+        if (activeTab === 'results' && !loadedTabs.has('results')) {
+            loadedTabs.add('results');
+            initializeResultsPage();
         }
         
         // Original polling and loading logic
