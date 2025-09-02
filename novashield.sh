@@ -150,7 +150,7 @@ is_security_hardening_enabled(){ [ "${NOVASHIELD_SECURITY_HARDENING:-0}" = "1" ]
 is_strict_sessions_enabled(){ [ "${NOVASHIELD_STRICT_SESSIONS:-0}" = "1" ]; }
 is_external_checks_enabled(){ [ "${NOVASHIELD_EXTERNAL_CHECKS:-1}" = "1" ]; }
 is_web_auto_start_enabled(){ [ "${NOVASHIELD_WEB_AUTO_START:-1}" = "1" ]; }
-is_auth_strict_enabled(){ [ "${NOVASHIELD_AUTH_STRICT:-1}" = "1" ]; }
+is_auth_strict_enabled(){ [ "${NOVASHIELD_AUTH_STRICT:-0}" = "1" ]; }
 
 # Improved file writing with proper directory creation and permissions
 write_file(){ 
@@ -378,7 +378,9 @@ security:
   tls_enabled: false
   tls_cert: "keys/tls.crt"
   tls_key: "keys/tls.key"
-  session_ttl_minutes: 120  # Session timeout in minutes (default: 2 hours)
+  session_ttl_minutes: 720  # Session timeout in minutes (default: 12 hours)
+  session_ttl_min: 720      # Alternate naming for session TTL 
+  strict_reload: false      # Force login on every page reload
   force_login_on_reload: false  # Force login on every page reload
 
 terminal:
@@ -461,7 +463,7 @@ webgen:
 
 jarvis:
   personality: "helpful"  # helpful, snarky, professional
-  memory_size: 10         # remember last N conversations
+  memory_size: 50         # remember last N conversations (increased from 10)
   voice_enabled: false    # future text-to-speech capability
 YAML
 }
@@ -1426,7 +1428,7 @@ BANS_DB = os.path.join(NS_CTRL,'bans.json')
 GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11'  # WebSocket
 
 # Environment variable checks
-AUTH_STRICT = os.environ.get('NOVASHIELD_AUTH_STRICT', '1') == '1'
+AUTH_STRICT = os.environ.get('NOVASHIELD_AUTH_STRICT', '0') == '1'
 
 def py_alert(level, msg):
     """Helper to log security alerts to alerts.log in the same format as bash alert()"""
@@ -1628,6 +1630,24 @@ def write_text(path, data):
 def read_json(path, default=None):
     try: return json.loads(read_text(path,''))
     except Exception: return default
+
+def read_uptime():
+    """Read system uptime from /proc/uptime if available."""
+    try:
+        uptime_text = read_text('/proc/uptime', '0 0')
+        uptime_seconds = float(uptime_text.split()[0])
+        # Convert to human readable format
+        days = int(uptime_seconds // 86400)
+        hours = int((uptime_seconds % 86400) // 3600)
+        minutes = int((uptime_seconds % 3600) // 60)
+        if days > 0:
+            return f"{days}d {hours}h {minutes}m"
+        elif hours > 0:
+            return f"{hours}h {minutes}m"
+        else:
+            return f"{minutes}m"
+    except Exception:
+        return "unknown"
 
 def write_json(path, obj):
     Path(os.path.dirname(path)).mkdir(parents=True, exist_ok=True)
@@ -2349,18 +2369,16 @@ def sanitize_username(username):
     return safe_name
 
 def user_memory_path(username):
-    """Get the path to a user's encrypted memory file."""
-    safe_username = sanitize_username(username)
-    return os.path.join(NS_CTRL, f'memory_{safe_username}.enc')
+    """Get the path to a user's encrypted memory file - using single jarvis_memory.enc as per requirements."""
+    return os.path.join(NS_CTRL, 'jarvis_memory.enc')
 
 def load_user_memory(username):
-    """Load per-user encrypted memory, fallback to plaintext if encryption fails."""
+    """Load per-user encrypted memory from shared jarvis_memory.enc file."""
     safe_username = sanitize_username(username)
     enc_path = user_memory_path(username)
-    json_path = os.path.join(NS_CTRL, f'memory_{safe_username}.json')
     
-    # Default empty memory structure
-    default_memory = {
+    # Default empty memory structure for this user
+    default_user_memory = {
         "memory": {},
         "preferences": {"theme": "jarvis-dark", "last_active_tab": "ai"},
         "history": [],
@@ -2369,32 +2387,23 @@ def load_user_memory(username):
     
     # Try to load encrypted file first
     if os.path.exists(enc_path):
-        memory = dec_json_from_file(enc_path)
-        if memory:
+        all_memory = dec_json_from_file(enc_path)
+        if all_memory and isinstance(all_memory, dict):
+            # Get this user's memory from the structure {username: {memory, preferences, etc}}
+            user_memory = all_memory.get(safe_username, default_user_memory)
             # Ensure all required fields exist
-            for key in default_memory:
-                if key not in memory:
-                    memory[key] = default_memory[key]
-            memory["last_seen"] = time.strftime('%Y-%m-%d %H:%M:%S')
-            return memory
-    
-    # Fallback to plaintext file if encryption fails
-    if os.path.exists(json_path):
-        try:
-            memory = read_json(json_path, default_memory)
-            # Migrate to encrypted format
-            save_user_memory(username, memory)
-            os.unlink(json_path)  # Remove plaintext file after migration
-            return memory
-        except Exception:
-            pass
+            for key in default_user_memory:
+                if key not in user_memory:
+                    user_memory[key] = default_user_memory[key]
+            user_memory["last_seen"] = time.strftime('%Y-%m-%d %H:%M:%S')
+            return user_memory
     
     # Return default and save it
-    save_user_memory(username, default_memory)
-    return default_memory
+    save_user_memory(username, default_user_memory)
+    return default_user_memory
 
 def save_user_memory(username, memory):
-    """Save per-user encrypted memory."""
+    """Save per-user encrypted memory to shared jarvis_memory.enc file."""
     safe_username = sanitize_username(username)
     enc_path = user_memory_path(username)
     
@@ -2404,13 +2413,25 @@ def save_user_memory(username, memory):
     # Ensure directory exists
     os.makedirs(os.path.dirname(enc_path), exist_ok=True)
     
+    # Load existing memory structure or create new one
+    all_memory = {}
+    if os.path.exists(enc_path):
+        existing = dec_json_from_file(enc_path)
+        if existing and isinstance(existing, dict):
+            all_memory = existing
+    
+    # Update this user's memory
+    all_memory[safe_username] = memory
+    
     # Save encrypted
-    success = enc_json_to_file(memory, enc_path)
+    success = enc_json_to_file(all_memory, enc_path)
     
     if not success:
-        # Fallback to plaintext if encryption fails
-        json_path = os.path.join(NS_CTRL, f'memory_{safe_username}.json')
-        write_json(json_path, memory)
+        # Fallback: log error but don't fail
+        py_alert('ERROR', f'Failed to encrypt Jarvis memory for user {username}')
+        return False
+    
+    return True
 
 def get_jarvis_personality():
     """Get the configured Jarvis personality type."""
@@ -2667,22 +2688,41 @@ def ai_reply(prompt, username, user_ip):
     elif any(term in prompt_low for term in ['advanced', 'expert', 'technical', 'professional']):
         return f"Advanced mode activated, {username}! I can execute system tools, analyze logs, perform security scans, generate reports, and provide technical insights. Try commands like 'run nmap localhost', 'analyze performance', or 'security audit' for detailed technical operations."
     
-    # Tool execution intent - NEW CAPABILITY
+    # Tool execution intent - ENHANCED with action payload
     elif any(term in prompt_low for term in ['run ', 'execute ', 'launch ', 'start ']) and any(tool in prompt_low for tool in ['nmap', 'netstat', 'htop', 'ps', 'df', 'ping', 'curl', 'dig', 'ss']):
-        # Extract tool name
+        # Extract tool name and arguments
         tool_match = None
+        args_match = ""
         for tool in ['nmap', 'netstat', 'htop', 'ps', 'df', 'ping', 'curl', 'dig', 'ss']:
             if tool in prompt_low:
                 tool_match = tool
+                # Try to extract arguments after the tool name
+                tool_pos = prompt_low.find(tool)
+                if tool_pos >= 0:
+                    args_part = prompt[tool_pos + len(tool):].strip()
+                    # Simple argument extraction - everything after the tool name
+                    if args_part and not any(stop_word in args_part.lower() for stop_word in ['please', 'for me', 'now']):
+                        args_match = args_part
                 break
         
         if tool_match:
-            try:
-                # Execute the tool
-                output = execute_tool(tool_match)
-                return f"Executed {tool_match} for you, {username}:\n\n{output[:500]}{'...' if len(output) > 500 else ''}\n\nCheck the Tools tab for the complete output and to run more tools."
-            except Exception as e:
-                return f"I tried to run {tool_match} but encountered an error, {username}: {str(e)}. You can manually execute tools in the Tools tab."
+            # Return both the response and action payload for frontend to execute
+            response_text = f"I'll run {tool_match} for you, {username}. Executing now..."
+            if args_match:
+                response_text = f"I'll run {tool_match} {args_match} for you, {username}. Executing now..."
+            
+            # Save AI response to memory
+            save_ai_response(username, response_text, user_memory, memory_size)
+            
+            # Return response with action payload
+            return {
+                'text': response_text,
+                'action': {
+                    'type': 'execute_tool',
+                    'tool': tool_match,
+                    'args': args_match if args_match else ''
+                }
+            }
         
     # Security scan intent - ENHANCED
     elif any(term in prompt_low for term in ['security scan', 'scan security', 'check security', 'security audit']):
@@ -3469,6 +3509,77 @@ def install_missing_tools():
 
 # Remove duplicate execute_custom_command function - using enhanced version below
 
+def sanitize_tool_args(args):
+    """Sanitize and validate tool arguments for security."""
+    if not args or not isinstance(args, str):
+        return ""
+    
+    # Allow only safe characters: alphanumeric, common symbols, spaces
+    # Remove dangerous characters and sequences
+    import re
+    
+    # First, remove obviously dangerous patterns
+    dangerous_patterns = [
+        r'[;&|`$]',  # Command injection characters
+        r'\.\./',    # Directory traversal
+        r'rm\s+',    # rm commands
+        r'del\s+',   # delete commands
+        r'format\s+', # format commands
+        r'>\s*/dev', # Redirects to devices
+        r'<\s*/dev', # Redirects from devices
+    ]
+    
+    for pattern in dangerous_patterns:
+        if re.search(pattern, args, re.IGNORECASE):
+            return ""  # Reject if dangerous pattern found
+    
+    # Allow only safe characters (alphanumeric, spaces, dots, hyphens, slashes, colons)
+    safe_chars = re.compile(r'^[a-zA-Z0-9\s\.\-/:]+$')
+    if not safe_chars.match(args):
+        return ""
+    
+    # Limit length to prevent abuse
+    if len(args) > 200:
+        return ""
+    
+    return args.strip()
+
+def execute_tool_with_args(tool_name, args):
+    """Execute a tool with sanitized arguments."""
+    if not tool_name or not args:
+        return execute_tool(tool_name)
+    
+    # Build command safely
+    try:
+        # Split args into components and validate each
+        arg_list = args.split()
+        if len(arg_list) > 10:  # Limit number of arguments
+            return "Error: Too many arguments provided"
+        
+        cmd = [tool_name] + arg_list
+        
+        # Execute with timeout
+        result = subprocess.run(
+            cmd, 
+            capture_output=True, 
+            text=True, 
+            timeout=30,
+            shell=False  # Never use shell=True for security
+        )
+        
+        output = result.stdout
+        if result.stderr:
+            output += f"\nSTDERR:\n{result.stderr}"
+        
+        return output or f"{tool_name} executed successfully (no output)"
+        
+    except subprocess.TimeoutExpired:
+        return f"Error: {tool_name} execution timed out"
+    except subprocess.CalledProcessError as e:
+        return f"Error: {tool_name} failed with exit code {e.returncode}"
+    except Exception as e:
+        return f"Error executing {tool_name}: {str(e)}"
+
 def execute_tool(tool_name):
     """Execute a system tool and return its output."""
     
@@ -3923,7 +4034,12 @@ class Handler(SimpleHTTPRequestHandler):
                 'memory_enabled': monitor_enabled('memory'),
                 'disk_enabled': monitor_enabled('disk'),
                 'scheduler_enabled': monitor_enabled('scheduler'),
-                'authenticated': sess is not None and sess.get('user') != 'public'
+                'authenticated': sess is not None and sess.get('user') != 'public',
+                # Additional fields required by UI as per problem statement
+                'services_count': len([x for x in os.listdir(os.path.join(NS_LOGS,'service.json')) if not x.startswith('.')]) if os.path.exists(os.path.join(NS_LOGS,'service.json')) else 0,
+                'suspicious_count': len(read_json(os.path.join(NS_LOGS,'process.json'), {}).get('suspicious', [])),
+                'active_sessions': len([s for s in (users_db() or {}).values() if s.get('expires', 0) > int(time.time())]),
+                'uptime': read_uptime()
             }
             self._set_headers(200); self.wfile.write(json.dumps(data).encode('utf-8')); return
 
@@ -3941,7 +4057,18 @@ class Handler(SimpleHTTPRequestHandler):
 
         if parsed.path == '/api/config':
             if not require_auth(self): return
-            self._set_headers(200, 'text/plain; charset=utf-8'); self.wfile.write(read_text(CONFIG, '').encode('utf-8')); return
+            sess = get_session(self) or {}
+            try:
+                # Read and parse the config file
+                config_text = read_text(CONFIG, '')
+                # Return config in expected JSON format
+                config_data = {
+                    'config': config_text,
+                    'csrf': sess.get('csrf','') if auth_enabled() else 'public'
+                }
+                self._set_headers(200); self.wfile.write(json.dumps(config_data).encode('utf-8')); return
+            except Exception as e:
+                self._set_headers(500); self.wfile.write(json.dumps({'error': str(e)}).encode('utf-8')); return
 
         if parsed.path == '/api/logs':
             if not require_auth(self): return
@@ -4149,15 +4276,25 @@ class Handler(SimpleHTTPRequestHandler):
                 reply = ai_reply(prompt, username, user_ip)
                 voice_enabled = cfg_get('jarvis.voice_enabled', False)
                 
+                # Check if reply contains action payload
+                action = None
+                reply_text = reply
+                
+                if isinstance(reply, dict) and 'text' in reply:
+                    reply_text = reply['text']
+                    action = reply.get('action')
+                
                 # Log to chat.log with username
                 try: 
-                    open(CHATLOG,'a',encoding='utf-8').write(f'{time.strftime("%Y-%m-%d %H:%M:%S")} User:{username} IP:{user_ip} Q:{prompt} A:{reply}\n')
+                    open(CHATLOG,'a',encoding='utf-8').write(f'{time.strftime("%Y-%m-%d %H:%M:%S")} User:{username} IP:{user_ip} Q:{prompt} A:{reply_text}\n')
                 except Exception: 
                     py_alert('WARN', f'Failed to write chat log for {username}@{user_ip}')
                     
-                response_data = {'ok': True, 'reply': reply}
+                response_data = {'ok': True, 'reply': reply_text}
                 if voice_enabled:
                     response_data['speak'] = True
+                if action:
+                    response_data['action'] = action
                     
                 self._set_headers(200); self.wfile.write(json.dumps(response_data).encode('utf-8')); return
             except Exception as e:
@@ -4253,6 +4390,7 @@ class Handler(SimpleHTTPRequestHandler):
                 data = json.loads(body or '{}')
                 tool_name = data.get('tool', '')
                 custom_command = data.get('command', '')
+                tool_args = data.get('args', '')  # New: support for tool arguments
                 
                 # Get user session for verification
                 sess = get_session(self)
@@ -4264,9 +4402,16 @@ class Handler(SimpleHTTPRequestHandler):
                     self.wfile.write(json.dumps({'ok': False, 'error': 'No tool specified'}).encode('utf-8'))
                     return
                 
+                # Define allowlisted tools that support arguments
+                allowlisted_tools_with_args = [
+                    'nmap', 'ping', 'dig', 'traceroute', 'curl', 'strings', 
+                    'file', 'md5sum', 'sha256sum', 'netstat', 'ss'
+                ]
+                
                 # Enhanced security verification for dangerous commands
                 requires_verification = False
                 verification_reason = ""
+                final_command = tool_name
                 
                 if tool_name == 'custom' and custom_command:
                     # Check if command requires additional verification
@@ -4274,12 +4419,21 @@ class Handler(SimpleHTTPRequestHandler):
                     if any(dangerous in custom_command.lower() for dangerous in dangerous_commands):
                         requires_verification = True
                         verification_reason = f"Command '{custom_command}' requires verification due to potential system impact"
-                        
+                    final_command = custom_command
+                elif tool_name in allowlisted_tools_with_args and tool_args:
+                    # Sanitize and validate arguments for allowlisted tools
+                    sanitized_args = sanitize_tool_args(tool_args)
+                    if not sanitized_args:
+                        self._set_headers(400)
+                        self.wfile.write(json.dumps({'ok': False, 'error': 'Invalid or unsafe arguments provided'}).encode('utf-8'))
+                        return
+                    final_command = f"{tool_name} {sanitized_args}"
+                    
                 # Security verification check
                 security_verification_level = cfg_get('security.command_verification', 'standard')
                 if requires_verification and security_verification_level == 'strict':
                     # In strict mode, require additional confirmation for dangerous operations
-                    security_log(f"DANGEROUS_COMMAND_BLOCKED user={username} ip={user_ip} command={custom_command} reason=verification_required")
+                    security_log(f"DANGEROUS_COMMAND_BLOCKED user={username} ip={user_ip} command={final_command} reason=verification_required")
                     self._set_headers(403)
                     self.wfile.write(json.dumps({
                         'ok': False, 
@@ -4288,18 +4442,21 @@ class Handler(SimpleHTTPRequestHandler):
                     }).encode('utf-8'))
                     return
                 
-                # Handle custom command execution
+                # Handle command execution
                 if tool_name == 'custom' and custom_command:
                     security_log(f"COMMAND_EXECUTE user={username} ip={user_ip} command={custom_command}")
                     output = execute_custom_command(custom_command)
+                elif tool_name in allowlisted_tools_with_args and tool_args:
+                    security_log(f"TOOL_EXECUTE_WITH_ARGS user={username} ip={user_ip} tool={tool_name} args={tool_args}")
+                    output = execute_tool_with_args(tool_name, sanitized_args)
                 else:
                     security_log(f"TOOL_EXECUTE user={username} ip={user_ip} tool={tool_name}")
                     output = execute_tool(tool_name)
                     
-                audit(f'TOOL_EXEC tool={tool_name} command="{custom_command if custom_command else tool_name}" ip={user_ip} user={username}')
+                audit(f'TOOL_EXEC tool={tool_name} command="{final_command}" ip={user_ip} user={username}')
                 
                 # Save results to results panel if enabled
-                save_command_result(tool_name, custom_command if custom_command else tool_name, output, username)
+                save_command_result(tool_name, final_command, output, username)
                 
                 self._set_headers(200)
                 self.wfile.write(json.dumps({
@@ -6611,10 +6768,19 @@ function updateAlertCategory(categoryId, alerts, emptyMessage) {
 // Load configuration data
 async function loadConfig() {
   try {
-    const r = await api('/api/status');
+    const r = await api('/api/config');
     const j = await r.json(); 
     CSRF = j.csrf || '';
     
+    // Update config display if elements exist
+    if (typeof updateConfigDisplay === 'function') {
+      updateConfigDisplay(j.config || {});
+    }
+  } catch (e) {
+    console.error('Failed to load config:', e);
+    toast('Failed to load configuration', 'error');
+  }
+}
     const cfgEl = $('#config');
     if (cfgEl && j.config) {
       cfgEl.textContent = j.config;
@@ -8098,6 +8264,47 @@ async function sendChat() {
     log.appendChild(ai); 
     $('#prompt').value=''; 
     log.scrollTop=log.scrollHeight;
+    
+    // Handle action payload if present
+    if (j.action && j.action.type === 'execute_tool') {
+        try {
+            // Execute the tool via the Tools API
+            const toolResponse = await fetch('/api/tools/execute', {
+                method: 'POST',
+                headers: { 'X-CSRF': CSRF, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ 
+                    tool: j.action.tool,
+                    args: j.action.args || ''
+                })
+            });
+            
+            if (toolResponse.ok) {
+                const toolData = await toolResponse.json();
+                // Display tool output in the tools output area
+                const outputEl = $('#tool-output');
+                if (outputEl) {
+                    outputEl.textContent = `=== JARVIS EXECUTED: ${j.action.tool.toUpperCase()} ${j.action.args || ''} ===\n`;
+                    outputEl.textContent += toolData.output || 'Command executed successfully';
+                    outputEl.scrollTop = outputEl.scrollHeight;
+                }
+                
+                // Add a follow-up message
+                const followUp = document.createElement('div');
+                followUp.className = 'jarvis-msg';
+                followUp.textContent = 'Jarvis: Tool execution completed. Results are displayed in the Tool Output panel.';
+                log.appendChild(followUp);
+                log.scrollTop = log.scrollHeight;
+            } else {
+                const followUp = document.createElement('div');
+                followUp.className = 'jarvis-msg';
+                followUp.textContent = 'Jarvis: Sorry, I encountered an error executing that tool. Please try manually in the Tools tab.';
+                log.appendChild(followUp);
+                log.scrollTop = log.scrollHeight;
+            }
+        } catch (error) {
+            console.error('Failed to execute tool action:', error);
+        }
+    }
     
     // Speak the reply if voice is enabled and speak flag is set
     if (j.speak && typeof voiceEnabled !== 'undefined' && voiceEnabled && typeof speak === 'function') {
