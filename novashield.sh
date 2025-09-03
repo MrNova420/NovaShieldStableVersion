@@ -2652,8 +2652,7 @@ def load_user_memory(username):
                     if "user_profile" in user_memory:
                         user_memory["user_profile"]["total_sessions"] = user_memory["user_profile"].get("total_sessions", 0) + 1
                     
-                    # Auto-save the updated memory immediately
-                    auto_save_user_memory(username, user_memory)
+                    # Note: Auto-save removed to prevent recursion - memory will be saved when modified
                     return user_memory
         
         # Create new user with defaults and save immediately
@@ -2844,7 +2843,7 @@ def ai_reply(prompt, username, user_ip):
     personality = get_jarvis_personality()
     
     # Enhanced conversation memory size based on user preferences
-    memory_size = user_memory.get("preferences", {}).get("conversation_memory_size", 50)
+    memory_size = int(user_memory.get("preferences", {}).get("conversation_memory_size", 50))
     
     # Add this conversation to user memory history with enhanced context
     user_memory["history"].append({
@@ -4768,7 +4767,7 @@ class Handler(SimpleHTTPRequestHandler):
                 })
                 
                 # Keep conversation history manageable
-                memory_size = cfg_get('jarvis.memory_size', 50)
+                memory_size = int(cfg_get('jarvis.memory_size', 50))
                 if len(user_memory["history"]) > memory_size * 2:  # *2 for user+AI pairs
                     user_memory["history"] = user_memory["history"][-memory_size * 2:]
                 
