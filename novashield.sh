@@ -75,15 +75,23 @@ alert(){
   mkdir -p "$(dirname "$NS_ALERTS")" 2>/dev/null
   echo "$line" | tee -a "$NS_ALERTS" >&2
   
-  # Enhanced alert categorization
-  case "$level" in
-    CRIT|ERROR)
-      # Critical security events
-      echo "$(ns_now) [THREAT] $level: $msg" | tee -a "$NS_LOGS/security.log" >/dev/null 2>&1
+  # Enhanced alert categorization - only log true security events to security.log
+  # Skip system resource warnings (memory, disk, CPU) from being security events
+  case "$msg" in
+    *"Memory "*|*"Disk "*|*"CPU "*|*"load "*|*"storage "*|*"elevated"*|*"high: "*%)
+      # These are system resource warnings, not security threats - only log to alerts.log
       ;;
-    WARN)
-      # Warning-level security events
-      echo "$(ns_now) [SECURITY] $level: $msg" | tee -a "$NS_LOGS/security.log" >/dev/null 2>&1
+    *)
+      # Log actual security events to security.log
+      case "$level" in
+        CRIT|ERROR)
+          echo "$(ns_now) [THREAT] $level: $msg" | tee -a "$NS_LOGS/security.log" >/dev/null 2>&1
+          ;;
+        WARN)
+          # Only log non-resource warnings as security events
+          echo "$(ns_now) [SECURITY] $level: $msg" | tee -a "$NS_LOGS/security.log" >/dev/null 2>&1
+          ;;
+      esac
       ;;
   esac
   
@@ -382,6 +390,7 @@ security:
   session_ttl_min: 720      # Alternate naming for session TTL 
   strict_reload: false      # Force login on every page reload
   force_login_on_reload: false  # Force login on every page reload
+  trust_proxy: false       # Trust X-Forwarded-For headers from reverse proxies
 
 terminal:
   enabled: true
@@ -1430,6 +1439,34 @@ GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11'  # WebSocket
 # Environment variable checks
 AUTH_STRICT = os.environ.get('NOVASHIELD_AUTH_STRICT', '0') == '1'
 
+def get_client_ip(handler):
+    """Get the real client IP address, supporting X-Forwarded-For when trust_proxy is enabled"""
+    # Check if we should trust proxy headers
+    trust_proxy = _coerce_bool(cfg_get('security.trust_proxy', False), False)
+    
+    if trust_proxy:
+        # Check for X-Forwarded-For header (most common proxy header)
+        forwarded_for = handler.headers.get('X-Forwarded-For', '').strip()
+        if forwarded_for:
+            # X-Forwarded-For can contain multiple IPs: "client, proxy1, proxy2"
+            # We want the first (leftmost) IP which should be the original client
+            client_ip = forwarded_for.split(',')[0].strip()
+            if client_ip and client_ip != '':
+                return client_ip
+        
+        # Check for X-Real-IP header (nginx style)
+        real_ip = handler.headers.get('X-Real-IP', '').strip()
+        if real_ip:
+            return real_ip
+            
+        # Check for CF-Connecting-IP (Cloudflare)
+        cf_ip = handler.headers.get('CF-Connecting-IP', '').strip()
+        if cf_ip:
+            return cf_ip
+    
+    # Fallback to direct connection IP (fixed recursive call)
+    return handler.client_address[0]
+
 def py_alert(level, msg):
     """Helper to log security alerts to alerts.log in the same format as bash alert()"""
     try:
@@ -1726,62 +1763,90 @@ def aes_key_path():
     return os.path.join(NS_HOME, aes_file)
 
 def enc_json_to_file(obj, out_path_enc):
-    """Encrypt a JSON object to a file using AES-256-CBC"""
-    import tempfile, subprocess
+    """Encrypt a JSON object to a file using AES-256-CBC with file locking"""
+    import tempfile, subprocess, fcntl
+    
+    # Create a lock file to prevent concurrent access
+    lock_path = out_path_enc + '.lock'
+    
     try:
-        # Write JSON to temporary file
-        with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.json') as tmp:
-            json.dump(obj, tmp, ensure_ascii=False, indent=2)
-            tmp_path = tmp.name
-        
-        # Encrypt using OpenSSL
-        key_path = aes_key_path()
-        if not os.path.exists(key_path):
-            # Generate key if it doesn't exist with proper permissions
-            os.makedirs(os.path.dirname(key_path), exist_ok=True)
-            with open(key_path, 'wb') as f:
-                # Generate 64 bytes (512 bits) of entropy for stronger key
-                f.write(os.urandom(64))
-            # Set restrictive permissions on key file
-            os.chmod(key_path, 0o600)
-        
-        cmd = ['openssl', 'enc', '-aes-256-cbc', '-salt', '-pbkdf2', 
-               '-in', tmp_path, '-out', out_path_enc, '-pass', f'file:{key_path}']
-        result = subprocess.run(cmd, capture_output=True, timeout=30)
-        
-        # Clean up temp file
-        os.unlink(tmp_path)
-        
-        return result.returncode == 0
+        # Acquire file lock to prevent race conditions
+        with open(lock_path, 'w') as lock_file:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+            
+            # Write JSON to temporary file
+            with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.json') as tmp:
+                json.dump(obj, tmp, ensure_ascii=False, indent=2)
+                tmp_path = tmp.name
+            
+            # Encrypt using OpenSSL
+            key_path = aes_key_path()
+            if not os.path.exists(key_path):
+                # Generate key if it doesn't exist with proper permissions
+                os.makedirs(os.path.dirname(key_path), exist_ok=True)
+                with open(key_path, 'wb') as f:
+                    # Generate 64 bytes (512 bits) of entropy for stronger key
+                    f.write(os.urandom(64))
+                # Set restrictive permissions on key file
+                os.chmod(key_path, 0o600)
+            
+            cmd = ['openssl', 'enc', '-aes-256-cbc', '-salt', '-pbkdf2', 
+                   '-in', tmp_path, '-out', out_path_enc, '-pass', f'file:{key_path}']
+            result = subprocess.run(cmd, capture_output=True, timeout=30)
+            
+            # Clean up temp file
+            os.unlink(tmp_path)
+            
+            return result.returncode == 0
     except Exception:
         return False
+    finally:
+        # Clean up lock file
+        try:
+            os.remove(lock_path)
+        except:
+            pass
 
 def dec_json_from_file(in_path_enc):
-    """Decrypt a JSON file using AES-256-CBC"""
-    import tempfile, subprocess
+    """Decrypt a JSON file using AES-256-CBC with file locking"""
+    import tempfile, subprocess, fcntl
+    
+    # Create a lock file to prevent concurrent access
+    lock_path = in_path_enc + '.lock'
+    
     try:
-        key_path = aes_key_path()
-        if not os.path.exists(key_path):
-            return None
-        
-        # Decrypt to temporary file
-        with tempfile.NamedTemporaryFile(mode='r', delete=False, suffix='.json') as tmp:
-            tmp_path = tmp.name
-        
-        cmd = ['openssl', 'enc', '-d', '-aes-256-cbc', '-pbkdf2',
-               '-in', in_path_enc, '-out', tmp_path, '-pass', f'file:{key_path}']
-        result = subprocess.run(cmd, capture_output=True, timeout=30)
-        
-        if result.returncode == 0:
-            with open(tmp_path, 'r', encoding='utf-8') as f:
-                obj = json.load(f)
-            os.unlink(tmp_path)
-            return obj
-        else:
-            os.unlink(tmp_path)
-            return None
+        # Acquire file lock to prevent race conditions
+        with open(lock_path, 'w') as lock_file:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+            
+            key_path = aes_key_path()
+            if not os.path.exists(key_path):
+                return None
+            
+            # Decrypt to temporary file
+            with tempfile.NamedTemporaryFile(mode='r', delete=False, suffix='.json') as tmp:
+                tmp_path = tmp.name
+            
+            cmd = ['openssl', 'enc', '-d', '-aes-256-cbc', '-pbkdf2',
+                   '-in', in_path_enc, '-out', tmp_path, '-pass', f'file:{key_path}']
+            result = subprocess.run(cmd, capture_output=True, timeout=30)
+            
+            if result.returncode == 0:
+                with open(tmp_path, 'r', encoding='utf-8') as f:
+                    obj = json.load(f)
+                os.unlink(tmp_path)
+                return obj
+            else:
+                os.unlink(tmp_path)
+                return None
     except Exception:
         return None
+    finally:
+        # Clean up lock file
+        try:
+            os.remove(lock_path)
+        except:
+            pass
 
 def _coerce_bool(v, default=False):
     if isinstance(v, bool): return v
@@ -1862,14 +1927,38 @@ def totp_now(secret_b32, t=None):
     return f'{code:06d}'
 
 def new_session(username):
+    db = users_db()
+    
+    # SINGLE SESSION PER USER: Remove any existing sessions for this username
+    tokens_to_remove = []
+    for token, session_data in db.items():
+        # Skip non-session entries (like _userdb, _2fa)
+        if token.startswith('_'):
+            continue
+        
+        if isinstance(session_data, dict) and session_data.get('user') == username:
+            tokens_to_remove.append(token)
+    
+    # Remove existing sessions for this user
+    for token in tokens_to_remove:
+        del db[token]
+    
+    # Create new session
     token = hashlib.sha256(f'{username}:{time.time()}:{os.urandom(8)}'.encode()).hexdigest()
     csrf  = hashlib.sha256(f'csrf:{token}:{os.urandom(8)}'.encode()).hexdigest()
-    db = users_db()
+    
     # Add session TTL support
     session_ttl_minutes = _coerce_int(cfg_get('security.session_ttl_minutes', 120), 120)
     expires = int(time.time()) + (session_ttl_minutes * 60)
     db[token]={'user':username,'ts':int(time.time()),'csrf':csrf,'expires':expires}
     set_users_db(db)
+    
+    # Log the session creation with count of removed sessions
+    if tokens_to_remove:
+        security_log(f"NEW_SESSION user={username} removed_existing_sessions={len(tokens_to_remove)} ttl_minutes={session_ttl_minutes}")
+    else:
+        security_log(f"NEW_SESSION user={username} ttl_minutes={session_ttl_minutes}")
+    
     return token, csrf
 
 def get_session(handler):
@@ -1925,7 +2014,7 @@ def cleanup_expired_sessions():
         py_alert('WARN', f'Failed to cleanup expired sessions: {str(e)}')
 
 def require_auth(handler):
-    client_ip = handler.client_address[0]
+    client_ip = get_client_ip(handler)
     user_agent = handler.headers.get('User-Agent', 'Unknown')
     path = getattr(handler, 'path', 'unknown')
     
@@ -1980,7 +2069,7 @@ def require_auth(handler):
     return True
 
 def rate_limit_ok(handler, key='default'):
-    ip = handler.client_address[0]
+    ip = get_client_ip(handler)
     now = int(time.time())
     rl = read_json(RL_DB,{}) or {}
     per = rate_limit_per_min()
@@ -1998,7 +2087,7 @@ def rate_limit_ok(handler, key='default'):
     return ent['cnt']<=per
 
 def login_fail(handler):
-    ip=handler.client_address[0]
+    ip=get_client_ip(handler)
     user_agent = handler.headers.get('User-Agent', 'Unknown')
     rl = read_json(BANS_DB,{}) or {}
     now=int(time.time())
@@ -2026,7 +2115,7 @@ def login_fail(handler):
     except Exception: pass
 
 def login_ok(handler):
-    ip=handler.client_address[0]
+    ip=get_client_ip(handler)
     user_agent = handler.headers.get('User-Agent', 'Unknown')
     rl = read_json(BANS_DB,{}) or {}
     if ip in rl: rl.pop(ip,None); write_json(BANS_DB, rl)
@@ -2048,7 +2137,7 @@ def login_ok(handler):
     except Exception: pass
 
 def banned(handler):
-    ip=handler.client_address[0]
+    ip=get_client_ip(handler)
     rl = read_json(BANS_DB,{}) or {}
     now=int(time.time())
     ent=rl.get(ip)
@@ -2189,7 +2278,7 @@ def mirror_terminal(handler):
     allow_write = _coerce_bool(cfg_get('terminal.allow_write', 'true'), True)
     
     # Enhanced terminal security logging
-    security_log(f"TERMINAL_ACCESS user={user} ip={handler.client_address[0]} cols={cols} rows={rows}")
+    security_log(f"TERMINAL_ACCESS user={user} ip={get_client_ip(handler)} cols={cols} rows={rows}")
     
     # Check if terminal access should be restricted for dangerous operations
     terminal_security_level = cfg_get('security.terminal_verification', 'standard')
@@ -2207,7 +2296,7 @@ def mirror_terminal(handler):
     # Create a real PTY with enhanced error handling and cross-platform support
     try:
         pid, fd = spawn_pty(shell, cols, rows)
-        audit(f'TERM START user={user} pid={pid} ip={handler.client_address[0]}')
+        audit(f'TERM START user={user} pid={pid} ip={get_client_ip(handler)}')
         security_log(f"PTY_SPAWNED user={user} pid={pid} shell={shell}")
         
         # Send success notification
@@ -2320,6 +2409,20 @@ def mirror_terminal(handler):
                 if opcode == 8:  # Close frame
                     security_log(f"TERMINAL_CLOSE_FRAME user={user} pid={pid}")
                     break
+                
+                if opcode == 9:  # Ping frame
+                    try:
+                        # Respond with pong frame
+                        ws_send(client, data, opcode=10)
+                        security_log(f"TERMINAL_PING_PONG user={user} pid={pid}")
+                    except Exception as e:
+                        security_log(f"TERMINAL_PONG_ERROR user={user} pid={pid} error={str(e)}")
+                    continue
+                
+                if opcode == 10:  # Pong frame
+                    # Client responded to our ping - connection is alive
+                    security_log(f"TERMINAL_PONG_RECEIVED user={user} pid={pid}")
+                    continue
                     
                 if opcode in (1, 2) and allow_write:  # Text/binary frame
                     try:
@@ -2377,7 +2480,7 @@ def mirror_terminal(handler):
         try: os.kill(pid, signal.SIGTERM)
         except: pass
         
-        audit(f'TERM END user={user} pid={pid} ip={handler.client_address[0]}')
+        audit(f'TERM END user={user} pid={pid} ip={get_client_ip(handler)}')
         security_log(f"TERMINAL_SESSION_END user={user} pid={pid}")
 
 # Add these functions before the Handler class:
@@ -2406,66 +2509,271 @@ def user_memory_path(username):
     """Get the path to a user's encrypted memory file - using single jarvis_memory.enc as per requirements."""
     return os.path.join(NS_CTRL, 'jarvis_memory.enc')
 
+def deep_merge_memory(user_memory, default_memory):
+    """Deep merge user memory with defaults to ensure all required keys exist."""
+    def merge_dict(source, destination):
+        for key, value in source.items():
+            if isinstance(value, dict):
+                node = destination.setdefault(key, {})
+                merge_dict(value, node)
+            else:
+                destination.setdefault(key, value)
+        return destination
+    
+    # Create a copy of user memory to avoid modifying the original
+    merged = dict(user_memory)
+    merge_dict(default_memory, merged)
+    return merged
+
+def file_lock_context(file_path):
+    """Context manager for file locking to prevent concurrent access issues."""
+    import fcntl
+    
+    class FileLock:
+        def __init__(self, path):
+            self.path = path
+            self.file = None
+            
+        def __enter__(self):
+            try:
+                # Create directory if it doesn't exist
+                os.makedirs(os.path.dirname(self.path), exist_ok=True)
+                
+                # Open file for reading/writing, create if doesn't exist
+                self.file = open(self.path, 'a+')
+                fcntl.flock(self.file.fileno(), fcntl.LOCK_EX)
+                return self.file
+            except Exception as e:
+                if self.file:
+                    self.file.close()
+                raise e
+                
+        def __exit__(self, exc_type, exc_val, exc_tb):
+            if self.file:
+                try:
+                    fcntl.flock(self.file.fileno(), fcntl.LOCK_UN)
+                    self.file.close()
+                except Exception:
+                    pass
+    
+    return FileLock(file_path)
+
+def auto_save_user_memory(username, memory):
+    """Auto-save user memory with enhanced error handling and backup."""
+    try:
+        # Update auto-save timestamp
+        memory["preferences"]["last_auto_save"] = time.strftime('%Y-%m-%d %H:%M:%S')
+        save_user_memory(username, memory)
+    except Exception as e:
+        py_alert('WARN', f'Auto-save failed for user {username}: {str(e)}')
+
 def load_user_memory(username):
-    """Load per-user encrypted memory from shared jarvis_memory.enc file."""
+    """Load per-user encrypted memory from shared jarvis_memory.enc file with enhanced auto-loading."""
     safe_username = sanitize_username(username)
     enc_path = user_memory_path(username)
     
-    # Default empty memory structure for this user
+    # Enhanced default memory structure with comprehensive learning patterns
     default_user_memory = {
-        "memory": {},
-        "preferences": {"theme": "jarvis-dark", "last_active_tab": "ai"},
+        "memory": {
+            "learning_patterns": {
+                "interaction_style": "formal",
+                "frequent_commands": {},
+                "command_preferences": {},
+                "conversation_topics": {},
+                "response_complexity": {"simple": 0, "detailed": 0, "technical": 0},
+                "emotional_preferences": {"formal": 0, "friendly": 0, "enthusiastic": 0},
+                "last_learning_update": time.strftime('%Y-%m-%d %H:%M:%S'),
+                "learning_sessions": 0,
+                "auto_learn_enabled": True
+            },
+            "conversation_context": {
+                "recent_topics": [],
+                "current_session_start": time.strftime('%Y-%m-%d %H:%M:%S'),
+                "total_conversations": 0
+            }
+        },
         "history": [],
-        "last_seen": time.strftime('%Y-%m-%d %H:%M:%S')
+        "preferences": {
+            "theme": "jarvis-dark", 
+            "last_active_tab": "ai",
+            "auto_save": True,
+            "learning_mode": "enhanced",
+            "conversation_memory_size": 50
+        },
+        "last_seen": time.strftime('%Y-%m-%d %H:%M:%S'),
+        "user_profile": {
+            "created": time.strftime('%Y-%m-%d %H:%M:%S'),
+            "total_sessions": 0,
+            "favorite_features": [],
+            "security_awareness_level": "medium"
+        }
     }
     
-    # Try to load encrypted file first
-    if os.path.exists(enc_path):
-        all_memory = dec_json_from_file(enc_path)
-        if all_memory and isinstance(all_memory, dict):
-            # Get this user's memory from the structure {username: {memory, preferences, etc}}
-            user_memory = all_memory.get(safe_username, default_user_memory)
-            # Ensure all required fields exist
-            for key in default_user_memory:
-                if key not in user_memory:
-                    user_memory[key] = default_user_memory[key]
-            user_memory["last_seen"] = time.strftime('%Y-%m-%d %H:%M:%S')
-            return user_memory
-    
-    # Return default and save it
-    save_user_memory(username, default_user_memory)
-    return default_user_memory
+    try:
+        if os.path.exists(enc_path):
+            # Implement file locking for safe concurrent access
+            with file_lock_context(enc_path):
+                all_user_data = dec_json_from_file(enc_path)
+                if all_user_data and isinstance(all_user_data, dict) and safe_username in all_user_data:
+                    user_memory = all_user_data[safe_username]
+                    
+                    # Deep merge with defaults to ensure all required keys exist
+                    user_memory = deep_merge_memory(user_memory, default_user_memory)
+                    user_memory["last_seen"] = time.strftime('%Y-%m-%d %H:%M:%S')
+                    
+                    # Increment session counter on load
+                    if "user_profile" in user_memory:
+                        user_memory["user_profile"]["total_sessions"] = user_memory["user_profile"].get("total_sessions", 0) + 1
+                    
+                    # Auto-save the updated memory immediately
+                    auto_save_user_memory(username, user_memory)
+                    return user_memory
+        
+        # Create new user with defaults and save immediately
+        default_user_memory["user_profile"]["created"] = time.strftime('%Y-%m-%d %H:%M:%S')
+        save_user_memory(username, default_user_memory)
+        py_alert('INFO', f'Created new user memory for {username}')
+        return default_user_memory
+        
+    except Exception as e:
+        py_alert('ERROR', f'Failed to load user memory for {username}: {str(e)}')
+        # Return defaults without saving to avoid corruption
+        return default_user_memory
 
 def save_user_memory(username, memory):
-    """Save per-user encrypted memory to shared jarvis_memory.enc file."""
+    """Save per-user encrypted memory to shared jarvis_memory.enc file with enhanced auto-sync."""
     safe_username = sanitize_username(username)
     enc_path = user_memory_path(username)
     
-    # Update last seen timestamp
-    memory["last_seen"] = time.strftime('%Y-%m-%d %H:%M:%S')
-    
-    # Ensure directory exists
-    os.makedirs(os.path.dirname(enc_path), exist_ok=True)
-    
-    # Load existing memory structure or create new one
-    all_memory = {}
-    if os.path.exists(enc_path):
-        existing = dec_json_from_file(enc_path)
-        if existing and isinstance(existing, dict):
-            all_memory = existing
-    
-    # Update this user's memory
-    all_memory[safe_username] = memory
-    
-    # Save encrypted
-    success = enc_json_to_file(all_memory, enc_path)
-    
-    if not success:
-        # Fallback: log error but don't fail
-        py_alert('ERROR', f'Failed to encrypt Jarvis memory for user {username}')
+    try:
+        # Update timestamps and metadata
+        memory["last_seen"] = time.strftime('%Y-%m-%d %H:%M:%S')
+        memory["preferences"]["last_save"] = time.strftime('%Y-%m-%d %H:%M:%S')
+        
+        # Increment save counter for statistics
+        if "user_profile" not in memory:
+            memory["user_profile"] = {}
+        memory["user_profile"]["total_saves"] = memory["user_profile"].get("total_saves", 0) + 1
+        
+        # Ensure directory exists
+        os.makedirs(os.path.dirname(enc_path), exist_ok=True)
+        
+        # Use file locking to prevent concurrent access issues
+        with file_lock_context(enc_path):
+            # Load existing memory structure or create new one
+            all_memory = {}
+            if os.path.exists(enc_path):
+                existing = dec_json_from_file(enc_path)
+                if existing and isinstance(existing, dict):
+                    all_memory = existing
+            
+            # Update this user's memory
+            all_memory[safe_username] = memory
+            
+            # Create backup before saving
+            backup_path = f"{enc_path}.backup"
+            if os.path.exists(enc_path):
+                try:
+                    import shutil
+                    shutil.copy2(enc_path, backup_path)
+                except Exception:
+                    pass  # Backup failure shouldn't stop save
+            
+            # Save encrypted with enhanced error handling
+            success = enc_json_to_file(all_memory, enc_path)
+            
+            if not success:
+                # Try to restore from backup if save failed
+                if os.path.exists(backup_path):
+                    try:
+                        import shutil
+                        shutil.copy2(backup_path, enc_path)
+                        py_alert('WARN', f'Restored memory from backup for user {username}')
+                    except Exception:
+                        pass
+                
+                py_alert('ERROR', f'Failed to encrypt Jarvis memory for user {username}')
+                return False
+        
+        # Log successful auto-sync
+        py_alert('INFO', f'Auto-synced memory for user {username} (save #{memory["user_profile"].get("total_saves", 1)})')
+        return True
+        
+    except Exception as e:
+        py_alert('ERROR', f'Critical error saving memory for user {username}: {str(e)}')
         return False
+
+def analyze_conversation_context(user_memory, current_prompt):
+    """Analyze conversation context to provide better responses."""
+    history = user_memory.get("history", [])
+    if not history:
+        return "first_interaction"
     
-    return True
+    # Get last few user interactions for context
+    recent_user_prompts = [h.get("prompt", "") for h in history[-6:] if h.get("type") == "user"]
+    
+    # Check for follow-up questions
+    current_low = current_prompt.lower()
+    follow_up_indicators = ["also", "and", "what about", "how about", "can you also", "tell me more"]
+    if any(indicator in current_low for indicator in follow_up_indicators):
+        return "follow_up"
+    
+    # Check for repeated topics
+    if len(recent_user_prompts) > 1:
+        common_words = set(current_low.split()) & set(" ".join(recent_user_prompts).lower().split())
+        if len(common_words) > 2:
+            return "continuing_topic"
+    
+    # Check for troubleshooting sequence
+    problem_indicators = ["error", "not working", "problem", "issue", "help", "fix"]
+    if any(indicator in current_low for indicator in problem_indicators):
+        return "troubleshooting"
+    
+    return "new_topic"
+
+def get_recent_conversation_topics(user_memory):
+    """Extract recent conversation topics for context awareness."""
+    history = user_memory.get("history", [])
+    topics = []
+    
+    # Analyze last 10 interactions
+    recent_history = history[-20:] if len(history) > 20 else history
+    
+    topic_keywords = {
+        "security": ["security", "scan", "vulnerability", "threat", "attack", "breach", "intrusion"],
+        "system": ["system", "cpu", "memory", "disk", "performance", "status", "monitor"],
+        "network": ["network", "ping", "connection", "ip", "dns", "internet"],
+        "tools": ["tool", "nmap", "netstat", "ps", "execute", "run", "command"],
+        "files": ["file", "directory", "folder", "ls", "find", "cat", "grep"],
+        "terminal": ["terminal", "shell", "command", "bash", "console"],
+        "backup": ["backup", "restore", "snapshot", "archive", "save"],
+        "config": ["config", "configuration", "settings", "preferences"]
+    }
+    
+    for interaction in recent_history:
+        if interaction.get("type") == "user":
+            prompt = interaction.get("prompt", "").lower()
+            for topic, keywords in topic_keywords.items():
+                if any(keyword in prompt for keyword in keywords):
+                    if topic not in topics:
+                        topics.append(topic)
+    
+    return topics[-5:]  # Return last 5 unique topics
+
+def get_preferred_response_complexity(learning_patterns):
+    """Determine user's preferred response complexity based on learning patterns."""
+    complexity_prefs = learning_patterns.get("response_complexity", {})
+    
+    if not complexity_prefs:
+        return "balanced"
+    
+    # Find the most preferred complexity
+    max_count = max(complexity_prefs.values())
+    for complexity, count in complexity_prefs.items():
+        if count == max_count:
+            return complexity
+    
+    return "balanced"
 
 def get_jarvis_personality():
     """Get the configured Jarvis personality type."""
@@ -2475,16 +2783,27 @@ def get_jarvis_personality():
     return personality
 
 def ai_reply(prompt, username, user_ip):
-    """Generate a more Jarvis-like reply with per-user memory and expanded intents."""
+    """Generate a more Jarvis-like reply with enhanced conversational awareness and per-user memory."""
     if not prompt or not prompt.strip():
         return "How can I assist you today?"
     
     prompt_low = prompt.lower()
     now = time.strftime('%Y-%m-%d %H:%M:%S')
     
-    # Load per-user memory using new encrypted system
+    # Load per-user memory using enhanced encrypted system
     user_memory = load_user_memory(username)
     user_memory["last_seen"] = now
+    
+    # Enhanced context analysis from conversation history
+    conversation_context = analyze_conversation_context(user_memory, prompt)
+    
+    # Get recent conversation topics for better context awareness
+    recent_topics = get_recent_conversation_topics(user_memory)
+    
+    # Enhanced learning patterns from user profile
+    learning_patterns = user_memory.get("memory", {}).get("learning_patterns", {})
+    interaction_style = learning_patterns.get("interaction_style", "formal")
+    preferred_complexity = get_preferred_response_complexity(learning_patterns)
     
     # Status data collection
     status = {
@@ -2497,8 +2816,10 @@ def ai_reply(prompt, username, user_ip):
     # Get personality traits
     personality = get_jarvis_personality()
     
-    # Add this conversation to user memory history
-    memory_size = _coerce_int(cfg_get('jarvis.memory_size', 10), 10)
+    # Enhanced conversation memory size based on user preferences
+    memory_size = user_memory.get("preferences", {}).get("conversation_memory_size", 50)
+    
+    # Add this conversation to user memory history with enhanced context
     user_memory["history"].append({
         "timestamp": now,
         "type": "user",
@@ -2507,20 +2828,23 @@ def ai_reply(prompt, username, user_ip):
         "context": {
             "cpu_load": status['cpu'].get('load1','?'),
             "mem_used": status['mem'].get('used_pct','?'),
-            "disk_used": status['disk'].get('use_pct','?')
+            "disk_used": status['disk'].get('use_pct','?'),
+            "conversation_context": conversation_context,
+            "recent_topics": recent_topics,
+            "interaction_style": interaction_style
         }
     })
+    
+    # Update conversation counter
+    if "conversation_context" in user_memory.get("memory", {}):
+        user_memory["memory"]["conversation_context"]["total_conversations"] += 1
     
     # Keep only last N conversations
     if len(user_memory["history"]) > memory_size * 2:  # *2 for user+AI pairs
         user_memory["history"] = user_memory["history"][-memory_size * 2:]
     
-    # Keep memory at configured size
-    # Trim memory to keep only recent history
-    if len(user_memory["history"]) > memory_size * 2:  # *2 for user+AI pairs  
-        user_memory["history"] = user_memory["history"][-memory_size * 2:]
-    
-    save_user_memory(username, user_memory)
+    # Auto-save memory after updating with user prompt
+    auto_save_user_memory(username, user_memory)
     
     # Expanded intents processing
     # Status intent
@@ -3256,98 +3580,197 @@ def jarvis_security_integration():
     return security_data
 
 def enhanced_jarvis_learning(username, prompt, reply_context):
-    """Enhanced learning system for Jarvis AI with advanced pattern analysis"""
+    """Enhanced learning system for Jarvis AI with comprehensive pattern analysis and auto-learning."""
     try:
         user_memory = load_user_memory(username)
         
-        if "learning_patterns" not in user_memory:
-            user_memory["learning_patterns"] = {}
+        # Ensure learning patterns structure exists
+        if "memory" not in user_memory:
+            user_memory["memory"] = {}
+        if "learning_patterns" not in user_memory["memory"]:
+            user_memory["memory"]["learning_patterns"] = {}
         
-        patterns = user_memory["learning_patterns"]
+        patterns = user_memory["memory"]["learning_patterns"]
         
-        # Enhanced pattern analysis
+        # Initialize learning tracking structures
+        learning_structures = {
+            "frequent_commands": {},
+            "command_preferences": {},
+            "conversation_topics": {},
+            "response_complexity": {"simple": 0, "detailed": 0, "technical": 0},
+            "emotional_preferences": {"formal": 0, "friendly": 0, "enthusiastic": 0},
+            "interaction_patterns": {"question": 0, "command": 0, "conversation": 0},
+            "time_patterns": {},
+            "error_patterns": {},
+            "success_patterns": {},
+            "contextual_preferences": {}
+        }
+        
+        for key, default_value in learning_structures.items():
+            if key not in patterns:
+                patterns[key] = default_value
+        
+        # Enhanced conversation analysis
         conversations = user_memory.get('history', [])
         
-        # Track command usage patterns
-        if "frequent_commands" not in patterns:
-            patterns["frequent_commands"] = {}
-        
-        # Extract commands from user prompts
+        # Learn from current prompt
         if prompt:
             prompt_lower = prompt.lower()
-            command_indicators = ['run ', 'execute ', 'launch ', 'start ', 'scan ', 'check ', 'analyze ']
+            
+            # Enhanced command extraction
+            command_indicators = [
+                'run ', 'execute ', 'launch ', 'start ', 'scan ', 'check ', 'analyze ',
+                'show ', 'display ', 'list ', 'find ', 'search ', 'get ', 'tell me'
+            ]
+            
             for indicator in command_indicators:
                 if indicator in prompt_lower:
                     cmd_start = prompt_lower.find(indicator) + len(indicator)
                     potential_cmd = prompt_lower[cmd_start:].split()[0] if cmd_start < len(prompt_lower) else ''
-                    if potential_cmd:
+                    if potential_cmd and len(potential_cmd) > 1:
                         patterns["frequent_commands"][potential_cmd] = patterns["frequent_commands"].get(potential_cmd, 0) + 1
+            
+            # Classify interaction type
+            if '?' in prompt or any(q in prompt_lower for q in ['what', 'how', 'why', 'when', 'where', 'who']):
+                patterns["interaction_patterns"]["question"] += 1
+            elif any(cmd in prompt_lower for cmd in ['run', 'execute', 'start', 'stop', 'restart']):
+                patterns["interaction_patterns"]["command"] += 1
+            else:
+                patterns["interaction_patterns"]["conversation"] += 1
+            
+            # Track time patterns (hour of day)
+            current_hour = int(time.strftime('%H'))
+            hour_key = f"hour_{current_hour}"
+            patterns["time_patterns"][hour_key] = patterns["time_patterns"].get(hour_key, 0) + 1
+            
+            # Analyze contextual preferences (sentiment/mood)
+            polite_indicators = ['please', 'thank you', 'thanks', 'appreciate']
+            urgent_indicators = ['urgent', 'quickly', 'asap', 'emergency', 'critical']
+            casual_indicators = ['hey', 'hi', 'hello', 'cool', 'awesome', 'nice']
+            
+            if any(indicator in prompt_lower for indicator in polite_indicators):
+                patterns["contextual_preferences"]["polite"] = patterns["contextual_preferences"].get("polite", 0) + 1
+            if any(indicator in prompt_lower for indicator in urgent_indicators):
+                patterns["contextual_preferences"]["urgent"] = patterns["contextual_preferences"].get("urgent", 0) + 1
+            if any(indicator in prompt_lower for indicator in casual_indicators):
+                patterns["contextual_preferences"]["casual"] = patterns["contextual_preferences"].get("casual", 0) + 1
         
-        # Analyze AI response patterns
+        # Learn from AI response analysis
         if reply_context and "reply" in reply_context:
             reply = reply_context["reply"]
+            reply_text = reply if isinstance(reply, str) else str(reply)
             
-            # Track response complexity preferences
-            if "response_complexity" not in patterns:
-                patterns["response_complexity"] = {"simple": 0, "detailed": 0, "technical": 0}
-            
-            if len(reply) > 500:
+            # Enhanced response complexity analysis
+            word_count = len(reply_text.split())
+            if word_count > 100:
                 patterns["response_complexity"]["detailed"] += 1
-            elif any(tech_term in reply.lower() for tech_term in ['cpu', 'memory', 'process', 'command', 'log']):
+            elif any(tech_term in reply_text.lower() for tech_term in 
+                    ['cpu', 'memory', 'process', 'command', 'log', 'system', 'network', 'security']):
                 patterns["response_complexity"]["technical"] += 1
             else:
                 patterns["response_complexity"]["simple"] += 1
             
-            # Track emotional tone preferences (basic sentiment analysis)
-            if "emotional_preferences" not in patterns:
-                patterns["emotional_preferences"] = {"formal": 0, "friendly": 0, "enthusiastic": 0}
-            
-            if any(enthusiastic in reply for enthusiastic in ['!', 'great', 'excellent', 'perfect']):
+            # Enhanced emotional tone analysis
+            if any(enthusiastic in reply_text for enthusiastic in ['!', '🎉', '✅', 'great', 'excellent', 'perfect', 'awesome']):
                 patterns["emotional_preferences"]["enthusiastic"] += 1
-            elif any(friendly in reply for friendly in ['please', 'sure', 'happy to', 'glad to']):
+            elif any(friendly in reply_text for friendly in ['please', 'sure', 'happy to', 'glad to', 'here to help']):
                 patterns["emotional_preferences"]["friendly"] += 1
             else:
                 patterns["emotional_preferences"]["formal"] += 1
+            
+            # Track success vs error patterns
+            if any(error in reply_text.lower() for error in ['error', 'failed', 'couldn\'t', 'unable', 'problem']):
+                error_type = "general"
+                if "permission" in reply_text.lower():
+                    error_type = "permission"
+                elif "network" in reply_text.lower():
+                    error_type = "network"
+                elif "file" in reply_text.lower():
+                    error_type = "file"
+                patterns["error_patterns"][error_type] = patterns["error_patterns"].get(error_type, 0) + 1
+            else:
+                patterns["success_patterns"]["successful_responses"] = patterns["success_patterns"].get("successful_responses", 0) + 1
         
-        # Legacy compatibility - analyze conversation history
-        user_patterns = {
-            'frequent_commands': patterns.get("frequent_commands", {}),
-            'preferred_tools': {},
-            'interaction_style': 'formal',  # formal, casual, technical
-            'response_preferences': {},
-            'security_awareness': 'medium'  # low, medium, high
-        }
-        
-        # Learn from conversation history
-        for conv in conversations:
-            if conv.get('type') == 'user':
+        # Advanced conversation history analysis
+        if len(conversations) > 0:
+            # Analyze conversation flow patterns
+            user_conversations = [c for c in conversations[-20:] if c.get('type') == 'user']
+            
+            for conv in user_conversations:
                 prompt_text = conv.get('prompt', '').lower()
                 
-                # Track command preferences
-                for tool in ['nmap', 'ping', 'netstat', 'ps', 'htop', 'curl', 'grep', 'find', 'ls']:
+                # Enhanced tool preference tracking
+                for tool in ['nmap', 'ping', 'netstat', 'ps', 'htop', 'curl', 'grep', 'find', 'ls', 'cat', 'tail', 'head']:
                     if tool in prompt_text:
-                        user_patterns['frequent_commands'][tool] = user_patterns['frequent_commands'].get(tool, 0) + 1
+                        patterns["command_preferences"][tool] = patterns["command_preferences"].get(tool, 0) + 1
                 
-                # Determine interaction style
-                if any(casual in prompt_text for casual in ['hey', 'hi', 'thanks', 'cool', 'awesome']):
-                    user_patterns['interaction_style'] = 'casual'
-                elif any(tech in prompt_text for tech in ['process', 'thread', 'memory', 'cpu', 'kernel']):
-                    user_patterns['interaction_style'] = 'technical'
+                # Conversation topic analysis
+                topic_mapping = {
+                    'security': ['security', 'vulnerability', 'threat', 'attack', 'breach', 'hack', 'scan'],
+                    'system': ['system', 'cpu', 'memory', 'disk', 'performance', 'monitor', 'status'],
+                    'network': ['network', 'ping', 'connection', 'ip', 'dns', 'internet', 'port'],
+                    'files': ['file', 'directory', 'folder', 'ls', 'find', 'cat', 'grep', 'search'],
+                    'troubleshooting': ['error', 'problem', 'issue', 'fix', 'help', 'not working', 'broken'],
+                    'automation': ['script', 'automate', 'schedule', 'cron', 'batch', 'automatic'],
+                    'configuration': ['config', 'setting', 'configure', 'setup', 'install', 'update']
+                }
                 
-                # Assess security awareness
-                if any(sec in prompt_text for sec in ['security', 'vulnerability', 'threat', 'attack', 'breach']):
-                    user_patterns['security_awareness'] = 'high'
+                for topic, keywords in topic_mapping.items():
+                    if any(keyword in prompt_text for keyword in keywords):
+                        patterns["conversation_topics"][topic] = patterns["conversation_topics"].get(topic, 0) + 1
         
-        # Update patterns with learned data
-        patterns.update(user_patterns)
+        # Determine user's interaction style based on accumulated patterns
+        total_interactions = sum(patterns["interaction_patterns"].values())
+        if total_interactions > 5:  # Only classify after sufficient data
+            if patterns["contextual_preferences"].get("casual", 0) > total_interactions * 0.3:
+                patterns["interaction_style"] = "casual"
+            elif patterns["response_complexity"]["technical"] > patterns["response_complexity"]["simple"]:
+                patterns["interaction_style"] = "technical"
+            elif patterns["contextual_preferences"].get("polite", 0) > total_interactions * 0.4:
+                patterns["interaction_style"] = "professional"
+            else:
+                patterns["interaction_style"] = "balanced"
+        
+        # Update learning metadata
         patterns["last_learning_update"] = time.strftime('%Y-%m-%d %H:%M:%S')
         patterns["learning_sessions"] = patterns.get("learning_sessions", 0) + 1
+        patterns["total_interactions"] = patterns.get("total_interactions", 0) + 1
         
-        # Save updated learning patterns
+        # Enhanced auto-learning features
+        patterns["auto_learn_enabled"] = True
+        patterns["learning_quality_score"] = calculate_learning_quality(patterns)
+        
+        # Auto-save enhanced memory with learning patterns
         save_user_memory(username, user_memory)
         
+        # Log successful learning session
+        py_alert('INFO', f'Enhanced learning completed for {username} (session #{patterns["learning_sessions"]})')
+        
     except Exception as e:
-        security_log(f"JARVIS_LEARNING_ERROR user={username} error={str(e)}")
+        py_alert('ERROR', f'Enhanced Jarvis learning error for {username}: {str(e)}')
+
+def calculate_learning_quality(patterns):
+    """Calculate a quality score for the learning patterns."""
+    score = 0
+    
+    # Points for interaction diversity
+    interaction_types = len([v for v in patterns.get("interaction_patterns", {}).values() if v > 0])
+    score += interaction_types * 10
+    
+    # Points for topic diversity
+    topic_count = len([v for v in patterns.get("conversation_topics", {}).values() if v > 0])
+    score += topic_count * 5
+    
+    # Points for command familiarity
+    command_count = len([v for v in patterns.get("frequent_commands", {}).values() if v > 2])
+    score += command_count * 3
+    
+    # Points for consistency (balanced preferences)
+    complexity_prefs = patterns.get("response_complexity", {})
+    if complexity_prefs and max(complexity_prefs.values()) < sum(complexity_prefs.values()) * 0.8:
+        score += 20  # Bonus for balanced complexity preferences
+    
+    return min(score, 100)  # Cap at 100
 
 def save_command_result(tool_name, command, output, username):
     """Save command results to the results panel for comprehensive tracking"""
@@ -3970,9 +4393,14 @@ def ws_handshake(handler):
     headers = {
         'Upgrade': 'websocket',
         'Connection': 'Upgrade',
-        'Sec-WebSocket-Accept': accept,
-        'Sec-WebSocket-Protocol': 'chat'
+        'Sec-WebSocket-Accept': accept
     }
+    
+    # Only send Sec-WebSocket-Protocol if the client requested specific protocols
+    client_protocols = handler.headers.get('Sec-WebSocket-Protocol')
+    if client_protocols and 'chat' in client_protocols:
+        headers['Sec-WebSocket-Protocol'] = 'chat'
+    
     handler._set_headers(101, 'application/octet-stream', headers)
     return True
 
@@ -3995,7 +4423,7 @@ class Handler(SimpleHTTPRequestHandler):
 
     def do_GET(self):
         # Enhanced connection logging - log all incoming connections
-        ip = self.client_address[0]
+        ip = get_client_ip(self)
         user_agent = self.headers.get('User-Agent', 'Unknown')
         path = self.path
         
@@ -4061,6 +4489,31 @@ class Handler(SimpleHTTPRequestHandler):
                 self._set_headers(200, ctype); self.wfile.write(read_text(p).encode('utf-8')); return
             self._set_headers(404); self.wfile.write(b'{}'); return
 
+        if parsed.path == '/api/ping':
+            # Keep-alive endpoint to prevent session expiration
+            if not auth_enabled():
+                # If auth is disabled, always return success
+                self._set_headers(200)
+                self.wfile.write(json.dumps({'status': 'ok', 'auth': 'disabled'}).encode('utf-8'))
+                return
+            
+            sess = get_session(self)
+            if not sess:
+                self._set_headers(401)
+                self.wfile.write(json.dumps({'error': 'unauthorized'}).encode('utf-8'))
+                return
+                
+            # Session is valid, return success with basic info
+            data = {
+                'status': 'ok',
+                'user': sess.get('user', 'unknown'),
+                'timestamp': time.strftime('%Y-%m-%d %H:%M:%S'),
+                'session_valid': True
+            }
+            self._set_headers(200)
+            self.wfile.write(json.dumps(data).encode('utf-8'))
+            return
+
         if parsed.path == '/api/status':
             if not require_auth(self): return
             sess = get_session(self) or {}
@@ -4099,7 +4552,7 @@ class Handler(SimpleHTTPRequestHandler):
                 'scheduler_enabled': monitor_enabled('scheduler'),
                 'authenticated': sess is not None and sess.get('user') != 'public',
                 # Additional fields required by UI as per problem statement
-                'services_count': len([x for x in os.listdir(os.path.join(NS_LOGS,'service.json')) if not x.startswith('.')]) if os.path.exists(os.path.join(NS_LOGS,'service.json')) else 0,
+                'services_count': len(cfg_get('monitors.services.targets', [])) if cfg_get('monitors.services.targets') else 0,
                 'suspicious_count': len(read_json(os.path.join(NS_LOGS,'process.json'), {}).get('suspicious', [])),
                 'active_sessions': len([s for s in (users_db() or {}).values() if s.get('expires', 0) > int(time.time())]),
                 'uptime': read_uptime()
@@ -4374,6 +4827,24 @@ class Handler(SimpleHTTPRequestHandler):
                     open(CHATLOG,'a',encoding='utf-8').write(f'{time.strftime("%Y-%m-%d %H:%M:%S")} User:{username} IP:{user_ip} Q:{prompt} A:{reply_text}\n')
                 except Exception: 
                     py_alert('WARN', f'Failed to write chat log for {username}@{user_ip}')
+                
+                # Save AI reply to user memory for learning
+                user_memory["history"].append({
+                    "timestamp": now,
+                    "type": "ai",
+                    "user": username,
+                    "reply": reply_text,
+                    "context": {
+                        "response_length": len(reply_text),
+                        "prompt_analyzed": prompt
+                    }
+                })
+                
+                # Enhanced learning from both prompt and reply
+                enhanced_jarvis_learning(username, prompt, {"reply": reply_text, "action": action})
+                
+                # Save updated memory after AI reply
+                save_user_memory(username, user_memory)
                     
                 response_data = {'ok': True, 'reply': reply_text}
                 if voice_enabled:
@@ -4850,6 +5321,198 @@ class Handler(SimpleHTTPRequestHandler):
                 self.wfile.write(json.dumps({'error': str(e)}).encode('utf-8'))
                 return
 
+        if parsed.path == '/api/jarvis/memory':
+            if not require_auth(self): return
+            sess = get_session(self) or {}
+            username = sess.get('user', 'anonymous')
+            
+            if self.command == 'GET':
+                # Load user memory
+                try:
+                    user_memory = load_user_memory(username)
+                    self._set_headers(200)
+                    self.wfile.write(json.dumps(user_memory).encode('utf-8'))
+                    return
+                except Exception as e:
+                    self._set_headers(500)
+                    self.wfile.write(json.dumps({'error': str(e)}).encode('utf-8'))
+                    return
+            
+            elif self.command == 'POST':
+                # Save user memory/preferences
+                try:
+                    content_length = int(self.headers.get('Content-Length', 0))
+                    if content_length == 0:
+                        self._set_headers(400)
+                        self.wfile.write(json.dumps({'error': 'No data provided'}).encode('utf-8'))
+                        return
+                    
+                    post_data = self.rfile.read(content_length).decode('utf-8')
+                    data = json.loads(post_data)
+                    
+                    # Load current memory
+                    user_memory = load_user_memory(username)
+                    
+                    # Update preferences if provided
+                    if 'preferences' in data:
+                        user_memory['preferences'].update(data['preferences'])
+                        security_log(f"JARVIS_PREFERENCES_UPDATED user={username} preferences={data['preferences']}")
+                    
+                    # Update specific fields if provided
+                    for field in ['memory', 'history']:
+                        if field in data:
+                            user_memory[field] = data[field]
+                    
+                    # Save updated memory
+                    success = save_user_memory(username, user_memory)
+                    
+                    if success:
+                        self._set_headers(200)
+                        self.wfile.write(json.dumps({'success': True, 'message': 'Memory updated'}).encode('utf-8'))
+                    else:
+                        self._set_headers(500)
+                        self.wfile.write(json.dumps({'error': 'Failed to save memory'}).encode('utf-8'))
+                    return
+                    
+                except json.JSONDecodeError:
+                    self._set_headers(400)
+                    self.wfile.write(json.dumps({'error': 'Invalid JSON'}).encode('utf-8'))
+                    return
+                except Exception as e:
+                    self._set_headers(500)
+                    self.wfile.write(json.dumps({'error': str(e)}).encode('utf-8'))
+                    return
+
+        if parsed.path == '/api/users':
+            if not require_auth(self): return
+            try:
+                db = users_db()
+                current_time = int(time.time())
+                users_list = []
+                
+                # Get all usernames from _userdb
+                userdb = db.get('_userdb', {})
+                active_sessions = {}
+                
+                # Count active sessions per user
+                for token, session_data in db.items():
+                    if token.startswith('_'):
+                        continue
+                    if isinstance(session_data, dict):
+                        user = session_data.get('user')
+                        expires = session_data.get('expires', 0)
+                        if user and expires > current_time:
+                            active_sessions[user] = active_sessions.get(user, 0) + 1
+                
+                # Build user list
+                for username in userdb.keys():
+                    active_count = active_sessions.get(username, 0)
+                    users_list.append({
+                        'username': username,
+                        'active': active_count > 0,
+                        'session_count': active_count
+                    })
+                
+                # Sort by username
+                users_list.sort(key=lambda x: x['username'])
+                
+                response = {
+                    'users': users_list,
+                    'total_users': len(users_list),
+                    'total_active_sessions': sum(active_sessions.values()),
+                    'timestamp': time.strftime('%Y-%m-%d %H:%M:%S')
+                }
+                
+                self._set_headers(200)
+                self.wfile.write(json.dumps(response).encode('utf-8'))
+                return
+                
+            except Exception as e:
+                security_log(f"USERS_API_ERROR error={str(e)}")
+                self._set_headers(500)
+                self.wfile.write(json.dumps({'error': str(e)}).encode('utf-8'))
+                return
+
+        if parsed.path == '/api/config/save':
+            if not require_auth(self): return
+            sess = get_session(self) or {}
+            
+            # Check CSRF if required
+            if csrf_required():
+                client_csrf = self.headers.get('X-CSRF','')
+                if client_csrf != sess.get('csrf',''):
+                    self._set_headers(403)
+                    self.wfile.write(json.dumps({'error': 'CSRF token mismatch'}).encode('utf-8'))
+                    return
+            
+            try:
+                # Read POST data
+                content_length = int(self.headers.get('Content-Length', 0))
+                if content_length == 0:
+                    self._set_headers(400)
+                    self.wfile.write(json.dumps({'error': 'No configuration data provided'}).encode('utf-8'))
+                    return
+                
+                post_data = self.rfile.read(content_length).decode('utf-8')
+                data = json.loads(post_data)
+                new_config = data.get('config', '')
+                
+                if not new_config.strip():
+                    self._set_headers(400)
+                    self.wfile.write(json.dumps({'error': 'Configuration cannot be empty'}).encode('utf-8'))
+                    return
+                
+                # Basic YAML validation (check for obvious syntax errors)
+                config_lines = new_config.split('\n')
+                for i, line in enumerate(config_lines, 1):
+                    stripped = line.strip()
+                    if stripped and not stripped.startswith('#'):
+                        # Basic checks for valid YAML structure
+                        if ':' not in stripped and not stripped.startswith('-'):
+                            if not stripped.replace(' ', '').replace('\t', ''):
+                                continue  # Skip empty lines
+                            self._set_headers(400)
+                            self.wfile.write(json.dumps({'error': f'Invalid YAML syntax on line {i}: missing colon'}).encode('utf-8'))
+                            return
+                
+                # Create backup of current config
+                if os.path.exists(CONFIG):
+                    backup_timestamp = time.strftime('%Y%m%d_%H%M%S')
+                    backup_path = f"{CONFIG}.bak.{backup_timestamp}"
+                    try:
+                        import shutil
+                        shutil.copy2(CONFIG, backup_path)
+                        security_log(f"CONFIG_BACKUP created={backup_path} user={sess.get('user', 'unknown')} ip={get_client_ip(self)}")
+                    except Exception as e:
+                        # Log but don't fail the save operation
+                        security_log(f"CONFIG_BACKUP_FAILED error={str(e)} user={sess.get('user', 'unknown')}")
+                
+                # Write new configuration
+                with open(CONFIG, 'w', encoding='utf-8') as f:
+                    f.write(new_config)
+                
+                # Log the configuration change
+                audit(f"CONFIG_SAVED user={sess.get('user', 'unknown')} ip={get_client_ip(self)} size={len(new_config)}")
+                security_log(f"CONFIG_MODIFIED user={sess.get('user', 'unknown')} ip={get_client_ip(self)}")
+                
+                self._set_headers(200)
+                self.wfile.write(json.dumps({
+                    'success': True, 
+                    'message': 'Configuration saved successfully',
+                    'backup_created': backup_path if 'backup_path' in locals() else None
+                }).encode('utf-8'))
+                return
+                
+            except json.JSONDecodeError:
+                self._set_headers(400)
+                self.wfile.write(json.dumps({'error': 'Invalid JSON in request'}).encode('utf-8'))
+                return
+            except Exception as e:
+                security_log(f"CONFIG_SAVE_ERROR user={sess.get('user', 'unknown')} ip={get_client_ip(self)} error={str(e)}")
+                self._set_headers(500)
+                self.wfile.write(json.dumps({'error': f'Failed to save configuration: {str(e)}'}).encode('utf-8'))
+                return
+
         self._set_headers(400); self.wfile.write(b'{"ok":false}')
 
 def pick_host_port():
@@ -5124,6 +5787,35 @@ write_dashboard(){
           <ul id="integrity-logs" class="log-list"></ul>
         </div>
       </div>
+      
+      <!-- Users & Sessions Panel -->
+      <div class="security-panel">
+        <h3>👥 Users & Sessions</h3>
+        <p class="panel-description">Active user accounts and session management. Monitor user login activity, session status, and account security.</p>
+        <div class="users-controls">
+          <button id="btn-refresh-users" type="button" title="Refresh user and session information">Refresh Users</button>
+        </div>
+        <div class="users-grid">
+          <div class="users-summary">
+            <div class="summary-item">
+              <span class="summary-label">Total Users:</span>
+              <span class="summary-value" id="total-users">0</span>
+            </div>
+            <div class="summary-item">
+              <span class="summary-label">Active Sessions:</span>
+              <span class="summary-value" id="active-sessions">0</span>
+            </div>
+            <div class="summary-item">
+              <span class="summary-label">Last Updated:</span>
+              <span class="summary-value" id="users-timestamp">Never</span>
+            </div>
+          </div>
+          <div class="users-list">
+            <h4>User Accounts</h4>
+            <ul id="users-list" class="user-list"></ul>
+          </div>
+        </div>
+      </div>
     </section>
 
     <section id="tab-tools" class="tab" aria-labelledby="Tools">
@@ -5394,9 +6086,22 @@ write_dashboard(){
 
     <section id="tab-config" class="tab" aria-labelledby="Config">
       <div class="panel">
-        <h3>Configuration Viewer</h3>
-        <p class="panel-description">View current NovaShield configuration settings including enabled features, monitoring thresholds, security options, and system paths. This is a read-only view - edit the configuration file directly to make changes.</p>
-        <pre id="config" style="white-space:pre-wrap;"></pre>
+        <h3>Configuration Editor</h3>
+        <p class="panel-description">Edit NovaShield configuration settings including enabled features, monitoring thresholds, security options, and system paths. Changes are saved to config.yaml with automatic backup.</p>
+        <div class="config-controls">
+          <button id="config-save" type="button" title="Save configuration changes to disk">💾 Save Configuration</button>
+          <button id="config-reload" type="button" title="Reload configuration from disk">🔄 Reload</button>
+          <button id="config-validate" type="button" title="Validate configuration syntax">✓ Validate</button>
+        </div>
+        <div class="config-editor">
+          <textarea id="config-text" placeholder="Loading configuration..." title="Edit YAML configuration - changes are saved with backup"></textarea>
+        </div>
+        <div id="config-status" class="config-status"></div>
+        <div class="config-readonly-fallback" style="display: none;">
+          <h4>Read-Only View</h4>
+          <p>Configuration editing requires authentication. Here's the current configuration:</p>
+          <pre id="config-readonly" style="white-space:pre-wrap;"></pre>
+        </div>
       </div>
     </section>
 
@@ -5560,6 +6265,42 @@ main{padding:16px}
 .filebar input{flex:1;padding:8px;border-radius:8px;border:1px solid #143055;background:#0b1830;color:#d7e3ff}
 #filelist{font-size:13px;white-space:pre-wrap;background:#081426;border:1px solid #143055;border-radius:8px;padding:8px}
 textarea#wcontent{width:100%;height:160px;background:#0b1830;color:#d7e3ff;border:1px solid #143055;border-radius:8px;padding:8px}
+
+/* Configuration Editor Styles */
+.config-controls{display:flex;gap:12px;margin-bottom:16px;flex-wrap:wrap}
+.config-controls button{padding:8px 16px;border-radius:8px;border:1px solid #143055;background:#0e1726;color:#d7e3ff;cursor:pointer;transition:all 0.3s ease}
+.config-controls button:hover{background:#173764;border-color:#1e5a96}
+.config-editor{margin-bottom:16px}
+#config-text{width:100%;height:400px;background:#0b1830;color:#d7e3ff;border:1px solid #143055;border-radius:8px;padding:12px;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;line-height:1.4;resize:vertical}
+.config-status{padding:8px 12px;border-radius:6px;margin-top:8px;font-size:13px;display:none}
+.config-status.success{background:#166534;border:1px solid #22c55e;color:#bbf7d0}
+.config-status.error{background:#7f1d1d;border:1px solid #ef4444;color:#fecaca}
+.config-status.warning{background:#92400e;border:1px solid #f59e0b;color:#fed7aa}
+.config-readonly-fallback pre{background:#081426;border:1px solid #143055;border-radius:8px;padding:12px;font-size:13px}
+
+/* Users & Sessions Panel Styles */
+.security-panel{background:var(--card);border:1px solid #143055;border-radius:12px;padding:16px;margin-top:20px}
+.security-panel h3{margin:0 0 12px 0;color:var(--accent);font-size:16px;font-weight:600}
+.users-controls{display:flex;gap:12px;margin-bottom:16px;flex-wrap:wrap}
+.users-controls button{padding:8px 16px;border-radius:8px;border:1px solid #143055;background:#0e1726;color:#d7e3ff;cursor:pointer;transition:all 0.3s ease}
+.users-controls button:hover{background:#173764;border-color:#1e5a96}
+.users-grid{display:grid;grid-template-columns:1fr 2fr;gap:20px}
+.users-summary{display:flex;flex-direction:column;gap:12px}
+.summary-item{display:flex;justify-content:space-between;padding:8px 12px;background:#0a1426;border-radius:6px;border:1px solid #143055}
+.summary-label{color:var(--muted);font-size:14px}
+.summary-value{color:var(--text);font-weight:600}
+.users-list h4{margin:0 0 12px 0;color:var(--accent);font-size:14px}
+.user-list{list-style:none;margin:0;padding:0;background:#0a1426;border-radius:8px;border:1px solid #143055;max-height:200px;overflow-y:auto}
+.user-list li{padding:8px 12px;border-bottom:1px solid #143055;display:flex;justify-content:space-between;align-items:center}
+.user-list li:last-child{border-bottom:none}
+.user-list li:hover{background:#0e1726}
+.user-name{color:var(--text);font-weight:500}
+.user-status{display:flex;align-items:center;gap:6px;font-size:12px}
+.status-indicator{width:8px;height:8px;border-radius:50%}
+.status-indicator.active{background:#10b981}
+.status-indicator.inactive{background:#6b7280}
+.session-count{color:var(--muted);font-size:11px}
+
 #term{background:#000;color:#9fe4b9;border:1px solid #173764;border-radius:10px;height:300px;overflow:auto;font-family:ui-monospace,Menlo,Consolas,monospace;padding:8px;white-space:pre-wrap;outline:none}
 .term-hint{color:#93a3c0;font-size:12px;margin-top:6px}
 
@@ -6477,36 +7218,8 @@ let CSRF = '';
 
 $('#btn-refresh').onclick = () => location.reload();
 
-// 420 Theme Toggle
-$('#btn-420-theme').onclick = () => {
-  const root = document.documentElement;
-  const btn = $('#btn-420-theme');
-  const is420Active = root.classList.contains('theme-420');
-  
-  if (is420Active) {
-    root.classList.remove('theme-420');
-    btn.textContent = '🌿 420 Mode';
-    btn.title = 'Toggle 420 themed colors (purple, green, blue)';
-    localStorage.setItem('theme-420', 'false');
-    toast('🌿 420 Theme Disabled');
-  } else {
-    root.classList.add('theme-420');
-    btn.textContent = '🌿 Classic';
-    btn.title = 'Switch back to classic blue theme';
-    localStorage.setItem('theme-420', 'true');
-    toast('🌿 420 Theme Activated - Purple & Green Power!');
-  }
-};
-
-// Initialize 420 theme on page load
-if (localStorage.getItem('theme-420') === 'true') {
-  document.documentElement.classList.add('theme-420');
-  const btn = $('#btn-420-theme');
-  if (btn) {
-    btn.textContent = '🌿 Classic';
-    btn.title = 'Switch back to classic blue theme';
-  }
-}
+// 420 Theme Toggle with Jarvis memory persistence
+$('#btn-420-theme').onclick = toggle420Theme;
 
 // Header actions
 $$('header .actions button[data-act]').forEach(btn=>{
@@ -6651,6 +7364,46 @@ async function refresh(){
     CSRF = j.csrf || '';
     // If we got here successfully, ensure login overlay is off
     hideLogin();
+    
+    // Enhanced Jarvis memory loading and auto-sync on every refresh
+    try {
+      console.log('🔄 Loading Jarvis memory during refresh...');
+      await loadJarvisMemory();
+      
+      // Trigger auto-save after successful memory load to update session info
+      await autoSaveAfterInteraction('page_refresh');
+      
+      console.log('✅ Jarvis memory loaded and synced on refresh');
+    } catch (error) {
+      console.warn('❌ Failed to load Jarvis memory during refresh:', error);
+      // Attempt to create default memory structure
+      try {
+        jarvisMemory = {
+          memory: {
+            learning_patterns: {},
+            conversation_context: {
+              recent_topics: [],
+              current_session_start: new Date().toISOString(),
+              total_conversations: 0
+            }
+          },
+          preferences: { 
+            theme: 'jarvis-dark',
+            auto_save: true,
+            learning_mode: 'enhanced'
+          },
+          history: [],
+          last_seen: new Date().toISOString(),
+          user_profile: {
+            created: new Date().toISOString(),
+            total_sessions: 1
+          }
+        };
+        console.log('🔧 Created fallback memory structure');
+      } catch (fallbackError) {
+        console.error('Failed to create fallback memory:', fallbackError);
+      }
+    }
 
     // Update Live Stats Panel
     updateLiveStats(j);
@@ -6659,37 +7412,81 @@ async function refresh(){
     const cpu = j.cpu || {};
     setCard('cpu', `Load: ${human(cpu.load1)} (1m) | Warn: ${cpu.warn || '2.0'} | Crit: ${cpu.crit || '4.0'} | Status: ${cpu.level || 'OK'}`);
     
-    // Enhanced Memory information  
-    const mem = j.memory || {};
-    const memUsed = mem.used_pct || '?';
-    const memWarn = mem.warn || 85;
-    const memCrit = mem.crit || 95;
-    setCard('mem', `Used: ${human(memUsed, '%')} | Available: ${human(100 - (parseInt(memUsed) || 0), '%')} | Warn: ${human(memWarn, '%')} | Crit: ${human(memCrit, '%')} | Status: ${mem.level || 'OK'}`);
+    // Enhanced Memory information
+    const mem = j.mem || {};
+    setCard('memory', `Used: ${human(mem.used_pct)}% | Total: ${human(mem.total)} | Free: ${human(mem.available)} | Status: ${mem.level || 'OK'}`);
     
-    // Enhanced Disk information
-    const dsk = j.disk || {};
-    const diskUsed = dsk.use_pct || '?';
-    setCard('disk', `Mount: ${dsk.mount || '/'} | Used: ${human(diskUsed, '%')} | Free: ${human(100 - (parseInt(diskUsed) || 0), '%')} | Warn: ${dsk.warn || 85}% | Status: ${dsk.level || 'OK'}`);
+    // Enhanced Disk information  
+    const disk = j.disk || {};
+    setCard('disk', `Used: ${human(disk.use_pct)}% | Total: ${human(disk.total)} | Free: ${human(disk.available)} | Status: ${disk.level || 'OK'}`);
     
     // Enhanced Network information
-    const net = j.network || {};
-    const netInfo = [];
-    if (net.ip) netInfo.push(`Local: ${net.ip}`);
-    if (net.public_ip && net.public_ip !== 'disabled' && net.public_ip !== 'unavailable') {
-        netInfo.push(`Public: ${net.public_ip}`);
-    }
-    if (net.external_checks === 'true' || net.external_checks === true) {
-        netInfo.push(`Loss: ${human(net.loss_pct, '%')}`);
-        if (net.rtt_avg_ms) netInfo.push(`RTT: ${human(net.rtt_avg_ms, 'ms')}`);
-    } else {
-        netInfo.push('External checks: disabled');
-    }
-    netInfo.push(`Status: ${net.level || 'OK'}`);
-    setCard('net', netInfo.join(' | '));
+    const net = j.net || {};
+    setCard('network', `IP: ${net.ip || 'N/A'} | Public: ${net.public_ip || 'N/A'} | Status: ${net.level || 'OK'}`);
     
-    // Enhanced monitor status information
-    setCard('int', `Integrity monitoring: ${j.integrity_enabled ? 'Active' : 'Inactive'} | Files watched: ${j.integrity_files || '?'}`);
-    setCard('proc', `Process monitoring: ${j.process_enabled ? 'Active' : 'Inactive'} | Suspicious patterns: ${j.suspicious_count || '?'}`);
+    // Enhanced Services information (fix for services_count bug)
+    const services = j.services || {};
+    const servicesCount = services.count || Object.keys(services).length || 0;
+    setCard('services', `Active: ${servicesCount} | Status: ${services.level || 'OK'}`);
+    
+    // Update Enhanced Alerts panel with better data population
+    const alertsEl = $('#alerts');
+    if (alertsEl && j.alerts) {
+      alertsEl.innerHTML = '';
+      const alerts = j.alerts.slice(-10); // Show last 10 alerts
+      if (alerts.length === 0) {
+        const li = document.createElement('li');
+        li.textContent = 'No alerts - system running smoothly';
+        li.style.color = '#00ff00';
+        alertsEl.appendChild(li);
+      } else {
+        alerts.forEach(alert => {
+          const li = document.createElement('li');
+          li.textContent = alert;
+          // Color code alerts by severity
+          if (alert.includes('[CRIT]') || alert.includes('[ERROR]')) {
+            li.style.color = '#ff6b6b';
+          } else if (alert.includes('[WARN]')) {
+            li.style.color = '#ffa500';
+          } else {
+            li.style.color = '#e0e0e0';
+          }
+          alertsEl.appendChild(li);
+        });
+      }
+    }
+    
+    // Update Enhanced AI statistics with memory data
+    if (jarvisMemory) {
+      updateAIStats(jarvisMemory);
+    }
+    
+    // Update session and user info displays
+    updateSessionInfo(j);
+    
+    // Auto-refresh memory and learning patterns every few refreshes
+    if (typeof refreshCounter === 'undefined') window.refreshCounter = 0;
+    window.refreshCounter++;
+    
+    if (window.refreshCounter % 5 === 0) {
+      // Every 5th refresh, ensure memory persistence
+      try {
+        if (jarvisMemory) {
+          jarvisMemory.last_seen = new Date().toISOString();
+          await saveJarvisMemory();
+          console.log('🔄 Periodic memory sync completed');
+        }
+      } catch (syncError) {
+        console.warn('Periodic sync failed:', syncError);
+      }
+    }
+    
+  } catch(e) {
+    console.error('Refresh error:', e);
+    // If we can't reach the API, show login 
+    showLogin();
+  }
+}
     setCard('user', `User sessions: ${j.active_sessions || '?'} | Login monitoring: ${j.userlogins_enabled ? 'Active' : 'Inactive'}`);
     setCard('svc', `Service monitoring: ${j.services_enabled ? 'Active' : 'Inactive'} | Services watched: ${j.services_count || '?'}`);
     
@@ -6731,10 +7528,11 @@ async function refresh(){
       if(!el) return; el.classList.remove('ok','warn','crit'); if(map[v]) el.classList.add(map[v]);
     });
     
-    // Configuration display
-    const conf = await (await api('/api/config')).text(); 
+    // Configuration display - Fix: parse JSON correctly since server returns JSON
+    const configResponse = await api('/api/config');
+    const configData = await configResponse.json(); 
     const cfgEl = $('#config'); 
-    if(cfgEl) cfgEl.textContent = conf;
+    if(cfgEl) cfgEl.textContent = configData.config || 'No configuration available';
     
   }catch(e){ 
     console.error(e);
@@ -6786,39 +7584,65 @@ function categorizeAlerts(alerts) {
     alerts.forEach(alert => {
         const alertLower = alert.toLowerCase();
         
-        // Critical threats (immediate danger)
+        // Skip system resource warnings that are NOT security threats
+        const isResourceWarning = (
+            alertLower.includes('memory') && (alertLower.includes('warn') || alertLower.includes('high')) ||
+            alertLower.includes('disk') && (alertLower.includes('warn') || alertLower.includes('full')) ||
+            alertLower.includes('cpu') && (alertLower.includes('warn') || alertLower.includes('high')) ||
+            alertLower.includes('storage') && alertLower.includes('warn') ||
+            alertLower.includes('load') && alertLower.includes('warn')
+        );
+        
+        // Don't treat system resource warnings as security threats
+        if (isResourceWarning && 
+            !alertLower.includes('attack') && 
+            !alertLower.includes('breach') && 
+            !alertLower.includes('unauthorized') &&
+            !alertLower.includes('malicious')) {
+            // Skip resource warnings - they should only appear in status tab
+            return;
+        }
+        
+        // Critical security threats (immediate danger)
         if (alertLower.includes('breach') || alertLower.includes('compromised') || 
             alertLower.includes('intrusion') || alertLower.includes('malware') ||
-            alertLower.includes('critical') || alertLower.includes('emergency')) {
+            alertLower.includes('exploit') || alertLower.includes('attack') ||
+            (alertLower.includes('critical') && (alertLower.includes('security') || alertLower.includes('auth')))) {
             critical.push(alert);
         }
         // Brute force attempts
         else if (alertLower.includes('brute') || alertLower.includes('failed login') ||
                  alertLower.includes('multiple attempts') || alertLower.includes('suspicious login') ||
-                 alertLower.includes('rate limit') || alertLower.includes('blocked ip')) {
+                 alertLower.includes('rate limit') || alertLower.includes('blocked ip') ||
+                 alertLower.includes('too many') || alertLower.includes('lockout')) {
             bruteForce.push(alert);
         }
         // Access violations and unauthorized attempts
         else if (alertLower.includes('unauthorized') || alertLower.includes('access denied') ||
-                 alertLower.includes('permission') || alertLower.includes('forbidden') ||
-                 alertLower.includes('invalid token') || alertLower.includes('session expired')) {
+                 alertLower.includes('permission denied') || alertLower.includes('forbidden') ||
+                 alertLower.includes('invalid token') || alertLower.includes('session expired') ||
+                 alertLower.includes('csrf') || alertLower.includes('auth') && alertLower.includes('fail')) {
             breaches.push(alert);
         }
-        // General warnings
-        else if (alertLower.includes('warn') || alertLower.includes('suspicious') ||
-                 alertLower.includes('unusual') || alertLower.includes('high usage') ||
-                 alertLower.includes('threshold')) {
+        // Security-related warnings only
+        else if ((alertLower.includes('warn') || alertLower.includes('suspicious') ||
+                 alertLower.includes('unusual') || alertLower.includes('threshold')) &&
+                 (alertLower.includes('security') || alertLower.includes('auth') || 
+                  alertLower.includes('network') || alertLower.includes('connection') ||
+                  alertLower.includes('user') || alertLower.includes('login'))) {
             warnings.push(alert);
         }
-        // If doesn't match any category, put in warnings
-        else {
+        // Security-related events that don't fit other categories
+        else if (alertLower.includes('security') || alertLower.includes('threat') ||
+                 alertLower.includes('violation') || alertLower.includes('blocked')) {
             warnings.push(alert);
         }
+        // Skip everything else (system messages, resource warnings, etc.)
     });
     
     // Update alert categories
     updateAlertCategory('critical', critical, 'No critical threats detected');
-    updateAlertCategory('warning', warnings, 'No warnings');
+    updateAlertCategory('warning', warnings, 'No security warnings');
     updateAlertCategory('brute-force', bruteForce, 'No brute force attempts');
     updateAlertCategory('breach', breaches, 'No access violations');
 }
@@ -6857,13 +7681,590 @@ async function loadConfig() {
     const j = await r.json(); 
     CSRF = j.csrf || '';
     
-    // Update config display if elements exist
-    if (typeof updateConfigDisplay === 'function') {
-      updateConfigDisplay(j.config || {});
+    // Update editable config text area
+    const configTextEl = $('#config-text');
+    const configReadonlyEl = $('#config-readonly');
+    const editorEl = $('.config-editor');
+    const readonlyEl = $('.config-readonly-fallback');
+    
+    if (j.csrf && j.csrf !== 'public') {
+      // User is authenticated, show editable interface
+      if (configTextEl) {
+        const configContent = j.config || '# No configuration found\n# Please check if config.yaml exists and is readable';
+        configTextEl.value = configContent;
+        configTextEl.style.display = 'block';
+        configTextEl.placeholder = 'Edit YAML configuration...';
+      }
+      if (editorEl) editorEl.style.display = 'block';
+      if (readonlyEl) readonlyEl.style.display = 'none';
+    } else {
+      // User not authenticated, show read-only interface
+      if (configReadonlyEl) {
+        configReadonlyEl.textContent = j.config || 'Configuration not available - authentication required';
+      }
+      if (editorEl) editorEl.style.display = 'none';
+      if (readonlyEl) readonlyEl.style.display = 'block';
     }
+    
+    // Legacy config display (fallback)
+    const legacyConfigEl = $('#config');
+    if (legacyConfigEl) {
+      legacyConfigEl.textContent = j.config || 'Configuration not available';
+    }
+    
   } catch (e) {
     console.error('Failed to load config:', e);
     toast('Failed to load configuration', 'error');
+    
+    // Show error in config textarea
+    const configTextEl = $('#config-text');
+    if (configTextEl) {
+      configTextEl.value = `# Error loading configuration: ${e.message}\n# Please check:\n# 1. Your session is valid\n# 2. config.yaml exists in the NovaShield directory\n# 3. File permissions allow reading\n# 4. Server is responding properly`;
+      configTextEl.placeholder = 'Configuration loading failed';
+    }
+  }
+}
+
+// Save configuration changes
+async function saveConfig() {
+  const configTextEl = $('#config-text');
+  const statusEl = $('#config-status');
+  
+  if (!configTextEl) {
+    console.error('Config text element not found');
+    return;
+  }
+  
+  const newConfig = configTextEl.value;
+  
+  if (!newConfig.trim()) {
+    showConfigStatus('Configuration cannot be empty', 'error');
+    return;
+  }
+  
+  try {
+    showConfigStatus('Saving configuration...', 'warning');
+    
+    const response = await fetch('/api/config/save', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-CSRF': CSRF
+      },
+      body: JSON.stringify({ config: newConfig })
+    });
+    
+    const result = await response.json();
+    
+    if (response.ok && result.success) {
+      showConfigStatus(result.message + (result.backup_created ? ` (Backup: ${result.backup_created})` : ''), 'success');
+      toast('Configuration saved successfully', 'success');
+    } else {
+      showConfigStatus(result.error || 'Failed to save configuration', 'error');
+      toast(result.error || 'Failed to save configuration', 'error');
+    }
+  } catch (error) {
+    showConfigStatus(`Save failed: ${error.message}`, 'error');
+    toast(`Save failed: ${error.message}`, 'error');
+  }
+}
+
+// Validate configuration syntax
+function validateConfig() {
+  const configTextEl = $('#config-text');
+  const statusEl = $('#config-status');
+  
+  if (!configTextEl) {
+    return;
+  }
+  
+  const config = configTextEl.value;
+  const lines = config.split('\n');
+  const errors = [];
+  
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (line && !line.startsWith('#')) {
+      // Basic YAML syntax validation
+      if (!line.startsWith('-') && !line.includes(':') && line.replace(/\s/g, '') !== '') {
+        errors.push(`Line ${i + 1}: Missing colon in key-value pair`);
+      }
+    }
+  }
+  
+  if (errors.length > 0) {
+    showConfigStatus(`Validation errors: ${errors.join('; ')}`, 'error');
+  } else {
+    showConfigStatus('Configuration syntax appears valid', 'success');
+  }
+}
+
+// Show configuration status message
+function showConfigStatus(message, type) {
+  const statusEl = $('#config-status');
+  if (statusEl) {
+    statusEl.textContent = message;
+    statusEl.className = `config-status ${type}`;
+    statusEl.style.display = 'block';
+    
+    // Auto-hide success messages after 5 seconds
+    if (type === 'success') {
+      setTimeout(() => {
+        statusEl.style.display = 'none';
+      }, 5000);
+    }
+  }
+}
+
+// Load users and sessions data
+async function loadUsers() {
+  try {
+    const response = await api('/api/users');
+    const data = await response.json();
+    
+    // Update summary stats
+    const totalUsersEl = $('#total-users');
+    const activeSessionsEl = $('#active-sessions');
+    const timestampEl = $('#users-timestamp');
+    
+    if (totalUsersEl) totalUsersEl.textContent = data.total_users;
+    if (activeSessionsEl) activeSessionsEl.textContent = data.total_active_sessions;
+    if (timestampEl) timestampEl.textContent = data.timestamp;
+    
+    // Update users list
+    const usersListEl = $('#users-list');
+    if (usersListEl) {
+      usersListEl.innerHTML = '';
+      
+      if (data.users.length === 0) {
+        const li = document.createElement('li');
+        li.innerHTML = '<span class="user-name">No users found</span>';
+        li.style.fontStyle = 'italic';
+        li.style.color = '#93a3c0';
+        usersListEl.appendChild(li);
+      } else {
+        data.users.forEach(user => {
+          const li = document.createElement('li');
+          li.innerHTML = `
+            <span class="user-name">${user.username}</span>
+            <div class="user-status">
+              <div class="status-indicator ${user.active ? 'active' : 'inactive'}"></div>
+              <span>${user.active ? 'Active' : 'Inactive'}</span>
+              ${user.session_count > 0 ? `<span class="session-count">(${user.session_count} sessions)</span>` : ''}
+            </div>
+          `;
+          usersListEl.appendChild(li);
+        });
+      }
+    }
+  } catch (error) {
+    console.error('Failed to load users:', error);
+    toast('Failed to load users and sessions', 'error');
+  }
+}
+
+// Jarvis Memory & Theme Management
+let jarvisMemory = null;
+let autoSaveEnabled = true;
+let lastAutoSave = Date.now();
+
+// Enhanced Jarvis memory loading with auto-sync capabilities
+async function loadJarvisMemory() {
+  try {
+    const response = await api('/api/jarvis/memory');
+    const memory = await response.json();
+    jarvisMemory = memory;
+    
+    // Apply saved theme preference with enhanced handling
+    const savedTheme = memory.preferences?.theme;
+    if (savedTheme === 'theme-420') {
+      document.documentElement.classList.add('theme-420');
+      const btn420 = $('#btn-420-theme');
+      if (btn420) {
+        btn420.textContent = '🌿 Classic Mode';
+        btn420.classList.add('active');
+      }
+    } else {
+      // Ensure default theme is applied if not 420 mode
+      document.documentElement.classList.remove('theme-420');
+      const btn420 = $('#btn-420-theme');
+      if (btn420) {
+        btn420.textContent = '🌿 420 Mode';
+        btn420.classList.remove('active');
+      }
+    }
+    
+    // Update AI stats and sync global variables
+    updateAIStats(memory);
+    
+    // Enhanced synchronization of global variables
+    if (typeof userPreferences !== 'undefined') {
+      userPreferences = { ...memory.preferences } || {};
+    }
+    if (typeof conversationHistory !== 'undefined') {
+      conversationHistory = [...memory.history] || [];
+    }
+    
+    // Initialize auto-save if enabled
+    if (memory.preferences?.auto_save !== false) {
+      autoSaveEnabled = true;
+      scheduleAutoSave();
+    }
+    
+    // Update last load timestamp
+    lastAutoSave = Date.now();
+    
+    console.log('✅ Jarvis memory loaded and synced successfully');
+    return memory;
+  } catch (error) {
+    console.warn('Failed to load Jarvis memory:', error);
+    // Return enhanced default memory structure
+    jarvisMemory = {
+      memory: {
+        learning_patterns: {},
+        conversation_context: {
+          recent_topics: [],
+          current_session_start: new Date().toISOString(),
+          total_conversations: 0
+        }
+      },
+      preferences: { 
+        theme: 'jarvis-dark',
+        auto_save: true,
+        learning_mode: 'enhanced'
+      },
+      history: [],
+      last_seen: new Date().toISOString(),
+      user_profile: {
+        created: new Date().toISOString(),
+        total_sessions: 1
+      }
+    };
+    return jarvisMemory;
+  }
+}
+
+// Enhanced Jarvis memory saving with auto-sync capabilities
+async function saveJarvisMemory(updates) {
+  try {
+    // Merge updates with existing memory
+    if (jarvisMemory && updates) {
+      // Deep merge to preserve existing data
+      jarvisMemory = deepMerge(jarvisMemory, updates);
+    }
+    
+    const response = await fetch('/api/jarvis/memory', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-CSRF': CSRF
+      },
+      body: JSON.stringify(updates || jarvisMemory)
+    });
+    
+    const result = await response.json();
+    
+    if (response.ok && result.success) {
+      lastAutoSave = Date.now();
+      console.log('✅ Jarvis memory saved and synced successfully');
+      return true;
+    } else {
+      console.error('❌ Failed to save Jarvis memory:', result.error);
+      return false;
+    }
+  } catch (error) {
+    console.error('❌ Error saving Jarvis memory:', error);
+    return false;
+  }
+}
+
+// Auto-save scheduler for continuous memory persistence
+function scheduleAutoSave() {
+  if (!autoSaveEnabled) return;
+  
+  // Auto-save every 30 seconds if there are changes
+  setInterval(async () => {
+    if (autoSaveEnabled && jarvisMemory && (Date.now() - lastAutoSave) > 25000) {
+      try {
+        // Update last activity timestamp
+        jarvisMemory.last_seen = new Date().toISOString();
+        await saveJarvisMemory();
+        console.log('🔄 Auto-save completed');
+      } catch (error) {
+        console.warn('Auto-save failed:', error);
+      }
+    }
+  }, 30000);
+}
+
+// Enhanced auto-save after user interactions
+async function autoSaveAfterInteraction(interactionType = 'general') {
+  if (!autoSaveEnabled || !jarvisMemory) return;
+  
+  try {
+    // Update interaction tracking
+    if (!jarvisMemory.user_profile) jarvisMemory.user_profile = {};
+    jarvisMemory.user_profile.last_interaction = new Date().toISOString();
+    jarvisMemory.user_profile.interaction_count = (jarvisMemory.user_profile.interaction_count || 0) + 1;
+    
+    // Track interaction type
+    if (!jarvisMemory.user_profile.interaction_types) jarvisMemory.user_profile.interaction_types = {};
+    jarvisMemory.user_profile.interaction_types[interactionType] = (jarvisMemory.user_profile.interaction_types[interactionType] || 0) + 1;
+    
+    await saveJarvisMemory();
+    console.log(`🔄 Auto-saved after ${interactionType} interaction`);
+  } catch (error) {
+    console.warn('Auto-save after interaction failed:', error);
+  }
+}
+
+// Deep merge utility for memory updates
+function deepMerge(target, source) {
+  const output = Object.assign({}, target);
+  if (isObject(target) && isObject(source)) {
+    Object.keys(source).forEach(key => {
+      if (isObject(source[key])) {
+        if (!(key in target))
+          Object.assign(output, { [key]: source[key] });
+        else
+          output[key] = deepMerge(target[key], source[key]);
+      } else {
+        Object.assign(output, { [key]: source[key] });
+      }
+    });
+  }
+  return output;
+}
+
+function isObject(item) {
+  return (item && typeof item === "object" && !Array.isArray(item));
+}
+
+// Enhanced session info update
+function updateSessionInfo(statusData) {
+  try {
+    // Update session counter if element exists
+    const sessionEl = $('#session-info');
+    if (sessionEl && jarvisMemory?.user_profile) {
+      const sessionCount = jarvisMemory.user_profile.total_sessions || 1;
+      const lastSeen = jarvisMemory.last_seen || 'Unknown';
+      sessionEl.textContent = `Session #${sessionCount} | Last seen: ${new Date(lastSeen).toLocaleString()}`;
+    }
+    
+    // Update conversation count
+    const conversationEl = $('#conversation-count');
+    if (conversationEl && jarvisMemory?.memory?.conversation_context) {
+      const totalConversations = jarvisMemory.memory.conversation_context.total_conversations || 0;
+      conversationEl.textContent = `${totalConversations} conversations`;
+    }
+    
+    // Update learning statistics
+    const learningEl = $('#learning-stats');
+    if (learningEl && jarvisMemory?.memory?.learning_patterns) {
+      const patterns = jarvisMemory.memory.learning_patterns;
+      const learningScore = patterns.learning_quality_score || 0;
+      const learningSessions = patterns.learning_sessions || 0;
+      learningEl.textContent = `Learning Score: ${learningScore}/100 | Sessions: ${learningSessions}`;
+    }
+  } catch (error) {
+    console.warn('Failed to update session info:', error);
+  }
+}
+
+// Enhanced AI stats update with comprehensive memory data
+function updateAIStats(memory = null) {
+  try {
+    const memoryData = memory || jarvisMemory;
+    if (!memoryData) return;
+    
+    // Update conversation count
+    const conversationCount = memoryData.history?.length || 0;
+    const conversationEl = $('#ai-conversations');
+    if (conversationEl) {
+      conversationEl.textContent = conversationCount.toString();
+    }
+    
+    // Update learning patterns count
+    const learningPatterns = memoryData.memory?.learning_patterns || {};
+    const patternsCount = Object.keys(learningPatterns).length;
+    const patternsEl = $('#ai-patterns');
+    if (patternsEl) {
+      patternsEl.textContent = patternsCount.toString();
+    }
+    
+    // Update memory size
+    const memorySize = JSON.stringify(memoryData).length;
+    const memorySizeEl = $('#ai-memory-size');
+    if (memorySizeEl) {
+      memorySizeEl.textContent = `${(memorySize / 1024).toFixed(1)}KB`;
+    }
+    
+    // Update learning quality score
+    const qualityScore = learningPatterns.learning_quality_score || 0;
+    const qualityEl = $('#ai-quality');
+    if (qualityEl) {
+      qualityEl.textContent = `${qualityScore}/100`;
+    }
+    
+    // Update last learning session
+    const lastLearning = learningPatterns.last_learning_update || 'Never';
+    const lastLearningEl = $('#ai-last-learning');
+    if (lastLearningEl) {
+      lastLearningEl.textContent = new Date(lastLearning).toLocaleString();
+    }
+    
+    // Update auto-save status
+    const autoSaveStatus = memoryData.preferences?.auto_save ? 'Enabled' : 'Disabled';
+    const autoSaveEl = $('#ai-auto-save');
+    if (autoSaveEl) {
+      autoSaveEl.textContent = autoSaveStatus;
+      autoSaveEl.style.color = memoryData.preferences?.auto_save ? '#00ff00' : '#ff6b6b';
+    }
+    
+  } catch (error) {
+    console.warn('Failed to update AI stats:', error);
+  }
+}
+
+// Save theme preference
+async function saveThemePreference(theme) {
+  if (!jarvisMemory) {
+    await loadJarvisMemory();
+  }
+  
+  const updates = {
+    preferences: {
+      ...jarvisMemory.preferences,
+      theme: theme
+    }
+  };
+  
+  const success = await saveJarvisMemory(updates);
+  if (success) {
+    jarvisMemory.preferences.theme = theme;
+  }
+  
+  return success;
+}
+
+// Enhanced 420 theme toggle with persistence
+function toggle420Theme() {
+  const root = document.documentElement;
+  const btn = $('#btn-420-theme');
+  const isActive = root.classList.contains('theme-420');
+  
+  if (isActive) {
+    // Switch to classic theme
+    root.classList.remove('theme-420');
+    if (btn) {
+      btn.textContent = '🌿 420 Mode';
+      btn.classList.remove('active');
+    }
+    saveThemePreference('jarvis-dark');
+  } else {
+    // Switch to 420 theme
+    root.classList.add('theme-420');
+    if (btn) {
+      btn.textContent = '🌿 Classic Mode';
+      btn.classList.add('active');
+    }
+    saveThemePreference('theme-420');
+  }
+}
+
+// Update AI learning stats from memory
+function updateAIStats(memory) {
+  if (!memory) return;
+  
+  const conversationCount = memory.history ? memory.history.filter(h => h.type === 'user').length : 0;
+  const memorySize = JSON.stringify(memory).length;
+  const lastSeen = memory.last_seen || 'Never';
+  
+  const conversationEl = $('#conversation-count');
+  const memorySizeEl = $('#memory-size');
+  const lastInteractionEl = $('#last-interaction');
+  
+  if (conversationEl) conversationEl.textContent = conversationCount;
+  if (memorySizeEl) memorySizeEl.textContent = `${Math.round(memorySize / 1024)} KB`;
+  if (lastInteractionEl) lastInteractionEl.textContent = lastSeen;
+  
+  // Update learning panel
+  const preferredThemeEl = $('#preferred-theme');
+  if (preferredThemeEl) {
+    const themeDisplay = memory.preferences?.theme === 'theme-420' ? '420 Mode' : 'JARVIS Dark';
+    preferredThemeEl.textContent = themeDisplay;
+  }
+}
+
+// Initialize config editor event handlers
+function initConfigEditor() {
+  const saveBtn = $('#config-save');
+  const reloadBtn = $('#config-reload');
+  const validateBtn = $('#config-validate');
+  const refreshUsersBtn = $('#btn-refresh-users');
+  
+  if (saveBtn) {
+    saveBtn.addEventListener('click', saveConfig);
+  }
+  
+  if (reloadBtn) {
+    reloadBtn.addEventListener('click', () => {
+      loadConfig();
+      toast('Configuration reloaded', 'info');
+    });
+  }
+  
+  if (validateBtn) {
+    validateBtn.addEventListener('click', validateConfig);
+  }
+  
+  if (refreshUsersBtn) {
+    refreshUsersBtn.addEventListener('click', loadUsers);
+  }
+  
+  // Memory management buttons
+  const clearMemoryBtn = $('#clear-memory');
+  const exportMemoryBtn = $('#export-memory');
+  
+  if (clearMemoryBtn) {
+    clearMemoryBtn.addEventListener('click', async () => {
+      if (confirm('Are you sure you want to clear all Jarvis memory? This cannot be undone.')) {
+        const success = await saveJarvisMemory({
+          memory: {},
+          history: [],
+          preferences: { theme: jarvisMemory?.preferences?.theme || 'jarvis-dark' }
+        });
+        
+        if (success) {
+          toast('Jarvis memory cleared successfully', 'success');
+          jarvisMemory.memory = {};
+          jarvisMemory.history = [];
+          updateAIStats(jarvisMemory);
+        } else {
+          toast('Failed to clear memory', 'error');
+        }
+      }
+    });
+  }
+  
+  if (exportMemoryBtn) {
+    exportMemoryBtn.addEventListener('click', async () => {
+      if (jarvisMemory) {
+        const dataStr = JSON.stringify(jarvisMemory, null, 2);
+        const dataBlob = new Blob([dataStr], { type: 'application/json' });
+        const url = URL.createObjectURL(dataBlob);
+        
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `jarvis-memory-${new Date().toISOString().split('T')[0]}.json`;
+        a.click();
+        
+        URL.revokeObjectURL(url);
+        toast('Memory exported successfully', 'success');
+      } else {
+        toast('No memory data to export', 'warning');
+      }
+    });
   }
 }
 
@@ -7040,6 +8441,13 @@ function connectTerm() {
         return; // Already connected
     }
     
+    // Check if we have a valid session before attempting WebSocket connection
+    if (!CSRF || CSRF === '') {
+        console.warn('No CSRF token - session may be invalid');
+        toast('Authentication required for terminal access', 'warning');
+        return;
+    }
+    
     try {
         const proto = location.protocol === 'https:' ? 'wss' : 'ws';
         ws = new WebSocket(`${proto}://${location.host}/ws/term`);
@@ -7101,17 +8509,28 @@ function connectTerm() {
         ws.onclose = (event) => { 
             console.log('Terminal WebSocket closed:', event.code, event.reason);
             
+            // Handle different close codes for better diagnosis
+            if (event.code === 1002) {
+                toast('Terminal disconnected: Protocol error', 'error');
+            } else if (event.code === 1006) {
+                toast('Terminal disconnected: Connection lost', 'warning');
+            } else if (event.code === 1011) {
+                toast('Terminal disconnected: Server error', 'error');
+            } else {
+                toast(`Terminal disconnected (code: ${event.code})`, 'warning');
+            }
+            
             if (reconnectAttempts < maxReconnectAttempts) {
                 const delay = reconnectDelay * Math.pow(1.5, reconnectAttempts); // Exponential backoff
-                toast(`Terminal disconnected - reconnecting in ${Math.round(delay/1000)}s... (${reconnectAttempts + 1}/${maxReconnectAttempts})`); 
+                toast(`Terminal reconnecting in ${Math.round(delay/1000)}s... (${reconnectAttempts + 1}/${maxReconnectAttempts})`); 
                 
                 setTimeout(() => {
                     reconnectAttempts++;
                     connectTerm();
                 }, delay);
             } else {
-                toast('Terminal connection failed - max retry attempts reached. Please refresh the page.', 'error');
-                term.textContent += '\n❌ Connection lost. Please refresh the page to reconnect.\n';
+                toast('Terminal connection failed - max retry attempts reached. Check your session and refresh the page.', 'error');
+                term.textContent += '\n❌ Connection lost. Possible causes:\n• Session expired (please refresh and login again)\n• Server overloaded\n• Network connectivity issues\n• Please refresh the page to reconnect.\n';
             }
             
             ws = null; 
@@ -7373,6 +8792,10 @@ $('#li-btn').onclick = async () => {
             CSRF = j.csrf || ''; 
             hideLogin(); 
             toast('Login successful'); 
+            
+            // Load Jarvis memory immediately after successful login
+            await loadJarvisMemory();
+            
             refresh(); 
         } else if (r.status === 401) {
             const j = await r.json().catch(() => ({}));
@@ -8112,20 +9535,7 @@ async function executeToolRequest(tool) {
     return data.output || 'No output generated';
 }
 
-async function loadJarvisMemory() {
-    try {
-        const response = await fetch('/api/jarvis/memory');
-        if (response.ok) {
-            const data = await response.json();
-            jarvisMemory = data.memory || {};
-            userPreferences = data.preferences || {};
-            conversationHistory = data.history || [];
-            updateAIStats();
-        }
-    } catch (err) {
-        console.error('Failed to load Jarvis memory:', err);
-    }
-}
+
 
 async function saveJarvisMemory() {
     try {
@@ -8381,18 +9791,77 @@ async function sendChat() {
       speak(j.reply);
     }
     
-    // Update learning data
-    if (typeof updateUserLearning === 'function') {
-      updateUserLearning(prompt);
-    }
-    if (typeof saveJarvisMemory === 'function') {
-      saveJarvisMemory();
-    }
-    if (typeof updateAIStats === 'function') {
-      updateAIStats();
+    // Enhanced learning and auto-save after every conversation
+    try {
+      // Add AI response to conversation history for enhanced learning
+      if (typeof conversationHistory !== 'undefined') {
+        conversationHistory.push({
+          type: 'ai',
+          message: j.reply,
+          timestamp: new Date().toISOString(),
+          action: j.action || null
+        });
+      }
+      
+      // Update Jarvis memory with enhanced conversation data
+      if (jarvisMemory) {
+        if (!jarvisMemory.history) jarvisMemory.history = [];
+        
+        // Add both user prompt and AI response to memory
+        jarvisMemory.history.push({
+          timestamp: new Date().toISOString(),
+          type: 'conversation',
+          user_prompt: prompt,
+          ai_response: j.reply,
+          context: {
+            had_action: !!j.action,
+            action_type: j.action?.type || null,
+            interaction_quality: 'completed'
+          }
+        });
+        
+        // Keep conversation history manageable
+        const maxHistory = jarvisMemory.preferences?.conversation_memory_size || 50;
+        if (jarvisMemory.history.length > maxHistory * 2) {
+          jarvisMemory.history = jarvisMemory.history.slice(-maxHistory * 2);
+        }
+        
+        // Update learning metrics
+        if (!jarvisMemory.memory) jarvisMemory.memory = {};
+        if (!jarvisMemory.memory.conversation_context) jarvisMemory.memory.conversation_context = {};
+        
+        jarvisMemory.memory.conversation_context.total_conversations = 
+          (jarvisMemory.memory.conversation_context.total_conversations || 0) + 1;
+        jarvisMemory.memory.conversation_context.last_conversation = new Date().toISOString();
+        
+        // Track conversation success
+        if (!jarvisMemory.memory.conversation_context.success_rate) {
+          jarvisMemory.memory.conversation_context.success_rate = { successful: 0, total: 0 };
+        }
+        jarvisMemory.memory.conversation_context.success_rate.successful += 1;
+        jarvisMemory.memory.conversation_context.success_rate.total += 1;
+      }
+      
+      // Trigger enhanced auto-save after conversation
+      await autoSaveAfterInteraction('conversation');
+      
+      // Update learning patterns (this happens on backend, but we track frontend too)
+      if (typeof updateUserLearning === 'function') {
+        updateUserLearning(prompt, j.reply);
+      }
+      
+      // Update AI statistics display
+      if (typeof updateAIStats === 'function') {
+        updateAIStats(jarvisMemory);
+      }
+      
+      console.log('🧠 Enhanced learning and auto-save completed after conversation');
+      
+    } catch (learningError) {
+      console.warn('Learning/auto-save failed:', learningError);
     }
     
-    // Update last interaction
+    // Update last interaction timestamp in UI
     const lastInteractionEl = $('#last-interaction');
     if (lastInteractionEl) {
       lastInteractionEl.textContent = new Date().toLocaleString();
@@ -8426,8 +9895,88 @@ function updateUserLearning(message) {
     });
 }
 
-// Initialize enhanced features when appropriate tabs are loaded
-const originalTabClick = tabs[0]?.onclick;
+// Enhanced initialization - called when page loads
+async function initializeNovaShield() {
+  try {
+    console.log('🚀 Initializing NovaShield enhanced features...');
+    
+    // Load Jarvis memory immediately
+    await loadJarvisMemory();
+    
+    // Set up auto-save scheduling
+    if (autoSaveEnabled) {
+      scheduleAutoSave();
+    }
+    
+    // Initialize refresh interval
+    refresh();
+    setInterval(refresh, 2000);
+    
+    // Load initial data
+    loadAlerts();
+    loadUsers();
+    
+    // Set up event listeners for enhanced interactions
+    setupEnhancedEventListeners();
+    
+    console.log('✅ NovaShield enhanced features initialized successfully');
+    
+  } catch (error) {
+    console.error('❌ Failed to initialize NovaShield enhanced features:', error);
+  }
+}
+
+function setupEnhancedEventListeners() {
+  // Enhanced tab switching with auto-save
+  const tabs = $$('.tabs button');
+  tabs.forEach(tab => {
+    const originalClick = tab.onclick;
+    tab.onclick = async function(e) {
+      // Trigger auto-save on tab change
+      if (jarvisMemory) {
+        jarvisMemory.preferences.last_active_tab = this.textContent.toLowerCase();
+        await autoSaveAfterInteraction('tab_change');
+      }
+      
+      // Call original handler if it exists
+      if (originalClick) {
+        return originalClick.call(this, e);
+      }
+    };
+  });
+  
+  // Enhanced form interactions
+  const inputs = $$('input, textarea, select');
+  inputs.forEach(input => {
+    input.addEventListener('change', () => {
+      // Trigger auto-save after form changes
+      setTimeout(() => {
+        autoSaveAfterInteraction('form_change');
+      }, 1000); // Debounce
+    });
+  });
+  
+  // Enhanced visibility change handling
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+      // Page became visible, refresh memory
+      loadJarvisMemory();
+    } else {
+      // Page hidden, save current state
+      autoSaveAfterInteraction('page_hidden');
+    }
+  });
+}
+
+// Start initialization when DOM is ready
+document.addEventListener('DOMContentLoaded', initializeNovaShield);
+
+// Also start if DOM is already ready
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', initializeNovaShield);
+} else {
+  initializeNovaShield();
+}
 tabs.forEach(b => {
     b.onclick = () => {
         // Call original tab switching logic
@@ -8447,6 +9996,7 @@ tabs.forEach(b => {
         if (activeTab === 'ai' && !loadedTabs.has('ai-enhanced')) {
             loadedTabs.add('ai-enhanced');
             initEnhancedAI();
+            initConfigEditor(); // Initialize memory management buttons
         }
         
         if (activeTab === 'results' && !loadedTabs.has('results')) {
@@ -8485,12 +10035,88 @@ tabs.forEach(b => {
                     }
                 } else if (tab === 'config') {
                     loadConfig();
+                    if (!loadedTabs.has('config-editor')) {
+                        loadedTabs.add('config-editor');
+                        initConfigEditor();
+                    }
                 } else if (tab === 'security') {
                     loadSecurityLogs();
+                    if (!loadedTabs.has('users-panel')) {
+                        loadedTabs.add('users-panel');
+                        loadUsers();
+                    }
                 }
             }
         });
     };
+});
+
+// Keep-alive functionality to prevent session expiration
+let keepAliveInterval = null;
+
+function startKeepAlive() {
+    // Only start keep-alive if not already running
+    if (keepAliveInterval) return;
+    
+    // Ping every 5 minutes to keep session alive
+    keepAliveInterval = setInterval(async () => {
+        try {
+            const response = await fetch('/api/ping', {
+                method: 'GET',
+                headers: {
+                    'Cache-Control': 'no-cache'
+                }
+            });
+            
+            if (response.status === 401) {
+                // Session expired, show login
+                showLogin();
+                stopKeepAlive();
+            } else if (response.ok) {
+                const data = await response.json();
+                console.log(`Keep-alive: ${data.status} (${data.timestamp})`);
+            }
+        } catch (error) {
+            console.warn('Keep-alive failed:', error);
+            // Don't stop keep-alive on network errors - might be temporary
+        }
+    }, 5 * 60 * 1000); // 5 minutes
+    
+    console.log('Keep-alive started (5 minute intervals)');
+}
+
+function stopKeepAlive() {
+    if (keepAliveInterval) {
+        clearInterval(keepAliveInterval);
+        keepAliveInterval = null;
+        console.log('Keep-alive stopped');
+    }
+}
+
+// Start keep-alive when page is visible and focused
+function handleVisibilityChange() {
+    if (document.hidden) {
+        // Page is hidden, could stop keep-alive to save resources
+        // But we'll keep it running for now to maintain sessions
+    } else {
+        // Page is visible, ensure keep-alive is running
+        startKeepAlive();
+    }
+}
+
+// Listen for visibility changes
+document.addEventListener('visibilitychange', handleVisibilityChange);
+
+// Start keep-alive immediately if page is visible
+if (!document.hidden) {
+    startKeepAlive();
+}
+
+// Load Jarvis memory and apply theme on page load
+loadJarvisMemory().then(() => {
+    console.log('Jarvis memory loaded and theme applied');
+}).catch(error => {
+    console.warn('Failed to load Jarvis memory:', error);
 });
 
 // Initialize AI enhancements on page load
