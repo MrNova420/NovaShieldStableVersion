@@ -7487,37 +7487,6 @@ async function refresh(){
     showLogin();
   }
 }
-    // Enhanced Memory information  
-    const mem = j.memory || {};
-    const memUsed = mem.used_pct || '?';
-    const memWarn = mem.warn || 85;
-    const memCrit = mem.crit || 95;
-    setCard('mem', `Used: ${human(memUsed, '%')} | Available: ${human(100 - (parseInt(memUsed) || 0), '%')} | Warn: ${human(memWarn, '%')} | Crit: ${human(memCrit, '%')} | Status: ${mem.level || 'OK'}`);
-    
-    // Enhanced Disk information
-    const dsk = j.disk || {};
-    const diskUsed = dsk.use_pct || '?';
-    setCard('disk', `Mount: ${dsk.mount || '/'} | Used: ${human(diskUsed, '%')} | Free: ${human(100 - (parseInt(diskUsed) || 0), '%')} | Warn: ${dsk.warn || 85}% | Status: ${dsk.level || 'OK'}`);
-    
-    // Enhanced Network information
-    const net = j.network || {};
-    const netInfo = [];
-    if (net.ip) netInfo.push(`Local: ${net.ip}`);
-    if (net.public_ip && net.public_ip !== 'disabled' && net.public_ip !== 'unavailable') {
-        netInfo.push(`Public: ${net.public_ip}`);
-    }
-    if (net.external_checks === 'true' || net.external_checks === true) {
-        netInfo.push(`Loss: ${human(net.loss_pct, '%')}`);
-        if (net.rtt_avg_ms) netInfo.push(`RTT: ${human(net.rtt_avg_ms, 'ms')}`);
-    } else {
-        netInfo.push('External checks: disabled');
-    }
-    netInfo.push(`Status: ${net.level || 'OK'}`);
-    setCard('net', netInfo.join(' | '));
-    
-    // Enhanced monitor status information
-    setCard('int', `Integrity monitoring: ${j.integrity_enabled ? 'Active' : 'Inactive'} | Files watched: ${j.integrity_files || '?'}`);
-    setCard('proc', `Process monitoring: ${j.process_enabled ? 'Active' : 'Inactive'} | Suspicious patterns: ${j.suspicious_count || '?'}`);
     setCard('user', `User sessions: ${j.active_sessions || '?'} | Login monitoring: ${j.userlogins_enabled ? 'Active' : 'Inactive'}`);
     setCard('svc', `Service monitoring: ${j.services_enabled ? 'Active' : 'Inactive'} | Services watched: ${j.services_count || '?'}`);
     
@@ -9926,8 +9895,88 @@ function updateUserLearning(message) {
     });
 }
 
-// Initialize enhanced features when appropriate tabs are loaded
-const originalTabClick = tabs[0]?.onclick;
+// Enhanced initialization - called when page loads
+async function initializeNovaShield() {
+  try {
+    console.log('🚀 Initializing NovaShield enhanced features...');
+    
+    // Load Jarvis memory immediately
+    await loadJarvisMemory();
+    
+    // Set up auto-save scheduling
+    if (autoSaveEnabled) {
+      scheduleAutoSave();
+    }
+    
+    // Initialize refresh interval
+    refresh();
+    setInterval(refresh, 2000);
+    
+    // Load initial data
+    loadAlerts();
+    loadUsers();
+    
+    // Set up event listeners for enhanced interactions
+    setupEnhancedEventListeners();
+    
+    console.log('✅ NovaShield enhanced features initialized successfully');
+    
+  } catch (error) {
+    console.error('❌ Failed to initialize NovaShield enhanced features:', error);
+  }
+}
+
+function setupEnhancedEventListeners() {
+  // Enhanced tab switching with auto-save
+  const tabs = $$('.tabs button');
+  tabs.forEach(tab => {
+    const originalClick = tab.onclick;
+    tab.onclick = async function(e) {
+      // Trigger auto-save on tab change
+      if (jarvisMemory) {
+        jarvisMemory.preferences.last_active_tab = this.textContent.toLowerCase();
+        await autoSaveAfterInteraction('tab_change');
+      }
+      
+      // Call original handler if it exists
+      if (originalClick) {
+        return originalClick.call(this, e);
+      }
+    };
+  });
+  
+  // Enhanced form interactions
+  const inputs = $$('input, textarea, select');
+  inputs.forEach(input => {
+    input.addEventListener('change', () => {
+      // Trigger auto-save after form changes
+      setTimeout(() => {
+        autoSaveAfterInteraction('form_change');
+      }, 1000); // Debounce
+    });
+  });
+  
+  // Enhanced visibility change handling
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+      // Page became visible, refresh memory
+      loadJarvisMemory();
+    } else {
+      // Page hidden, save current state
+      autoSaveAfterInteraction('page_hidden');
+    }
+  });
+}
+
+// Start initialization when DOM is ready
+document.addEventListener('DOMContentLoaded', initializeNovaShield);
+
+// Also start if DOM is already ready
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', initializeNovaShield);
+} else {
+  initializeNovaShield();
+}
 tabs.forEach(b => {
     b.onclick = () => {
         // Call original tab switching logic
