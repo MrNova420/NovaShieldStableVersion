@@ -8233,9 +8233,11 @@ async function loadConfig() {
 async function saveConfig() {
   const configTextEl = $('#config-text');
   const statusEl = $('#config-status');
+  const saveBtn = $('#config-save');
   
   if (!configTextEl) {
     console.error('Config text element not found');
+    toast('Configuration editor not available', 'error');
     return;
   }
   
@@ -8243,10 +8245,36 @@ async function saveConfig() {
   
   if (!newConfig.trim()) {
     showConfigStatus('Configuration cannot be empty', 'error');
+    toast('Configuration cannot be empty', 'error');
     return;
   }
   
+  // Disable save button during operation
+  if (saveBtn) {
+    saveBtn.disabled = true;
+    saveBtn.textContent = '💾 Saving...';
+  }
+  
   try {
+    // Pre-validate configuration structure
+    try {
+      const lines = newConfig.split('\n');
+      let hasValidStructure = false;
+      for (const line of lines) {
+        if (line.trim() && line.includes(':') && !line.trim().startsWith('#')) {
+          hasValidStructure = true;
+          break;
+        }
+      }
+      if (!hasValidStructure) {
+        throw new Error('Configuration appears to have invalid YAML structure');
+      }
+    } catch (validationError) {
+      showConfigStatus(`Pre-validation failed: ${validationError.message}`, 'error');
+      toast(`Validation failed: ${validationError.message}`, 'error');
+      return;
+    }
+    
     showConfigStatus('Saving configuration...', 'warning');
     
     const response = await fetch('/api/config/save', {
@@ -8261,15 +8289,40 @@ async function saveConfig() {
     const result = await response.json();
     
     if (response.ok && result.success) {
-      showConfigStatus(result.message + (result.backup_created ? ` (Backup: ${result.backup_created})` : ''), 'success');
+      let successMessage = result.message;
+      if (result.backup_created) {
+        successMessage += ` (Backup: ${result.backup_created})`;
+        console.log(`✅ Configuration backup created: ${result.backup_created}`);
+      }
+      
+      showConfigStatus(successMessage, 'success');
       toast('Configuration saved successfully', 'success');
+      
+      // Auto-reload to verify changes took effect
+      setTimeout(() => {
+        loadConfig();
+        showConfigStatus('Configuration reloaded to verify changes', 'info');
+      }, 1000);
     } else {
-      showConfigStatus(result.error || 'Failed to save configuration', 'error');
-      toast(result.error || 'Failed to save configuration', 'error');
+      const errorMsg = result.error || 'Failed to save configuration';
+      showConfigStatus(errorMsg, 'error');
+      toast(errorMsg, 'error');
+      
+      if (result.details) {
+        console.error('Config save details:', result.details);
+      }
     }
   } catch (error) {
-    showConfigStatus(`Save failed: ${error.message}`, 'error');
-    toast(`Save failed: ${error.message}`, 'error');
+    const errorMsg = `Save failed: ${error.message}`;
+    showConfigStatus(errorMsg, 'error');
+    toast(errorMsg, 'error');
+    console.error('Config save error:', error);
+  } finally {
+    // Re-enable save button
+    if (saveBtn) {
+      saveBtn.disabled = false;
+      saveBtn.textContent = '💾 Save Configuration';
+    }
   }
 }
 
@@ -9076,16 +9129,39 @@ function connectTerm() {
             }
             
             if (reconnectAttempts < maxReconnectAttempts) {
-                const delay = reconnectDelay * Math.pow(1.5, reconnectAttempts); // Exponential backoff
+                const delay = Math.min(reconnectDelay * Math.pow(1.5, reconnectAttempts), 30000); // Cap at 30s
                 toast(`Terminal reconnecting in ${Math.round(delay/1000)}s... (${reconnectAttempts + 1}/${maxReconnectAttempts})`); 
                 
                 setTimeout(() => {
                     reconnectAttempts++;
-                    connectTerm();
+                    
+                    // Check if session is still valid before reconnecting
+                    fetch('/api/status', {
+                        method: 'GET',
+                        headers: { 'Content-Type': 'application/json' }
+                    }).then(response => {
+                        if (response.ok) {
+                            connectTerm();
+                        } else {
+                            console.warn('Session may be invalid, skipping reconnect attempt');
+                            toast('Session expired - please refresh and login again', 'warning');
+                        }
+                    }).catch(() => {
+                        // Network issue or server down - still try to reconnect
+                        connectTerm();
+                    });
                 }, delay);
             } else {
                 toast('Terminal connection failed - max retry attempts reached. Check your session and refresh the page.', 'error');
-                term.textContent += '\n❌ Connection lost. Possible causes:\n• Session expired (please refresh and login again)\n• Server overloaded\n• Network connectivity issues\n• Please refresh the page to reconnect.\n';
+                term.textContent += '\n❌ Connection lost. Possible causes:\n• Session expired (please refresh and login again)\n• Server overloaded\n• Network connectivity issues\n• Please refresh the page to reconnect.\n\n🔄 You can also try clicking the "Reconnect" button above.\n';
+                
+                // Add manual reconnect button functionality
+                const reconnectBtn = $('#terminal-reconnect');
+                if (reconnectBtn) {
+                    reconnectBtn.style.background = '#ef4444';
+                    reconnectBtn.style.color = 'white';
+                    reconnectBtn.textContent = '🔴 Connection Lost';
+                }
             }
             
             ws = null; 
@@ -9282,28 +9358,77 @@ function toggleTerminalFullscreen() {
     const wrapper = $('.terminal-wrapper');
     const btn = $('#terminal-fullscreen');
     
+    if (!wrapper || !btn) return;
+    
     if (wrapper.classList.contains('fullscreen')) {
+        // Exit fullscreen
         wrapper.classList.remove('fullscreen');
         btn.textContent = '🔲 Fullscreen';
-        btn.title = 'Enter fullscreen mode';
+        btn.title = 'Enter fullscreen mode (or press F11)';
         document.removeEventListener('keydown', handleFullscreenEscape);
+        
         // Remove fullscreen-specific styles
         btn.style.position = '';
         btn.style.top = '';
         btn.style.right = '';
         btn.style.zIndex = '';
+        btn.style.background = '';
+        btn.style.border = '';
+        btn.style.borderRadius = '';
+        btn.style.padding = '';
+        btn.style.color = '';
+        btn.style.fontSize = '';
+        btn.style.cursor = '';
+        
+        // Enhanced focus restoration
+        setTimeout(() => {
+            const term = $('#term');
+            const termInput = $('#terminal-input');
+            if (term) {
+                term.focus();
+            }
+            if (termInput && isMobile()) {
+                termInput.focus();
+            }
+        }, 100);
+        
+        toast('Exited fullscreen mode', 'info');
     } else {
+        // Enter fullscreen
         wrapper.classList.add('fullscreen');
         btn.textContent = '❌ Exit Fullscreen';
         btn.title = 'Exit fullscreen mode (or press Escape)';
         document.addEventListener('keydown', handleFullscreenEscape);
-        // Make button accessible in fullscreen
+        
+        // Make button accessible in fullscreen with improved styling
         btn.style.position = 'fixed';
         btn.style.top = '20px';
         btn.style.right = '20px';
         btn.style.zIndex = '10000';
-        // Refocus terminal in fullscreen
-        setTimeout(() => $('#term').focus(), 100);
+        btn.style.background = 'rgba(220, 38, 38, 0.9)';
+        btn.style.border = '1px solid #ef4444';
+        btn.style.borderRadius = '6px';
+        btn.style.padding = '8px 12px';
+        btn.style.color = 'white';
+        btn.style.fontSize = '12px';
+        btn.style.cursor = 'pointer';
+        btn.style.fontWeight = '500';
+        btn.style.boxShadow = '0 4px 12px rgba(0,0,0,0.3)';
+        
+        // Enhanced terminal focus in fullscreen
+        setTimeout(() => {
+            const term = $('#term');
+            const termInput = $('#terminal-input');
+            if (term) {
+                term.focus();
+                term.scrollTop = term.scrollHeight; // Scroll to bottom
+            }
+            if (termInput) {
+                termInput.focus();
+            }
+        }, 100);
+        
+        toast('Entered fullscreen mode - Press Escape to exit', 'success');
     }
 }
 
@@ -9320,11 +9445,40 @@ function handleFullscreenEscape(e) {
 // Terminal control event listeners
 $('#terminal-fullscreen')?.addEventListener('click', toggleTerminalFullscreen);
 $('#terminal-reconnect')?.addEventListener('click', () => {
+    const reconnectBtn = $('#terminal-reconnect');
+    
+    if (reconnectBtn) {
+        reconnectBtn.textContent = '🔄 Reconnecting...';
+        reconnectBtn.disabled = true;
+    }
+    
+    // Reset connection state
+    reconnectAttempts = 0;
+    
     if (ws) {
         ws.close();
         ws = null;
     }
-    setTimeout(connectTerm, 500);
+    
+    // Reset button appearance
+    if (reconnectBtn) {
+        reconnectBtn.style.background = '';
+        reconnectBtn.style.color = '';
+    }
+    
+    setTimeout(() => {
+        connectTerm();
+        
+        // Re-enable button after connection attempt
+        setTimeout(() => {
+            if (reconnectBtn) {
+                reconnectBtn.disabled = false;
+                reconnectBtn.textContent = '🔄 Reconnect';
+            }
+        }, 2000);
+    }, 500);
+    
+    toast('Attempting to reconnect terminal...', 'info');
 });
 
 function showLogin() {
