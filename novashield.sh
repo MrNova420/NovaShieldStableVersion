@@ -4420,7 +4420,16 @@ class Handler(SimpleHTTPRequestHandler):
             # If AUTH_STRICT is enabled and no valid session, clear session cookie
             if AUTH_STRICT and not sess:
                 self._set_headers(200, 'text/html; charset=utf-8', {'Set-Cookie': 'NSSESS=deleted; Path=/; HttpOnly; Max-Age=0; SameSite=Strict'})
-            # If force_login_on_reload is enabled, clear session cookie (even if session is valid)
+            # If force_login_on_reload is enabled, clear session cookie and invalidate database session (even if session is valid)
+            elif force_login_on_reload and sess:
+                # Clear the session from database too to prevent API auth issues
+                db = users_db()
+                # Find and remove the session token
+                for token, session_data in list(db.items()):
+                    if session_data.get('user') == sess.get('user'):
+                        del db[token]
+                set_users_db(db)
+                self._set_headers(200, 'text/html; charset=utf-8', {'Set-Cookie': 'NSSESS=deleted; Path=/; HttpOnly; Max-Age=0; SameSite=Strict'})
             elif force_login_on_reload:
                 self._set_headers(200, 'text/html; charset=utf-8', {'Set-Cookie': 'NSSESS=deleted; Path=/; HttpOnly; Max-Age=0; SameSite=Strict'})
             else:
@@ -4498,7 +4507,7 @@ class Handler(SimpleHTTPRequestHandler):
                 'modules_count': len([x for x in os.listdir(os.path.join(NS_HOME,'modules')) if not x.startswith('.')]) if os.path.exists(os.path.join(NS_HOME,'modules')) else 0,
                 'version': read_text(os.path.join(NS_HOME,'version.txt'),'unknown'),
                 'csrf': sess.get('csrf','') if auth_enabled() else 'public',
-                'voice_enabled': cfg_get('jarvis.voice_enabled', False),
+                'voice_enabled': cfg_get('jarvis.voice_enabled', True),
                 'ui_theme': cfg_get('webgen.theme', 'jarvis-dark'),
                 # Add monitor enabled state flags for dashboard UI
                 'integrity_enabled': monitor_enabled('integrity'),
@@ -4850,7 +4859,7 @@ class Handler(SimpleHTTPRequestHandler):
                 
                 # Generate AI reply
                 reply = ai_reply(prompt, username, user_ip)
-                voice_enabled = cfg_get('jarvis.voice_enabled', False)
+                voice_enabled = cfg_get('jarvis.voice_enabled', True)
                 
                 # Check if reply contains action payload
                 action = None
@@ -7309,16 +7318,39 @@ function toast(msg){
   setTimeout(()=>t.remove(), 2500);
 }
 
-async function api(path, opts){
-  const r = await fetch(path, Object.assign({headers:{'Content-Type':'application/json'}},opts||{}));
-  if(r.status===401){
-    showLogin(); throw new Error('unauthorized');
+async function api(path, opts, retries = 3){
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      const r = await fetch(path, Object.assign({headers:{'Content-Type':'application/json'}},opts||{}));
+      if(r.status===401){
+        // On first 401 error, try to refresh the page if force_login_on_reload is enabled
+        if (attempt === 1 && window.location.pathname === '/') {
+          console.warn(`401 error on ${path}, attempt ${attempt}/${retries}`);
+          await new Promise(resolve => setTimeout(resolve, 1000 * attempt)); // exponential backoff
+          continue;
+        }
+        showLogin(); throw new Error('unauthorized');
+      }
+      if(r.status===403){
+        toast('Forbidden or CSRF'); throw new Error('forbidden');
+      }
+      if(!r.ok){ 
+        console.warn(`API error ${r.status} on ${path}, attempt ${attempt}/${retries}`);
+        if (attempt < retries) {
+          await new Promise(resolve => setTimeout(resolve, 1000 * attempt)); // exponential backoff
+          continue;
+        }
+        throw new Error('API error'); 
+      }
+      return r;
+    } catch (error) {
+      if (attempt === retries || error.message === 'unauthorized' || error.message === 'forbidden') {
+        throw error;
+      }
+      console.warn(`API call failed on ${path}, attempt ${attempt}/${retries}:`, error.message);
+      await new Promise(resolve => setTimeout(resolve, 1000 * attempt)); // exponential backoff
+    }
   }
-  if(r.status===403){
-    toast('Forbidden or CSRF'); throw new Error('forbidden');
-  }
-  if(!r.ok){ throw new Error('API error'); }
-  return r;
 }
 
 function human(val, unit=''){ if(val===undefined || val===null) return '?'; return `${val}${unit}`; }
@@ -8796,11 +8828,23 @@ function toggleTerminalFullscreen() {
     if (wrapper.classList.contains('fullscreen')) {
         wrapper.classList.remove('fullscreen');
         btn.textContent = '🔲 Fullscreen';
+        btn.title = 'Enter fullscreen mode';
         document.removeEventListener('keydown', handleFullscreenEscape);
+        // Remove fullscreen-specific styles
+        btn.style.position = '';
+        btn.style.top = '';
+        btn.style.right = '';
+        btn.style.zIndex = '';
     } else {
         wrapper.classList.add('fullscreen');
         btn.textContent = '❌ Exit Fullscreen';
+        btn.title = 'Exit fullscreen mode (or press Escape)';
         document.addEventListener('keydown', handleFullscreenEscape);
+        // Make button accessible in fullscreen
+        btn.style.position = 'fixed';
+        btn.style.top = '20px';
+        btn.style.right = '20px';
+        btn.style.zIndex = '10000';
         // Refocus terminal in fullscreen
         setTimeout(() => $('#term').focus(), 100);
     }
@@ -9375,11 +9419,18 @@ function initEnhancedAI() {
 
 async function initializeVoice() {
     try {
-        // Load voice_enabled setting from status API
-        const response = await fetch('/api/status');
-        if (response.ok) {
-            const data = await response.json();
-            voiceEnabled = data.voice_enabled || false;
+        // Default to enabled (since config has voice_enabled: true)
+        voiceEnabled = true;
+        
+        // Try to load voice_enabled setting from status API
+        try {
+            const response = await fetch('/api/status');
+            if (response.ok) {
+                const data = await response.json();
+                voiceEnabled = data.voice_enabled !== undefined ? data.voice_enabled : true;
+            }
+        } catch (error) {
+            console.warn('Failed to load voice settings from API, using default (enabled)');
         }
         
         // Override with user preference from Jarvis memory if available
