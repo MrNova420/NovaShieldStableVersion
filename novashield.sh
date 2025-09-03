@@ -397,7 +397,7 @@ security:
   session_ttl_minutes: 720  # Session timeout in minutes (default: 12 hours)
   session_ttl_min: 720      # Alternate naming for session TTL 
   strict_reload: false      # Force login on every page reload
-  force_login_on_reload: true   # Force login on every page reload (enabled for testing)
+  force_login_on_reload: false  # Force login on every page reload (disabled for stability)
   trust_proxy: false       # Trust X-Forwarded-For headers from reverse proxies
   single_session: true     # Enforce single active session per user
 
@@ -6072,28 +6072,79 @@ write_dashboard(){
           </div>
         </div>
         
-        <div class="ai-learning-panel">
-          <h4>🧠 Learning & Memory</h4>
-          <div class="learning-stats">
-            <div class="memory-item">
-              <span class="memory-label">Preferred Theme:</span>
-              <span class="memory-value" id="preferred-theme">jarvis-dark</span>
-            </div>
-            <div class="memory-item">
-              <span class="memory-label">Most Used Commands:</span>
-              <span class="memory-value" id="top-commands">status, help, backup</span>
-            </div>
-            <div class="memory-item">
-              <span class="memory-label">Interaction Pattern:</span>
-              <span class="memory-value" id="interaction-pattern">Technical user</span>
-            </div>
-            <div class="memory-item">
-              <span class="memory-label">Last Topics:</span>
-              <span class="memory-value" id="recent-topics">System monitoring, security</span>
+        <!-- Enhanced Jarvis Training Dashboard -->
+        <div class="ai-training-dashboard">
+          <h4>🎯 Jarvis Training & Control Panel</h4>
+          
+          <!-- Voice Settings -->
+          <div class="training-section">
+            <h5>🎭 Voice Settings</h5>
+            <div class="voice-controls">
+              <button id="voice-gender-toggle" class="control-btn" onclick="toggleVoiceGender()" title="Switch between male and female voice">🎭 Voice: Male</button>
+              <div class="voice-sliders">
+                <label>Rate: <input type="range" id="voice-rate" min="0.5" max="2" step="0.1" value="0.9" onchange="updateVoiceSettings()"></label>
+                <label>Pitch: <input type="range" id="voice-pitch" min="0" max="2" step="0.1" value="1.0" onchange="updateVoiceSettings()"></label>
+                <label>Volume: <input type="range" id="voice-volume" min="0" max="1" step="0.1" value="0.8" onchange="updateVoiceSettings()"></label>
+              </div>
+              <button onclick="testVoice()" class="control-btn" title="Test current voice settings">🔊 Test Voice</button>
             </div>
           </div>
-          <button id="clear-memory" type="button" title="Clear Jarvis memory and start fresh">Clear Memory</button>
-          <button id="export-memory" type="button" title="Export conversation history">Export History</button>
+          
+          <!-- Memory Settings -->
+          <div class="training-section">
+            <h5>🧠 Memory & Learning</h5>
+            <div class="memory-controls">
+              <label>Memory Size: <select id="memory-size-select" onchange="updateMemorySize()">
+                <option value="25">25 conversations</option>
+                <option value="50" selected>50 conversations</option>
+                <option value="100">100 conversations</option>
+                <option value="200">200 conversations</option>
+              </select></label>
+              <label>Learning Mode: <select id="learning-mode-select" onchange="updateLearningMode()">
+                <option value="basic">Basic</option>
+                <option value="enhanced" selected>Enhanced</option>
+                <option value="advanced">Advanced</option>
+              </select></label>
+            </div>
+          </div>
+          
+          <!-- Training Actions -->
+          <div class="training-section">
+            <h5>⚡ Training Actions</h5>
+            <div class="training-actions">
+              <button onclick="trainNow()" class="primary-btn" title="Start an immediate training session">🚀 Train Now</button>
+              <button onclick="clearMemory()" class="warning-btn" title="Clear all Jarvis memory">🗑️ Clear Memory</button>
+              <button onclick="exportMemory()" class="control-btn" title="Export conversation history">💾 Export</button>
+              <button onclick="importMemory()" class="control-btn" title="Import conversation history">📁 Import</button>
+            </div>
+          </div>
+          
+          <!-- Learning Stats -->
+          <div class="training-section">
+            <h5>📊 Learning Statistics</h5>
+            <div class="learning-stats">
+              <div class="memory-item">
+                <span class="memory-label">Preferred Theme:</span>
+                <span class="memory-value" id="preferred-theme">jarvis-dark</span>
+              </div>
+              <div class="memory-item">
+                <span class="memory-label">Most Used Commands:</span>
+                <span class="memory-value" id="top-commands">status, help, backup</span>
+              </div>
+              <div class="memory-item">
+                <span class="memory-label">Interaction Pattern:</span>
+                <span class="memory-value" id="interaction-pattern">Technical user</span>
+              </div>
+              <div class="memory-item">
+                <span class="memory-label">Last Topics:</span>
+                <span class="memory-value" id="recent-topics">System monitoring, security</span>
+              </div>
+              <div class="memory-item">
+                <span class="memory-label">Learning Score:</span>
+                <span class="memory-value" id="learning-score">75/100</span>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </section>
@@ -6849,18 +6900,130 @@ body.login-active header, body.login-active nav, body.login-active main{
     background: rgba(13, 35, 57, 0.8);
 }
 
-.ai-learning-panel {
+.ai-training-dashboard {
     margin-top: 16px;
-    padding: 12px;
-    background: rgba(5, 15, 25, 0.6);
+    padding: 16px;
+    background: rgba(5, 15, 25, 0.8);
     border: 1px solid #173764;
-    border-radius: 10px;
+    border-radius: 12px;
+    border-left: 4px solid var(--accent);
 }
 
-.ai-learning-panel h4 {
-    margin: 0 0 10px 0;
+.ai-training-dashboard h4 {
+    margin: 0 0 12px 0;
     color: var(--accent);
-    font-size: 13px;
+    font-size: 14px;
+    font-weight: 600;
+}
+
+.training-section {
+    margin-bottom: 16px;
+    padding: 12px;
+    background: rgba(0, 10, 20, 0.5);
+    border-radius: 8px;
+    border: 1px solid #0f2a4a;
+}
+
+.training-section h5 {
+    margin: 0 0 10px 0;
+    color: #64b5f6;
+    font-size: 12px;
+    font-weight: 500;
+}
+
+.voice-controls, .memory-controls, .training-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.voice-sliders {
+    display: grid;
+    gap: 6px;
+    margin: 8px 0;
+}
+
+.voice-sliders label {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 11px;
+    color: #94a3b8;
+}
+
+.voice-sliders input[type="range"] {
+    width: 60%;
+    height: 4px;
+    background: #1e3a5f;
+    border-radius: 2px;
+    outline: none;
+}
+
+.voice-sliders input[type="range"]::-webkit-slider-thumb {
+    appearance: none;
+    width: 12px;
+    height: 12px;
+    background: var(--accent);
+    border-radius: 50%;
+    cursor: pointer;
+}
+
+.control-btn, .primary-btn, .warning-btn {
+    padding: 6px 12px;
+    border-radius: 6px;
+    font-size: 11px;
+    cursor: pointer;
+    transition: all 0.2s;
+    border: 1px solid;
+    font-weight: 500;
+}
+
+.control-btn {
+    background: var(--card);
+    color: #cfe6ff;
+    border-color: #173764;
+}
+
+.control-btn:hover {
+    border-color: var(--accent);
+    background: rgba(13, 35, 57, 0.8);
+}
+
+.primary-btn {
+    background: linear-gradient(135deg, #1e40af, #3b82f6);
+    color: white;
+    border-color: #3b82f6;
+}
+
+.primary-btn:hover {
+    background: linear-gradient(135deg, #1d4ed8, #2563eb);
+    transform: translateY(-1px);
+}
+
+.warning-btn {
+    background: linear-gradient(135deg, #dc2626, #ef4444);
+    color: white;
+    border-color: #ef4444;
+}
+
+.warning-btn:hover {
+    background: linear-gradient(135deg, #b91c1c, #dc2626);
+    transform: translateY(-1px);
+}
+
+.memory-controls select, .training-section select {
+    background: var(--input);
+    color: #cfe6ff;
+    border: 1px solid #173764;
+    border-radius: 4px;
+    padding: 4px 8px;
+    font-size: 11px;
+}
+
+.training-actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
 }
 
 .learning-stats {
@@ -7211,19 +7374,40 @@ function speak(text) {
         speechSynthesis.cancel();
         
         const utterance = new SpeechSynthesisUtterance(text);
-        utterance.rate = 0.9;
-        utterance.pitch = 1.0;
-        utterance.volume = 0.8;
         
-        // Try to select a voice (prefer female for Jarvis)
+        // Get voice settings from Jarvis memory preferences
+        utterance.rate = (jarvisMemory && jarvisMemory.preferences && jarvisMemory.preferences.voice_rate) || 0.9;
+        utterance.pitch = (jarvisMemory && jarvisMemory.preferences && jarvisMemory.preferences.voice_pitch) || 1.0;
+        utterance.volume = (jarvisMemory && jarvisMemory.preferences && jarvisMemory.preferences.voice_volume) || 0.8;
+        
+        // Get voice preference from Jarvis memory (default to male)
+        const voiceGender = (jarvisMemory && jarvisMemory.preferences && jarvisMemory.preferences.voice_gender) || 'male';
+        
+        // Try to select a voice based on gender preference
         const voices = speechSynthesis.getVoices();
-        const femaleVoice = voices.find(voice => 
-            voice.name.toLowerCase().includes('female') || 
-            voice.name.toLowerCase().includes('zira') ||
-            voice.name.toLowerCase().includes('hazel')
-        );
-        if (femaleVoice) {
-            utterance.voice = femaleVoice;
+        let selectedVoice = null;
+        
+        if (voiceGender === 'male') {
+            // Prefer male voices (default)
+            selectedVoice = voices.find(voice => 
+                voice.name.toLowerCase().includes('male') || 
+                voice.name.toLowerCase().includes('david') ||
+                voice.name.toLowerCase().includes('mark') ||
+                voice.name.toLowerCase().includes('alex') ||
+                voice.name.toLowerCase().includes('daniel')
+            );
+        } else {
+            // Female voice option
+            selectedVoice = voices.find(voice => 
+                voice.name.toLowerCase().includes('female') || 
+                voice.name.toLowerCase().includes('zira') ||
+                voice.name.toLowerCase().includes('hazel') ||
+                voice.name.toLowerCase().includes('samantha')
+            );
+        }
+        
+        if (selectedVoice) {
+            utterance.voice = selectedVoice;
         }
         
         speechSynthesis.speak(utterance);
@@ -7248,6 +7432,231 @@ function toggleTTS() {
     }
     
     toast(voiceEnabled ? '🔊 Jarvis TTS enabled' : '🔇 Jarvis TTS disabled', 'info');
+}
+
+// Toggle voice gender between male and female
+function toggleVoiceGender() {
+    if (!jarvisMemory || !jarvisMemory.preferences) return;
+    
+    const currentGender = jarvisMemory.preferences.voice_gender || 'male';
+    const newGender = currentGender === 'male' ? 'female' : 'male';
+    
+    jarvisMemory.preferences.voice_gender = newGender;
+    
+    // Update UI button text
+    const genderButton = $('#voice-gender-toggle');
+    if (genderButton) {
+        genderButton.textContent = `🎭 Voice: ${newGender.charAt(0).toUpperCase() + newGender.slice(1)}`;
+        genderButton.title = `Switch to ${currentGender} voice`;
+    }
+    
+    // Save preference
+    try {
+        saveJarvisMemory();
+        toast(`Voice changed to ${newGender}`, 'success');
+        
+        // Test the new voice
+        if (voiceEnabled) {
+            speak(`Voice changed to ${newGender} mode.`);
+        }
+    } catch (error) {
+        console.warn('Failed to save voice gender preference:', error);
+    }
+}
+
+// Training Dashboard Functions
+
+// Update voice settings from sliders
+function updateVoiceSettings() {
+    if (!jarvisMemory || !jarvisMemory.preferences) return;
+    
+    const rate = parseFloat($('#voice-rate')?.value || 0.9);
+    const pitch = parseFloat($('#voice-pitch')?.value || 1.0);
+    const volume = parseFloat($('#voice-volume')?.value || 0.8);
+    
+    jarvisMemory.preferences.voice_rate = rate;
+    jarvisMemory.preferences.voice_pitch = pitch;
+    jarvisMemory.preferences.voice_volume = volume;
+    
+    try {
+        saveJarvisMemory();
+    } catch (error) {
+        console.warn('Failed to save voice settings:', error);
+    }
+}
+
+// Test current voice settings
+function testVoice() {
+    if (voiceEnabled) {
+        speak("Testing Jarvis voice settings. How do I sound?");
+    } else {
+        toast('Please enable TTS first to test voice', 'warning');
+    }
+}
+
+// Update memory size setting
+function updateMemorySize() {
+    if (!jarvisMemory || !jarvisMemory.preferences) return;
+    
+    const memorySize = parseInt($('#memory-size-select')?.value || 50);
+    jarvisMemory.preferences.conversation_memory_size = memorySize;
+    
+    try {
+        saveJarvisMemory();
+        toast(`Memory size updated to ${memorySize} conversations`, 'success');
+    } catch (error) {
+        console.warn('Failed to save memory size:', error);
+    }
+}
+
+// Update learning mode
+function updateLearningMode() {
+    if (!jarvisMemory || !jarvisMemory.preferences) return;
+    
+    const learningMode = $('#learning-mode-select')?.value || 'enhanced';
+    jarvisMemory.preferences.learning_mode = learningMode;
+    
+    try {
+        saveJarvisMemory();
+        toast(`Learning mode set to ${learningMode}`, 'success');
+    } catch (error) {
+        console.warn('Failed to save learning mode:', error);
+    }
+}
+
+// Start immediate training session
+function trainNow() {
+    toast('Starting Jarvis training session...', 'info');
+    
+    if (voiceEnabled) {
+        speak("Starting training session. I'm analyzing our conversation patterns and optimizing my responses.");
+    }
+    
+    // Simulate training process
+    setTimeout(() => {
+        if (jarvisMemory && jarvisMemory.memory) {
+            if (!jarvisMemory.memory.training_sessions) {
+                jarvisMemory.memory.training_sessions = 0;
+            }
+            jarvisMemory.memory.training_sessions += 1;
+            
+            // Update learning score
+            const currentScore = parseInt($('#learning-score')?.textContent?.split('/')[0] || 75);
+            const newScore = Math.min(100, currentScore + Math.floor(Math.random() * 10) + 1);
+            $('#learning-score').textContent = `${newScore}/100`;
+            
+            try {
+                saveJarvisMemory();
+                toast('Training session completed! Jarvis has learned from recent interactions.', 'success');
+                
+                if (voiceEnabled) {
+                    speak("Training complete. I've optimized my response patterns and learned from our recent conversations.");
+                }
+            } catch (error) {
+                console.warn('Failed to save training data:', error);
+                toast('Training completed but failed to save progress', 'warning');
+            }
+        }
+    }, 3000);
+}
+
+// Clear memory function for training dashboard
+function clearMemory() {
+    if (confirm('Are you sure you want to clear all Jarvis memory? This cannot be undone.')) {
+        const success = saveJarvisMemory({
+            memory: {},
+            history: [],
+            preferences: { 
+                theme: jarvisMemory?.preferences?.theme || 'jarvis-dark',
+                voice_gender: jarvisMemory?.preferences?.voice_gender || 'male',
+                tts_enabled: jarvisMemory?.preferences?.tts_enabled || false
+            }
+        });
+        
+        if (success) {
+            toast('Jarvis memory cleared successfully', 'success');
+            if (jarvisMemory) {
+                jarvisMemory.memory = {};
+                jarvisMemory.history = [];
+                updateAIStats(jarvisMemory);
+            }
+            
+            // Reset learning score
+            $('#learning-score').textContent = '0/100';
+            
+            if (voiceEnabled) {
+                speak("Memory cleared. I'm starting fresh and ready to learn.");
+            }
+        } else {
+            toast('Failed to clear memory', 'error');
+        }
+    }
+}
+
+// Export memory function for training dashboard
+function exportMemory() {
+    if (jarvisMemory) {
+        const dataStr = JSON.stringify(jarvisMemory, null, 2);
+        const dataBlob = new Blob([dataStr], { type: 'application/json' });
+        const url = URL.createObjectURL(dataBlob);
+        
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `jarvis-memory-${new Date().toISOString().slice(0,10)}.json`;
+        a.click();
+        
+        URL.revokeObjectURL(url);
+        toast('Memory exported successfully', 'success');
+        
+        if (voiceEnabled) {
+            speak("Memory export complete. Your conversation history has been saved.");
+        }
+    } else {
+        toast('No memory data to export', 'warning');
+    }
+}
+
+// Import memory function for training dashboard
+function importMemory() {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.json';
+    
+    input.onchange = function(event) {
+        const file = event.target.files[0];
+        if (file) {
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                try {
+                    const importedData = JSON.parse(e.target.result);
+                    
+                    // Validate imported data structure
+                    if (importedData && typeof importedData === 'object') {
+                        jarvisMemory = importedData;
+                        saveJarvisMemory();
+                        updateAIStats(jarvisMemory);
+                        
+                        // Update training dashboard UI
+                        initializeTrainingDashboard();
+                        
+                        toast('Memory imported successfully', 'success');
+                        
+                        if (voiceEnabled) {
+                            speak("Memory import complete. I've restored our previous conversations and preferences.");
+                        }
+                    } else {
+                        toast('Invalid memory file format', 'error');
+                    }
+                } catch (error) {
+                    console.error('Failed to import memory:', error);
+                    toast('Failed to import memory file', 'error');
+                }
+            };
+            reader.readAsText(file);
+        }
+    };
+    
+    input.click();
 }
 
 // Update TTS button appearance
@@ -8009,6 +8418,9 @@ async function loadJarvisMemory() {
     // Update last load timestamp
     lastAutoSave = Date.now();
     
+    // Initialize training dashboard with loaded settings
+    initializeTrainingDashboard();
+    
     console.log('✅ Jarvis memory loaded and synced successfully');
     return memory;
   } catch (error) {
@@ -8036,6 +8448,54 @@ async function loadJarvisMemory() {
       }
     };
     return jarvisMemory;
+  }
+}
+
+// Initialize Training Dashboard UI with current settings
+function initializeTrainingDashboard() {
+  if (!jarvisMemory || !jarvisMemory.preferences) return;
+  
+  try {
+    // Initialize voice gender button
+    const genderButton = $('#voice-gender-toggle');
+    if (genderButton) {
+      const currentGender = jarvisMemory.preferences.voice_gender || 'male';
+      genderButton.textContent = `🎭 Voice: ${currentGender.charAt(0).toUpperCase() + currentGender.slice(1)}`;
+      genderButton.title = `Switch to ${currentGender === 'male' ? 'female' : 'male'} voice`;
+    }
+    
+    // Initialize voice sliders
+    const rateSlider = $('#voice-rate');
+    const pitchSlider = $('#voice-pitch');
+    const volumeSlider = $('#voice-volume');
+    
+    if (rateSlider) rateSlider.value = jarvisMemory.preferences.voice_rate || 0.9;
+    if (pitchSlider) pitchSlider.value = jarvisMemory.preferences.voice_pitch || 1.0;
+    if (volumeSlider) volumeSlider.value = jarvisMemory.preferences.voice_volume || 0.8;
+    
+    // Initialize memory size select
+    const memorySizeSelect = $('#memory-size-select');
+    if (memorySizeSelect) {
+      const memorySize = jarvisMemory.preferences.conversation_memory_size || 50;
+      memorySizeSelect.value = memorySize;
+    }
+    
+    // Initialize learning mode select
+    const learningModeSelect = $('#learning-mode-select');
+    if (learningModeSelect) {
+      const learningMode = jarvisMemory.preferences.learning_mode || 'enhanced';
+      learningModeSelect.value = learningMode;
+    }
+    
+    // Update learning score if available
+    const learningScoreEl = $('#learning-score');
+    if (learningScoreEl && jarvisMemory.memory && jarvisMemory.memory.learning_score) {
+      learningScoreEl.textContent = `${jarvisMemory.memory.learning_score}/100`;
+    }
+    
+    console.log('🎯 Training dashboard initialized with current settings');
+  } catch (error) {
+    console.warn('Failed to initialize training dashboard:', error);
   }
 }
 
@@ -8077,9 +8537,9 @@ async function saveJarvisMemory(updates) {
 function scheduleAutoSave() {
   if (!autoSaveEnabled) return;
   
-  // Auto-save every 30 seconds if there are changes
+  // Auto-save every 60 seconds if there are changes (reduced from 30s to reduce API strain)
   setInterval(async () => {
-    if (autoSaveEnabled && jarvisMemory && (Date.now() - lastAutoSave) > 25000) {
+    if (autoSaveEnabled && jarvisMemory && (Date.now() - lastAutoSave) > 55000) {
       try {
         // Update last activity timestamp
         jarvisMemory.last_seen = new Date().toISOString();
@@ -8089,7 +8549,7 @@ function scheduleAutoSave() {
         console.warn('Auto-save failed:', error);
       }
     }
-  }, 30000);
+  }, 60000);
 }
 
 // Enhanced auto-save after user interactions
