@@ -397,7 +397,7 @@ security:
   session_ttl_minutes: 720  # Session timeout in minutes (default: 12 hours)
   session_ttl_min: 720      # Alternate naming for session TTL 
   strict_reload: false      # Force login on every page reload
-  force_login_on_reload: false  # Force login on every page reload
+  force_login_on_reload: true   # Force login on every page reload (enabled for testing)
   trust_proxy: false       # Trust X-Forwarded-For headers from reverse proxies
   single_session: true     # Enforce single active session per user
 
@@ -4415,13 +4415,18 @@ class Handler(SimpleHTTPRequestHandler):
                 audit(f'UNAUTHORIZED_ACCESS ip={client_ip}')
             
             # Enhanced session handling with force_login_on_reload support
+            # Note: Jarvis memory is stored separately from sessions and persists across session clears
             force_login_on_reload = _coerce_bool(cfg_get('security.force_login_on_reload', False), False)
+            
+            # Check if this is a fresh page load (not an AJAX request) by looking at headers
+            is_page_load = self.headers.get('Accept', '').startswith('text/html')
             
             # If AUTH_STRICT is enabled and no valid session, clear session cookie
             if AUTH_STRICT and not sess:
                 self._set_headers(200, 'text/html; charset=utf-8', {'Set-Cookie': 'NSSESS=deleted; Path=/; HttpOnly; Max-Age=0; SameSite=Strict'})
-            # If force_login_on_reload is enabled, clear session cookie (even if session is valid)
-            elif force_login_on_reload:
+            # If force_login_on_reload is enabled, clear session cookie on fresh page loads without session
+            # This ensures login prompt appears on refresh while preserving API access after successful login
+            elif force_login_on_reload and not sess and is_page_load:
                 self._set_headers(200, 'text/html; charset=utf-8', {'Set-Cookie': 'NSSESS=deleted; Path=/; HttpOnly; Max-Age=0; SameSite=Strict'})
             else:
                 self._set_headers(200, 'text/html; charset=utf-8')
@@ -4498,7 +4503,7 @@ class Handler(SimpleHTTPRequestHandler):
                 'modules_count': len([x for x in os.listdir(os.path.join(NS_HOME,'modules')) if not x.startswith('.')]) if os.path.exists(os.path.join(NS_HOME,'modules')) else 0,
                 'version': read_text(os.path.join(NS_HOME,'version.txt'),'unknown'),
                 'csrf': sess.get('csrf','') if auth_enabled() else 'public',
-                'voice_enabled': cfg_get('jarvis.voice_enabled', False),
+                'voice_enabled': cfg_get('jarvis.voice_enabled', True),
                 'ui_theme': cfg_get('webgen.theme', 'jarvis-dark'),
                 # Add monitor enabled state flags for dashboard UI
                 'integrity_enabled': monitor_enabled('integrity'),
@@ -4546,6 +4551,83 @@ class Handler(SimpleHTTPRequestHandler):
                 self._set_headers(200); self.wfile.write(json.dumps(config_data).encode('utf-8')); return
             except Exception as e:
                 self._set_headers(500); self.wfile.write(json.dumps({'error': str(e)}).encode('utf-8')); return
+
+        # Jarvis AI memory management - GET handler
+        if parsed.path == '/api/jarvis/memory':
+            if not require_auth(self): return
+            sess = get_session(self)
+            username = sess.get('user', 'public') if sess else 'public'
+            
+            try:
+                # Load user's encrypted memory
+                user_memory = load_user_memory(username)
+                self._set_headers(200)
+                self.wfile.write(json.dumps({
+                    'ok': True,
+                    'memory': user_memory.get('memory', {}),
+                    'preferences': user_memory.get('preferences', {}),
+                    'history': user_memory.get('history', [])
+                }).encode('utf-8'))
+            except Exception as e:
+                self._set_headers(200)
+                self.wfile.write(json.dumps({
+                    'ok': True,
+                    'memory': {},
+                    'preferences': {},
+                    'history': []
+                }).encode('utf-8'))
+            return
+
+        # Users and sessions management - GET handler
+        if parsed.path == '/api/users':
+            if not require_auth(self): return
+            try:
+                db = users_db()
+                current_time = int(time.time())
+                users_list = []
+                
+                # Get all usernames from _userdb
+                userdb = db.get('_userdb', {})
+                active_sessions = {}
+                
+                # Count active sessions per user
+                for token, session_data in db.items():
+                    if token.startswith('_'):
+                        continue
+                    if isinstance(session_data, dict):
+                        user = session_data.get('user')
+                        expires = session_data.get('expires', 0)
+                        if user and expires > current_time:
+                            active_sessions[user] = active_sessions.get(user, 0) + 1
+                
+                # Build user list
+                for username in userdb.keys():
+                    active_count = active_sessions.get(username, 0)
+                    users_list.append({
+                        'username': username,
+                        'active': active_count > 0,
+                        'session_count': active_count
+                    })
+                
+                # Sort by username
+                users_list.sort(key=lambda x: x['username'])
+                
+                response = {
+                    'users': users_list,
+                    'total_users': len(users_list),
+                    'total_active_sessions': sum(active_sessions.values()),
+                    'timestamp': time.strftime('%Y-%m-%d %H:%M:%S')
+                }
+                
+                self._set_headers(200)
+                self.wfile.write(json.dumps(response).encode('utf-8'))
+                return
+                
+            except Exception as e:
+                security_log(f"USERS_API_ERROR error={str(e)}")
+                self._set_headers(500)
+                self.wfile.write(json.dumps({'error': str(e)}).encode('utf-8'))
+                return
 
         if parsed.path == '/api/logs':
             if not require_auth(self): return
@@ -4672,7 +4754,8 @@ class Handler(SimpleHTTPRequestHandler):
                                 f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} [2FA_FAIL] IP={ip} User={user} UserAgent='{user_agent[:100]}'\n")
                         except Exception: pass
                         self._set_headers(401); self.wfile.write(b'{"ok":false,"need_2fa":true}'); return
-                        
+                
+                # Create session after all authentication checks pass (moved outside 2FA block)
                 token, csrf = new_session(user)
                 login_ok(self)
                 py_alert('INFO', f'LOGIN OK user={user} ip={ip}')
@@ -4773,7 +4856,7 @@ class Handler(SimpleHTTPRequestHandler):
                 
                 # Generate AI reply
                 reply = ai_reply(prompt, username, user_ip)
-                voice_enabled = cfg_get('jarvis.voice_enabled', False)
+                voice_enabled = cfg_get('jarvis.voice_enabled', True)
                 
                 # Check if reply contains action payload
                 action = None
@@ -4824,53 +4907,31 @@ class Handler(SimpleHTTPRequestHandler):
             sess = get_session(self)
             username = sess.get('user', 'public') if sess else 'public'
             
-            if self.command == 'GET':
-                # Load user's encrypted memory
-                try:
-                    user_memory = load_user_memory(username)
-                    self._set_headers(200)
-                    self.wfile.write(json.dumps({
-                        'ok': True,
-                        'memory': user_memory.get('memory', {}),
-                        'preferences': user_memory.get('preferences', {}),
-                        'history': user_memory.get('history', [])  # Use history field consistently
-                    }).encode('utf-8'))
-                except Exception:
-                    self._set_headers(200)
-                    self.wfile.write(json.dumps({
-                        'ok': True,
-                        'memory': {},
-                        'preferences': {},
-                        'history': []
-                    }).encode('utf-8'))
-                return
-            
-            if self.command == 'POST':
-                # Save user's encrypted memory
-                try:
-                    data = json.loads(body or '{}')
-                    
-                    # Load existing memory or start with default
-                    user_memory = load_user_memory(username)
-                    
-                    # Update user's memory with new data
-                    user_memory['memory'] = data.get('memory', {})
-                    user_memory['preferences'] = data.get('preferences', {})
-                    # Use 'conversations' instead of 'history' for consistency with ai_reply
-                    user_memory['history'] = data.get('history', [])
-                    user_memory['last_updated'] = time.time()
-                    user_memory['last_seen'] = time.strftime('%Y-%m-%d %H:%M:%S')
-                    
-                    # Save encrypted memory
-                    save_user_memory(username, user_memory)
-                    
-                    self._set_headers(200)
-                    self.wfile.write(json.dumps({'ok': True}).encode('utf-8'))
-                except Exception as e:
-                    py_alert('ERROR', f'Failed to save memory for {username}: {str(e)}')
-                    self._set_headers(500)
-                    self.wfile.write(json.dumps({'ok': False, 'error': str(e)}).encode('utf-8'))
-                return
+            # Save user's encrypted memory
+            try:
+                data = json.loads(body or '{}')
+                
+                # Load existing memory or start with default
+                user_memory = load_user_memory(username)
+                
+                # Update user's memory with new data
+                user_memory['memory'] = data.get('memory', {})
+                user_memory['preferences'] = data.get('preferences', {})
+                # Use 'conversations' instead of 'history' for consistency with ai_reply
+                user_memory['history'] = data.get('history', [])
+                user_memory['last_updated'] = time.time()
+                user_memory['last_seen'] = time.strftime('%Y-%m-%d %H:%M:%S')
+                
+                # Save encrypted memory
+                save_user_memory(username, user_memory)
+                
+                self._set_headers(200)
+                self.wfile.write(json.dumps({'ok': True}).encode('utf-8'))
+            except Exception as e:
+                py_alert('ERROR', f'Failed to save memory for {username}: {str(e)}')
+                self._set_headers(500)
+                self.wfile.write(json.dumps({'ok': False, 'error': str(e)}).encode('utf-8'))
+            return
         
         # Tools management API
         if parsed.path == '/api/tools/scan':
@@ -5279,118 +5340,6 @@ class Handler(SimpleHTTPRequestHandler):
             except Exception as e:
                 print(f"Security API error: {e}")
                 self._set_headers(500); 
-                self.wfile.write(json.dumps({'error': str(e)}).encode('utf-8'))
-                return
-
-        if parsed.path == '/api/jarvis/memory':
-            if not require_auth(self): return
-            sess = get_session(self) or {}
-            username = sess.get('user', 'anonymous')
-            
-            if self.command == 'GET':
-                # Load user memory
-                try:
-                    user_memory = load_user_memory(username)
-                    self._set_headers(200)
-                    self.wfile.write(json.dumps(user_memory).encode('utf-8'))
-                    return
-                except Exception as e:
-                    self._set_headers(500)
-                    self.wfile.write(json.dumps({'error': str(e)}).encode('utf-8'))
-                    return
-            
-            elif self.command == 'POST':
-                # Save user memory/preferences
-                try:
-                    content_length = int(self.headers.get('Content-Length', 0))
-                    if content_length == 0:
-                        self._set_headers(400)
-                        self.wfile.write(json.dumps({'error': 'No data provided'}).encode('utf-8'))
-                        return
-                    
-                    post_data = self.rfile.read(content_length).decode('utf-8')
-                    data = json.loads(post_data)
-                    
-                    # Load current memory
-                    user_memory = load_user_memory(username)
-                    
-                    # Update preferences if provided
-                    if 'preferences' in data:
-                        user_memory['preferences'].update(data['preferences'])
-                        security_log(f"JARVIS_PREFERENCES_UPDATED user={username} preferences={data['preferences']}")
-                    
-                    # Update specific fields if provided
-                    for field in ['memory', 'history']:
-                        if field in data:
-                            user_memory[field] = data[field]
-                    
-                    # Save updated memory
-                    success = save_user_memory(username, user_memory)
-                    
-                    if success:
-                        self._set_headers(200)
-                        self.wfile.write(json.dumps({'success': True, 'message': 'Memory updated'}).encode('utf-8'))
-                    else:
-                        self._set_headers(500)
-                        self.wfile.write(json.dumps({'error': 'Failed to save memory'}).encode('utf-8'))
-                    return
-                    
-                except json.JSONDecodeError:
-                    self._set_headers(400)
-                    self.wfile.write(json.dumps({'error': 'Invalid JSON'}).encode('utf-8'))
-                    return
-                except Exception as e:
-                    self._set_headers(500)
-                    self.wfile.write(json.dumps({'error': str(e)}).encode('utf-8'))
-                    return
-
-        if parsed.path == '/api/users':
-            if not require_auth(self): return
-            try:
-                db = users_db()
-                current_time = int(time.time())
-                users_list = []
-                
-                # Get all usernames from _userdb
-                userdb = db.get('_userdb', {})
-                active_sessions = {}
-                
-                # Count active sessions per user
-                for token, session_data in db.items():
-                    if token.startswith('_'):
-                        continue
-                    if isinstance(session_data, dict):
-                        user = session_data.get('user')
-                        expires = session_data.get('expires', 0)
-                        if user and expires > current_time:
-                            active_sessions[user] = active_sessions.get(user, 0) + 1
-                
-                # Build user list
-                for username in userdb.keys():
-                    active_count = active_sessions.get(username, 0)
-                    users_list.append({
-                        'username': username,
-                        'active': active_count > 0,
-                        'session_count': active_count
-                    })
-                
-                # Sort by username
-                users_list.sort(key=lambda x: x['username'])
-                
-                response = {
-                    'users': users_list,
-                    'total_users': len(users_list),
-                    'total_active_sessions': sum(active_sessions.values()),
-                    'timestamp': time.strftime('%Y-%m-%d %H:%M:%S')
-                }
-                
-                self._set_headers(200)
-                self.wfile.write(json.dumps(response).encode('utf-8'))
-                return
-                
-            except Exception as e:
-                security_log(f"USERS_API_ERROR error={str(e)}")
-                self._set_headers(500)
                 self.wfile.write(json.dumps({'error': str(e)}).encode('utf-8'))
                 return
 
@@ -6111,6 +6060,7 @@ write_dashboard(){
           <button class="quick-action" data-command="backup" title="Create system backup">💾 Backup</button>
           <button class="quick-action" data-command="alerts" title="Show recent alerts">⚠️ Alerts</button>
           <button class="quick-action" data-command="help" title="Show available commands">❓ Help</button>
+          <button id="tts-toggle" class="quick-action" title="Toggle Jarvis text-to-speech voice">🔊 TTS</button>
         </div>
         
         <div id="chat">
@@ -7282,6 +7232,40 @@ function speak(text) {
     }
 }
 
+// Toggle TTS on/off and update UI and config
+function toggleTTS() {
+    voiceEnabled = !voiceEnabled;
+    updateTTSButton();
+    
+    // Save TTS preference to Jarvis memory
+    try {
+        if (jarvisMemory && jarvisMemory.preferences) {
+            jarvisMemory.preferences.tts_enabled = voiceEnabled;
+            saveJarvisMemory();
+        }
+    } catch (error) {
+        console.warn('Failed to save TTS preference:', error);
+    }
+    
+    toast(voiceEnabled ? '🔊 Jarvis TTS enabled' : '🔇 Jarvis TTS disabled', 'info');
+}
+
+// Update TTS button appearance
+function updateTTSButton() {
+    const ttsBtn = $('#tts-toggle');
+    if (ttsBtn) {
+        if (voiceEnabled) {
+            ttsBtn.textContent = '🔊 TTS';
+            ttsBtn.title = 'Disable Jarvis text-to-speech voice';
+            ttsBtn.style.background = '#28a745';
+        } else {
+            ttsBtn.textContent = '🔇 TTS';
+            ttsBtn.title = 'Enable Jarvis text-to-speech voice';
+            ttsBtn.style.background = '#6c757d';
+        }
+    }
+}
+
 // Tab lazy loading and polling management
 let activeTab = 'ai';
 let statusPolling = null;
@@ -7331,16 +7315,39 @@ function toast(msg){
   setTimeout(()=>t.remove(), 2500);
 }
 
-async function api(path, opts){
-  const r = await fetch(path, Object.assign({headers:{'Content-Type':'application/json'}},opts||{}));
-  if(r.status===401){
-    showLogin(); throw new Error('unauthorized');
+async function api(path, opts, retries = 3){
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      const r = await fetch(path, Object.assign({headers:{'Content-Type':'application/json'}},opts||{}));
+      if(r.status===401){
+        // On first 401 error, try to refresh the page if force_login_on_reload is enabled
+        if (attempt === 1 && window.location.pathname === '/') {
+          console.warn(`401 error on ${path}, attempt ${attempt}/${retries}`);
+          await new Promise(resolve => setTimeout(resolve, 1000 * attempt)); // exponential backoff
+          continue;
+        }
+        showLogin(); throw new Error('unauthorized');
+      }
+      if(r.status===403){
+        toast('Forbidden or CSRF'); throw new Error('forbidden');
+      }
+      if(!r.ok){ 
+        console.warn(`API error ${r.status} on ${path}, attempt ${attempt}/${retries}`);
+        if (attempt < retries) {
+          await new Promise(resolve => setTimeout(resolve, 1000 * attempt)); // exponential backoff
+          continue;
+        }
+        throw new Error('API error'); 
+      }
+      return r;
+    } catch (error) {
+      if (attempt === retries || error.message === 'unauthorized' || error.message === 'forbidden') {
+        throw error;
+      }
+      console.warn(`API call failed on ${path}, attempt ${attempt}/${retries}:`, error.message);
+      await new Promise(resolve => setTimeout(resolve, 1000 * attempt)); // exponential backoff
+    }
   }
-  if(r.status===403){
-    toast('Forbidden or CSRF'); throw new Error('forbidden');
-  }
-  if(!r.ok){ throw new Error('API error'); }
-  return r;
 }
 
 function human(val, unit=''){ if(val===undefined || val===null) return '?'; return `${val}${unit}`; }
@@ -7559,12 +7566,12 @@ async function refresh(){
     // Update session and user info displays
     updateSessionInfo(j);
     
-    // Auto-refresh memory and learning patterns every few refreshes
+    // Auto-refresh memory and learning patterns every 20 refreshes (every ~2 minutes)
     if (typeof refreshCounter === 'undefined') window.refreshCounter = 0;
     window.refreshCounter++;
     
-    if (window.refreshCounter % 5 === 0) {
-      // Every 5th refresh, ensure memory persistence
+    if (window.refreshCounter % 20 === 0) {
+      // Every 20th refresh, ensure memory persistence
       try {
         if (jarvisMemory) {
           jarvisMemory.last_seen = new Date().toISOString();
@@ -8818,11 +8825,23 @@ function toggleTerminalFullscreen() {
     if (wrapper.classList.contains('fullscreen')) {
         wrapper.classList.remove('fullscreen');
         btn.textContent = '🔲 Fullscreen';
+        btn.title = 'Enter fullscreen mode';
         document.removeEventListener('keydown', handleFullscreenEscape);
+        // Remove fullscreen-specific styles
+        btn.style.position = '';
+        btn.style.top = '';
+        btn.style.right = '';
+        btn.style.zIndex = '';
     } else {
         wrapper.classList.add('fullscreen');
         btn.textContent = '❌ Exit Fullscreen';
+        btn.title = 'Exit fullscreen mode (or press Escape)';
         document.addEventListener('keydown', handleFullscreenEscape);
+        // Make button accessible in fullscreen
+        btn.style.position = 'fixed';
+        btn.style.top = '20px';
+        btn.style.right = '20px';
+        btn.style.zIndex = '10000';
         // Refocus terminal in fullscreen
         setTimeout(() => $('#term').focus(), 100);
     }
@@ -9397,11 +9416,23 @@ function initEnhancedAI() {
 
 async function initializeVoice() {
     try {
-        // Load voice_enabled setting from status API
-        const response = await fetch('/api/status');
-        if (response.ok) {
-            const data = await response.json();
-            voiceEnabled = data.voice_enabled || false;
+        // Default to enabled (since config has voice_enabled: true)
+        voiceEnabled = true;
+        
+        // Try to load voice_enabled setting from status API
+        try {
+            const response = await fetch('/api/status');
+            if (response.ok) {
+                const data = await response.json();
+                voiceEnabled = data.voice_enabled !== undefined ? data.voice_enabled : true;
+            }
+        } catch (error) {
+            console.warn('Failed to load voice settings from API, using default (enabled)');
+        }
+        
+        // Override with user preference from Jarvis memory if available
+        if (jarvisMemory && jarvisMemory.preferences && typeof jarvisMemory.preferences.tts_enabled !== 'undefined') {
+            voiceEnabled = jarvisMemory.preferences.tts_enabled;
         }
         
         // Initialize TTS if available and enabled
@@ -9412,9 +9443,13 @@ async function initializeVoice() {
                 voiceEnabled = false;
             }
         }
+        
+        // Update TTS button appearance
+        updateTTSButton();
     } catch (error) {
         console.warn('Failed to initialize voice:', error);
         voiceEnabled = false;
+        updateTTSButton();
     }
 }
 
@@ -9431,6 +9466,9 @@ function bindAIEvents() {
     // Memory management buttons
     $('#clear-memory')?.addEventListener('click', clearJarvisMemory);
     $('#export-memory')?.addEventListener('click', exportConversationHistory);
+    
+    // TTS toggle button
+    $('#tts-toggle')?.addEventListener('click', toggleTTS);
     
     // Voice input (if supported)
     if ('webkitSpeechRecognition' in window) {
