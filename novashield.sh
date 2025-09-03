@@ -76,20 +76,28 @@ alert(){
   echo "$line" | tee -a "$NS_ALERTS" >&2
   
   # Enhanced alert categorization - only log true security events to security.log
-  # Skip system resource warnings (memory, disk, CPU) from being security events
+  # Skip system resource warnings (memory, disk, CPU, network loss) from being security events
   case "$msg" in
-    *"Memory "*|*"Disk "*|*"CPU "*|*"load "*|*"storage "*|*"elevated"*|*"high: "*%)
+    *"Memory "*|*"Disk "*|*"CPU "*|*"load "*|*"storage "*|*"elevated"*|*"high: "*%|*"Network loss"*)
       # These are system resource warnings, not security threats - only log to alerts.log
       ;;
     *)
-      # Log actual security events to security.log
-      case "$level" in
-        CRIT|ERROR)
-          echo "$(ns_now) [THREAT] $level: $msg" | tee -a "$NS_LOGS/security.log" >/dev/null 2>&1
+      # Only log security-relevant events to security.log based on keywords
+      local msg_lower="$(echo "$msg" | tr '[:upper:]' '[:lower:]')"
+      case "$msg_lower" in
+        *intrusion*|*auth*|*unauthorized*|*csrf*|*brute*|*attack*|*forbidden*|*blocked*|*command*|*traversal*|*ban*|*"rate limit"*|*login*|*breach*|*suspicious*)
+          # This is a real security event
+          case "$level" in
+            CRIT|ERROR)
+              echo "$(ns_now) [SECURITY] $level: $msg" | tee -a "$NS_LOGS/security.log" >/dev/null 2>&1
+              ;;
+            WARN)
+              echo "$(ns_now) [SECURITY] $level: $msg" | tee -a "$NS_LOGS/security.log" >/dev/null 2>&1
+              ;;
+          esac
           ;;
-        WARN)
-          # Only log non-resource warnings as security events
-          echo "$(ns_now) [SECURITY] $level: $msg" | tee -a "$NS_LOGS/security.log" >/dev/null 2>&1
+        *)
+          # Non-security system alert - only goes to alerts.log (already logged above)
           ;;
       esac
       ;;
@@ -2328,6 +2336,8 @@ def mirror_terminal(handler):
             return
         
     last_activity = time.time()
+    last_ping = time.time()
+    ping_interval = 30  # Send ping every 30 seconds
     connection_stable = True
     
     # Set terminal to raw mode with enhanced error handling
@@ -2387,6 +2397,18 @@ def mirror_terminal(handler):
     try:
         while connection_stable and reader_thread.is_alive():
             try:
+                # Check if we need to send a ping for keepalive
+                current_time = time.time()
+                if current_time - last_ping > ping_interval:
+                    try:
+                        # Send ping frame to keep connection alive
+                        ws_send(client, b'ping', opcode=9)
+                        last_ping = current_time
+                        security_log(f"TERMINAL_PING_SENT user={user} pid={pid}")
+                    except Exception as e:
+                        security_log(f"TERMINAL_PING_SEND_ERROR user={user} pid={pid} error={str(e)}")
+                        break
+                
                 if time.time() - last_activity > idle_timeout:
                     try:
                         ws_send(client, '\r\n[Session idle timeout - disconnecting]\r\n')
@@ -3175,53 +3197,7 @@ def save_ai_response(username, reply, user_memory, memory_size):
     except Exception as e:
         py_alert('WARN', f'Failed to save AI response for {username}: {str(e)}')
 
-def get_personalized_jarvis_response(username, base_reply):
-        if len(reply) > 200:
-            patterns["prefers_detailed"] = patterns.get("prefers_detailed", 0) + 1
-        else:
-            patterns["prefers_concise"] = patterns.get("prefers_concise", 0) + 1
-        
-        # Determine interaction style preference
-        detailed = patterns.get("prefers_detailed", 0)
-        concise = patterns.get("prefers_concise", 0)
-        if detailed > concise * 1.5:
-            patterns["interaction_style"] = "detailed"
-        elif concise > detailed * 1.5:
-            patterns["interaction_style"] = "concise"
-        else:
-            patterns["interaction_style"] = "balanced"
-        
-        # Track time patterns for personalization
-        current_hour = int(time.strftime('%H'))
-        if "active_hours" not in patterns:
-            patterns["active_hours"] = {}
-        patterns["active_hours"][str(current_hour)] = patterns["active_hours"].get(str(current_hour), 0) + 1
-        
-        # Keep memory at configured size
-        # Trim memory to keep only recent history
-        if len(user_memory["history"]) > memory_size * 2:  # *2 for user+AI pairs
-            user_memory["history"] = user_memory["history"][-memory_size * 2:]
-        
-        # Save updated memory with enhanced data
-        save_user_memory(username, user_memory)
-        
-        # Enhanced learning - analyze patterns for future responses
-        enhanced_jarvis_learning(username, "", {"reply": reply})
-        
-        # Global conversation logging for cross-user learning (encrypted)
-        try:
-            global_log_path = os.path.join(NS_CTRL, 'global_conversations.enc')
-            metadata = {
-                "timestamp": now,
-                "username": username,
-                "prompt_length": len(reply.split()),
-                "response_type": "ai_reply",
-                "topics": list(patterns.get("topics", {}).keys()),
-                "interaction_style": patterns.get("interaction_style", "balanced")
-            }
-            # In a full implementation, this would be encrypted
-        except Exception:
-            pass  # Fail silently for global logging
+
 
 def get_personalized_jarvis_response(username, base_response):
     """Enhance response with personalization based on user learning patterns"""
@@ -3817,27 +3793,7 @@ def save_command_result(tool_name, command, output, username):
     except Exception as e:
         security_log(f"RESULT_SAVE_ERROR user={username} tool={tool_name} error={str(e)}")
 
-def get_personalized_jarvis_response(username, base_response):
-    """Generate personalized responses based on user learning patterns"""
-    try:
-        user_memory = load_user_memory(username)
-        patterns = user_memory.get('learning_patterns', {})
-        style = patterns.get('interaction_style', 'formal')
-        
-        # Adapt response style
-        if style == 'casual':
-            base_response = base_response.replace('I recommend', "I'd suggest")
-            base_response = base_response.replace('You may', "You might wanna")
-            base_response = base_response.replace('Please', "")
-        elif style == 'technical':
-            base_response = base_response.replace('check', 'analyze')
-            base_response = base_response.replace('look at', 'examine')
-            base_response = base_response.replace('run', 'execute')
-        
-        return base_response
-        
-    except Exception:
-        return base_response
+
 
 # Old ai_reply function removed - using enhanced version above
 
@@ -5511,6 +5467,120 @@ class Handler(SimpleHTTPRequestHandler):
                 security_log(f"CONFIG_SAVE_ERROR user={sess.get('user', 'unknown')} ip={get_client_ip(self)} error={str(e)}")
                 self._set_headers(500)
                 self.wfile.write(json.dumps({'error': f'Failed to save configuration: {str(e)}'}).encode('utf-8'))
+                return
+
+        if parsed.path == '/api/security/action':
+            if not require_auth(self): return
+            sess = get_session(self) or {}
+            
+            # Check CSRF if required
+            if csrf_required():
+                client_csrf = self.headers.get('X-CSRF','')
+                if client_csrf != sess.get('csrf',''):
+                    self._set_headers(403)
+                    self.wfile.write(json.dumps({'error': 'CSRF token mismatch'}).encode('utf-8'))
+                    return
+            
+            try:
+                # Read POST data
+                content_length = int(self.headers.get('Content-Length', 0))
+                if content_length == 0:
+                    self._set_headers(400)
+                    self.wfile.write(json.dumps({'error': 'No action data provided'}).encode('utf-8'))
+                    return
+                
+                post_data = self.rfile.read(content_length).decode('utf-8')
+                data = json.loads(post_data)
+                action = data.get('action', '')
+                ip_address = data.get('ip', '')
+                
+                if not action:
+                    self._set_headers(400)
+                    self.wfile.write(json.dumps({'error': 'No action specified'}).encode('utf-8'))
+                    return
+                
+                # Load bans database
+                bans = read_json(BANS_DB, {})
+                
+                # Perform the requested action
+                result = {}
+                if action == 'ban_ip':
+                    if not ip_address:
+                        self._set_headers(400)
+                        self.wfile.write(json.dumps({'error': 'IP address required for ban action'}).encode('utf-8'))
+                        return
+                    
+                    # Add IP to bans
+                    bans[ip_address] = {
+                        'banned_at': time.strftime('%Y-%m-%d %H:%M:%S'),
+                        'banned_by': sess.get('user', 'unknown'),
+                        'reason': data.get('reason', 'Manual ban via security actions')
+                    }
+                    write_json(BANS_DB, bans)
+                    
+                    audit(f"SECURITY_ACTION action=ban_ip ip={ip_address} user={sess.get('user', 'unknown')}")
+                    security_log(f"IP_BANNED ip={ip_address} user={sess.get('user', 'unknown')} reason={data.get('reason', 'Manual')}")
+                    
+                    result = {'success': True, 'message': f'IP {ip_address} banned successfully'}
+                    
+                elif action == 'unban_ip':
+                    if not ip_address:
+                        self._set_headers(400)
+                        self.wfile.write(json.dumps({'error': 'IP address required for unban action'}).encode('utf-8'))
+                        return
+                    
+                    # Remove IP from bans
+                    if ip_address in bans:
+                        del bans[ip_address]
+                        write_json(BANS_DB, bans)
+                        
+                        audit(f"SECURITY_ACTION action=unban_ip ip={ip_address} user={sess.get('user', 'unknown')}")
+                        security_log(f"IP_UNBANNED ip={ip_address} user={sess.get('user', 'unknown')}")
+                        
+                        result = {'success': True, 'message': f'IP {ip_address} unbanned successfully'}
+                    else:
+                        result = {'success': False, 'message': f'IP {ip_address} was not banned'}
+                        
+                elif action == 'list_banned_ips':
+                    # Return list of banned IPs
+                    banned_list = []
+                    for ip, info in bans.items():
+                        banned_list.append({
+                            'ip': ip,
+                            'banned_at': info.get('banned_at', 'Unknown'),
+                            'banned_by': info.get('banned_by', 'Unknown'),
+                            'reason': info.get('reason', 'No reason provided')
+                        })
+                    
+                    result = {
+                        'success': True,
+                        'banned_ips': banned_list,
+                        'total_banned': len(banned_list)
+                    }
+                    
+                else:
+                    self._set_headers(400)
+                    self.wfile.write(json.dumps({'error': f'Unknown action: {action}'}).encode('utf-8'))
+                    return
+                
+                # Add updated stats
+                result['stats'] = {
+                    'total_banned_ips': len(bans),
+                    'timestamp': time.strftime('%Y-%m-%d %H:%M:%S')
+                }
+                
+                self._set_headers(200)
+                self.wfile.write(json.dumps(result).encode('utf-8'))
+                return
+                
+            except json.JSONDecodeError:
+                self._set_headers(400)
+                self.wfile.write(json.dumps({'error': 'Invalid JSON in request'}).encode('utf-8'))
+                return
+            except Exception as e:
+                security_log(f"SECURITY_ACTION_ERROR action={action} user={sess.get('user', 'unknown')} ip={get_client_ip(self)} error={str(e)}")
+                self._set_headers(500)
+                self.wfile.write(json.dumps({'error': f'Security action failed: {str(e)}'}).encode('utf-8'))
                 return
 
         self._set_headers(400); self.wfile.write(b'{"ok":false}')
