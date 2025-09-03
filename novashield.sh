@@ -399,6 +399,7 @@ security:
   strict_reload: false      # Force login on every page reload
   force_login_on_reload: false  # Force login on every page reload
   trust_proxy: false       # Trust X-Forwarded-For headers from reverse proxies
+  single_session: true     # Enforce single active session per user
 
 terminal:
   enabled: true
@@ -475,13 +476,13 @@ scheduler:
 webgen:
   enabled: true
   site_name: "NovaShield Site"
-  theme: "jarvis-dark"
+  theme: "jarvis-blue"
 
 
 jarvis:
   personality: "helpful"  # helpful, snarky, professional
   memory_size: 50         # remember last N conversations (increased from 10)
-  voice_enabled: false    # future text-to-speech capability
+  voice_enabled: true     # Voice talk-back enabled by default
 YAML
 }
 
@@ -1937,19 +1938,23 @@ def totp_now(secret_b32, t=None):
 def new_session(username):
     db = users_db()
     
-    # SINGLE SESSION PER USER: Remove any existing sessions for this username
-    tokens_to_remove = []
-    for token, session_data in db.items():
-        # Skip non-session entries (like _userdb, _2fa)
-        if token.startswith('_'):
-            continue
-        
-        if isinstance(session_data, dict) and session_data.get('user') == username:
-            tokens_to_remove.append(token)
+    # Check if single session enforcement is enabled (default: true)
+    single_session_enabled = cfg_get('security.single_session', 'true').lower() in ('true', '1', 'yes')
     
-    # Remove existing sessions for this user
-    for token in tokens_to_remove:
-        del db[token]
+    if single_session_enabled:
+        # SINGLE SESSION PER USER: Remove any existing sessions for this username
+        tokens_to_remove = []
+        for token, session_data in db.items():
+            # Skip non-session entries (like _userdb, _2fa)
+            if token.startswith('_'):
+                continue
+            
+            if isinstance(session_data, dict) and session_data.get('user') == username:
+                tokens_to_remove.append(token)
+        
+        # Remove existing sessions for this user
+        for token in tokens_to_remove:
+            del db[token]
     
     # Create new session
     token = hashlib.sha256(f'{username}:{time.time()}:{os.urandom(8)}'.encode()).hexdigest()
