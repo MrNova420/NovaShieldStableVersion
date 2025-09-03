@@ -7576,12 +7576,7 @@ async function refresh(){
       }
     }
     
-  } catch(e) {
-    console.error('Refresh error:', e);
-    // If we can't reach the API, show login 
-    showLogin();
-  }
-}
+    // Status updates
     setCard('user', `User sessions: ${j.active_sessions || '?'} | Login monitoring: ${j.userlogins_enabled ? 'Active' : 'Inactive'}`);
     setCard('svc', `Service monitoring: ${j.services_enabled ? 'Active' : 'Inactive'} | Services watched: ${j.services_count || '?'}`);
     
@@ -7593,16 +7588,9 @@ async function refresh(){
     // Alerts with better formatting
     const ul = $('#alerts'); if(ul){ 
         ul.innerHTML=''; 
-        const alerts = (j.alerts||[]).slice(-50).reverse(); // Show last 50 alerts
-        if (alerts.length === 0) {
-            const li = document.createElement('li');
-            li.textContent = 'No recent alerts';
-            li.style.fontStyle = 'italic';
-            li.style.color = '#93a3c0';
-            ul.appendChild(li);
-        } else {
-            alerts.forEach(line => { 
-                const li = document.createElement('li'); 
+        if(j.alerts && j.alerts.length){
+            j.alerts.forEach(line => {
+                const li = document.createElement('li');
                 li.textContent = line;
                 // Color code alerts by level
                 if (line.includes('[CRIT]')) li.style.color = '#ef4444';
@@ -7624,16 +7612,21 @@ async function refresh(){
     });
     
     // Configuration display - Fix: parse JSON correctly since server returns JSON
-    const configResponse = await api('/api/config');
-    const configData = await configResponse.json(); 
-    const cfgEl = $('#config'); 
-    if(cfgEl) cfgEl.textContent = configData.config || 'No configuration available';
-    
-  }catch(e){ 
-    console.error(e);
-    if (e.message === 'unauthorized') {
-        showLogin();
+    try {
+      const configResponse = await api('/api/config');
+      const configData = await configResponse.json(); 
+      const cfgEl = $('#config'); 
+      if(cfgEl) cfgEl.textContent = configData.config || 'No configuration available';
+    } catch (configError) {
+      console.warn('Failed to load config:', configError);
+      const cfgEl = $('#config'); 
+      if(cfgEl) cfgEl.textContent = 'Configuration unavailable';
     }
+    
+  } catch(e) {
+    console.error('Refresh error:', e);
+    // If we can't reach the API, show login 
+    showLogin();
   }
 }
 
@@ -9393,7 +9386,6 @@ async function executeManualCommand() {
 // ========== ENHANCED JARVIS AI FUNCTIONALITY ==========
 let conversationHistory = [];
 let userPreferences = {};
-let jarvisMemory = {};
 
 // Enhanced chat functionality
 function initEnhancedAI() {
