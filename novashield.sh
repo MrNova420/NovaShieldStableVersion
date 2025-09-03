@@ -4196,7 +4196,7 @@ class Handler(SimpleHTTPRequestHandler):
                 'scheduler_enabled': monitor_enabled('scheduler'),
                 'authenticated': sess is not None and sess.get('user') != 'public',
                 # Additional fields required by UI as per problem statement
-                'services_count': len([x for x in os.listdir(os.path.join(NS_LOGS,'service.json')) if not x.startswith('.')]) if os.path.exists(os.path.join(NS_LOGS,'service.json')) else 0,
+                'services_count': len(cfg_get('monitors.services.targets', [])) if cfg_get('monitors.services.targets') else 0,
                 'suspicious_count': len(read_json(os.path.join(NS_LOGS,'process.json'), {}).get('suspicious', [])),
                 'active_sessions': len([s for s in (users_db() or {}).values() if s.get('expires', 0) > int(time.time())]),
                 'uptime': read_uptime()
@@ -6884,39 +6884,65 @@ function categorizeAlerts(alerts) {
     alerts.forEach(alert => {
         const alertLower = alert.toLowerCase();
         
-        // Critical threats (immediate danger)
+        // Skip system resource warnings that are NOT security threats
+        const isResourceWarning = (
+            alertLower.includes('memory') && (alertLower.includes('warn') || alertLower.includes('high')) ||
+            alertLower.includes('disk') && (alertLower.includes('warn') || alertLower.includes('full')) ||
+            alertLower.includes('cpu') && (alertLower.includes('warn') || alertLower.includes('high')) ||
+            alertLower.includes('storage') && alertLower.includes('warn') ||
+            alertLower.includes('load') && alertLower.includes('warn')
+        );
+        
+        // Don't treat system resource warnings as security threats
+        if (isResourceWarning && 
+            !alertLower.includes('attack') && 
+            !alertLower.includes('breach') && 
+            !alertLower.includes('unauthorized') &&
+            !alertLower.includes('malicious')) {
+            // Skip resource warnings - they should only appear in status tab
+            return;
+        }
+        
+        // Critical security threats (immediate danger)
         if (alertLower.includes('breach') || alertLower.includes('compromised') || 
             alertLower.includes('intrusion') || alertLower.includes('malware') ||
-            alertLower.includes('critical') || alertLower.includes('emergency')) {
+            alertLower.includes('exploit') || alertLower.includes('attack') ||
+            (alertLower.includes('critical') && (alertLower.includes('security') || alertLower.includes('auth')))) {
             critical.push(alert);
         }
         // Brute force attempts
         else if (alertLower.includes('brute') || alertLower.includes('failed login') ||
                  alertLower.includes('multiple attempts') || alertLower.includes('suspicious login') ||
-                 alertLower.includes('rate limit') || alertLower.includes('blocked ip')) {
+                 alertLower.includes('rate limit') || alertLower.includes('blocked ip') ||
+                 alertLower.includes('too many') || alertLower.includes('lockout')) {
             bruteForce.push(alert);
         }
         // Access violations and unauthorized attempts
         else if (alertLower.includes('unauthorized') || alertLower.includes('access denied') ||
-                 alertLower.includes('permission') || alertLower.includes('forbidden') ||
-                 alertLower.includes('invalid token') || alertLower.includes('session expired')) {
+                 alertLower.includes('permission denied') || alertLower.includes('forbidden') ||
+                 alertLower.includes('invalid token') || alertLower.includes('session expired') ||
+                 alertLower.includes('csrf') || alertLower.includes('auth') && alertLower.includes('fail')) {
             breaches.push(alert);
         }
-        // General warnings
-        else if (alertLower.includes('warn') || alertLower.includes('suspicious') ||
-                 alertLower.includes('unusual') || alertLower.includes('high usage') ||
-                 alertLower.includes('threshold')) {
+        // Security-related warnings only
+        else if ((alertLower.includes('warn') || alertLower.includes('suspicious') ||
+                 alertLower.includes('unusual') || alertLower.includes('threshold')) &&
+                 (alertLower.includes('security') || alertLower.includes('auth') || 
+                  alertLower.includes('network') || alertLower.includes('connection') ||
+                  alertLower.includes('user') || alertLower.includes('login'))) {
             warnings.push(alert);
         }
-        // If doesn't match any category, put in warnings
-        else {
+        // Security-related events that don't fit other categories
+        else if (alertLower.includes('security') || alertLower.includes('threat') ||
+                 alertLower.includes('violation') || alertLower.includes('blocked')) {
             warnings.push(alert);
         }
+        // Skip everything else (system messages, resource warnings, etc.)
     });
     
     // Update alert categories
     updateAlertCategory('critical', critical, 'No critical threats detected');
-    updateAlertCategory('warning', warnings, 'No warnings');
+    updateAlertCategory('warning', warnings, 'No security warnings');
     updateAlertCategory('brute-force', bruteForce, 'No brute force attempts');
     updateAlertCategory('breach', breaches, 'No access violations');
 }
