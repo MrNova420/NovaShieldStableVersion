@@ -397,7 +397,7 @@ security:
   session_ttl_minutes: 720  # Session timeout in minutes (default: 12 hours)
   session_ttl_min: 720      # Alternate naming for session TTL 
   strict_reload: false      # Force login on every page reload
-  force_login_on_reload: false  # Force login on every page reload
+  force_login_on_reload: true   # Force login on every page reload (enabled for testing)
   trust_proxy: false       # Trust X-Forwarded-For headers from reverse proxies
   single_session: true     # Enforce single active session per user
 
@@ -4547,6 +4547,32 @@ class Handler(SimpleHTTPRequestHandler):
             except Exception as e:
                 self._set_headers(500); self.wfile.write(json.dumps({'error': str(e)}).encode('utf-8')); return
 
+        # Jarvis AI memory management - GET handler
+        if parsed.path == '/api/jarvis/memory':
+            if not require_auth(self): return
+            sess = get_session(self)
+            username = sess.get('user', 'public') if sess else 'public'
+            
+            try:
+                # Load user's encrypted memory
+                user_memory = load_user_memory(username)
+                self._set_headers(200)
+                self.wfile.write(json.dumps({
+                    'ok': True,
+                    'memory': user_memory.get('memory', {}),
+                    'preferences': user_memory.get('preferences', {}),
+                    'history': user_memory.get('history', [])
+                }).encode('utf-8'))
+            except Exception as e:
+                self._set_headers(200)
+                self.wfile.write(json.dumps({
+                    'ok': True,
+                    'memory': {},
+                    'preferences': {},
+                    'history': []
+                }).encode('utf-8'))
+            return
+
         if parsed.path == '/api/logs':
             if not require_auth(self): return
             q = parse_qs(parsed.query); name = (q.get('name', ['launcher.log'])[0]).replace('..','')
@@ -4824,53 +4850,31 @@ class Handler(SimpleHTTPRequestHandler):
             sess = get_session(self)
             username = sess.get('user', 'public') if sess else 'public'
             
-            if self.command == 'GET':
-                # Load user's encrypted memory
-                try:
-                    user_memory = load_user_memory(username)
-                    self._set_headers(200)
-                    self.wfile.write(json.dumps({
-                        'ok': True,
-                        'memory': user_memory.get('memory', {}),
-                        'preferences': user_memory.get('preferences', {}),
-                        'history': user_memory.get('history', [])  # Use history field consistently
-                    }).encode('utf-8'))
-                except Exception:
-                    self._set_headers(200)
-                    self.wfile.write(json.dumps({
-                        'ok': True,
-                        'memory': {},
-                        'preferences': {},
-                        'history': []
-                    }).encode('utf-8'))
-                return
-            
-            if self.command == 'POST':
-                # Save user's encrypted memory
-                try:
-                    data = json.loads(body or '{}')
-                    
-                    # Load existing memory or start with default
-                    user_memory = load_user_memory(username)
-                    
-                    # Update user's memory with new data
-                    user_memory['memory'] = data.get('memory', {})
-                    user_memory['preferences'] = data.get('preferences', {})
-                    # Use 'conversations' instead of 'history' for consistency with ai_reply
-                    user_memory['history'] = data.get('history', [])
-                    user_memory['last_updated'] = time.time()
-                    user_memory['last_seen'] = time.strftime('%Y-%m-%d %H:%M:%S')
-                    
-                    # Save encrypted memory
-                    save_user_memory(username, user_memory)
-                    
-                    self._set_headers(200)
-                    self.wfile.write(json.dumps({'ok': True}).encode('utf-8'))
-                except Exception as e:
-                    py_alert('ERROR', f'Failed to save memory for {username}: {str(e)}')
-                    self._set_headers(500)
-                    self.wfile.write(json.dumps({'ok': False, 'error': str(e)}).encode('utf-8'))
-                return
+            # Save user's encrypted memory
+            try:
+                data = json.loads(body or '{}')
+                
+                # Load existing memory or start with default
+                user_memory = load_user_memory(username)
+                
+                # Update user's memory with new data
+                user_memory['memory'] = data.get('memory', {})
+                user_memory['preferences'] = data.get('preferences', {})
+                # Use 'conversations' instead of 'history' for consistency with ai_reply
+                user_memory['history'] = data.get('history', [])
+                user_memory['last_updated'] = time.time()
+                user_memory['last_seen'] = time.strftime('%Y-%m-%d %H:%M:%S')
+                
+                # Save encrypted memory
+                save_user_memory(username, user_memory)
+                
+                self._set_headers(200)
+                self.wfile.write(json.dumps({'ok': True}).encode('utf-8'))
+            except Exception as e:
+                py_alert('ERROR', f'Failed to save memory for {username}: {str(e)}')
+                self._set_headers(500)
+                self.wfile.write(json.dumps({'ok': False, 'error': str(e)}).encode('utf-8'))
+            return
         
         # Tools management API
         if parsed.path == '/api/tools/scan':
@@ -5281,68 +5285,6 @@ class Handler(SimpleHTTPRequestHandler):
                 self._set_headers(500); 
                 self.wfile.write(json.dumps({'error': str(e)}).encode('utf-8'))
                 return
-
-        if parsed.path == '/api/jarvis/memory':
-            if not require_auth(self): return
-            sess = get_session(self) or {}
-            username = sess.get('user', 'anonymous')
-            
-            if self.command == 'GET':
-                # Load user memory
-                try:
-                    user_memory = load_user_memory(username)
-                    self._set_headers(200)
-                    self.wfile.write(json.dumps(user_memory).encode('utf-8'))
-                    return
-                except Exception as e:
-                    self._set_headers(500)
-                    self.wfile.write(json.dumps({'error': str(e)}).encode('utf-8'))
-                    return
-            
-            elif self.command == 'POST':
-                # Save user memory/preferences
-                try:
-                    content_length = int(self.headers.get('Content-Length', 0))
-                    if content_length == 0:
-                        self._set_headers(400)
-                        self.wfile.write(json.dumps({'error': 'No data provided'}).encode('utf-8'))
-                        return
-                    
-                    post_data = self.rfile.read(content_length).decode('utf-8')
-                    data = json.loads(post_data)
-                    
-                    # Load current memory
-                    user_memory = load_user_memory(username)
-                    
-                    # Update preferences if provided
-                    if 'preferences' in data:
-                        user_memory['preferences'].update(data['preferences'])
-                        security_log(f"JARVIS_PREFERENCES_UPDATED user={username} preferences={data['preferences']}")
-                    
-                    # Update specific fields if provided
-                    for field in ['memory', 'history']:
-                        if field in data:
-                            user_memory[field] = data[field]
-                    
-                    # Save updated memory
-                    success = save_user_memory(username, user_memory)
-                    
-                    if success:
-                        self._set_headers(200)
-                        self.wfile.write(json.dumps({'success': True, 'message': 'Memory updated'}).encode('utf-8'))
-                    else:
-                        self._set_headers(500)
-                        self.wfile.write(json.dumps({'error': 'Failed to save memory'}).encode('utf-8'))
-                    return
-                    
-                except json.JSONDecodeError:
-                    self._set_headers(400)
-                    self.wfile.write(json.dumps({'error': 'Invalid JSON'}).encode('utf-8'))
-                    return
-                except Exception as e:
-                    self._set_headers(500)
-                    self.wfile.write(json.dumps({'error': str(e)}).encode('utf-8'))
-                    return
 
         if parsed.path == '/api/users':
             if not require_auth(self): return
@@ -6111,6 +6053,7 @@ write_dashboard(){
           <button class="quick-action" data-command="backup" title="Create system backup">💾 Backup</button>
           <button class="quick-action" data-command="alerts" title="Show recent alerts">⚠️ Alerts</button>
           <button class="quick-action" data-command="help" title="Show available commands">❓ Help</button>
+          <button id="tts-toggle" class="quick-action" title="Toggle Jarvis text-to-speech voice">🔊 TTS</button>
         </div>
         
         <div id="chat">
@@ -7279,6 +7222,40 @@ function speak(text) {
         speechSynthesis.speak(utterance);
     } catch (error) {
         console.warn('Text-to-speech failed:', error);
+    }
+}
+
+// Toggle TTS on/off and update UI and config
+function toggleTTS() {
+    voiceEnabled = !voiceEnabled;
+    updateTTSButton();
+    
+    // Save TTS preference to Jarvis memory
+    try {
+        if (jarvisMemory && jarvisMemory.preferences) {
+            jarvisMemory.preferences.tts_enabled = voiceEnabled;
+            saveJarvisMemory();
+        }
+    } catch (error) {
+        console.warn('Failed to save TTS preference:', error);
+    }
+    
+    toast(voiceEnabled ? '🔊 Jarvis TTS enabled' : '🔇 Jarvis TTS disabled', 'info');
+}
+
+// Update TTS button appearance
+function updateTTSButton() {
+    const ttsBtn = $('#tts-toggle');
+    if (ttsBtn) {
+        if (voiceEnabled) {
+            ttsBtn.textContent = '🔊 TTS';
+            ttsBtn.title = 'Disable Jarvis text-to-speech voice';
+            ttsBtn.style.background = '#28a745';
+        } else {
+            ttsBtn.textContent = '🔇 TTS';
+            ttsBtn.title = 'Enable Jarvis text-to-speech voice';
+            ttsBtn.style.background = '#6c757d';
+        }
     }
 }
 
@@ -9404,6 +9381,11 @@ async function initializeVoice() {
             voiceEnabled = data.voice_enabled || false;
         }
         
+        // Override with user preference from Jarvis memory if available
+        if (jarvisMemory && jarvisMemory.preferences && typeof jarvisMemory.preferences.tts_enabled !== 'undefined') {
+            voiceEnabled = jarvisMemory.preferences.tts_enabled;
+        }
+        
         // Initialize TTS if available and enabled
         if (voiceEnabled) {
             const ttsAvailable = initializeTTS();
@@ -9412,9 +9394,13 @@ async function initializeVoice() {
                 voiceEnabled = false;
             }
         }
+        
+        // Update TTS button appearance
+        updateTTSButton();
     } catch (error) {
         console.warn('Failed to initialize voice:', error);
         voiceEnabled = false;
+        updateTTSButton();
     }
 }
 
@@ -9431,6 +9417,9 @@ function bindAIEvents() {
     // Memory management buttons
     $('#clear-memory')?.addEventListener('click', clearJarvisMemory);
     $('#export-memory')?.addEventListener('click', exportConversationHistory);
+    
+    // TTS toggle button
+    $('#tts-toggle')?.addEventListener('click', toggleTTS);
     
     // Voice input (if supported)
     if ('webkitSpeechRecognition' in window) {
