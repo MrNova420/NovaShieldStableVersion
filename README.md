@@ -1,4 +1,4 @@
-# NovaShield — Enhanced JARVIS Edition (3.1.0)
+# NovaShield — Enhanced JARVIS Edition (3.1.0) — COMPREHENSIVE UPDATE
 *Production-Ready Security & System Management Platform*
 
 ![Enhanced AI-Powered Security Dashboard](https://private-user-images.githubusercontent.com/155208275/484666342-c251af56-56f1-4643-88d9-67d35bdc391e.png?jwt=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJnaXRodWIuY29tIiwiYXVkIjoicmF3LmdpdGh1YnVzZXJjb250ZW50LmNvbSIsImtleSI6ImtleTUiLCJleHAiOjE3NTY4MzAzMTEsIm5iZiI6MTc1NjgzMDAxMSwicGF0aCI6Ii8xNTUyMDgyNzUvNDg0NjY2MzQyLWMyNTFhZjU2LTU2ZjEtNDY0My04OGQ5LTY3ZDM1YmRjMzkxZS5wbmc_WC1BbXotQWxnb3JpdGhtPUFXUzQtSE1BQy1TSEEyNTYmWC1BbXotQ3JlZGVudGlhbD1BS0lBVkNPRFlMU0E1M1BRSzRaQSUyRjIwMjUwOTAyJTJGdXMtZWFzdC0xJTJGczMlMkZhd3M0X3JlcXVlc3QmWC1BbXotRGF0ZT0yMDI1MDkwMlQxNjIwMTFaJlgtQW16LUV4cGlyZXM9MzAwJlgtQW16LVNpZ25hdHVyZT0zMzRjODhmMTlkM2EyZTE0M2M2NWJiNDFkMWI1MjdjYzdjNTU0ZGRlYTllMzU3N2NhODUyMWRhZWE5ZjQ0NDA0JlgtQW16LVNpZ25lZEhlYWRlcnM9aG9zdCJ9.7Mv5EhzzY64lFlWmcZfsUqEvVIYaWxGXXp8pkvltL1U)
@@ -10,33 +10,61 @@
 
 **NovaShield** is a comprehensive, production-ready security and system management platform that transforms a single self-contained script into a powerful web-based dashboard. Designed specifically for Android/Termux and Linux environments, it provides enterprise-grade monitoring, advanced AI assistance, and complete system management capabilities with zero external dependencies.
 
-## ✨ What's New in 3.1.0 - Complete Enhancement Overhaul
+## ✨ What's New in 3.1.0 - COMPLETE STABILITY & ENHANCEMENT OVERHAUL
 
-### 🚀 **Revolutionary Jarvis AI - Tool Execution Engine**
-- **Execute Commands via Chat**: Say "run nmap localhost", "security scan", or "analyze performance" and Jarvis executes tools directly
-- **Encrypted Per-User Memory**: AES-256-CBC encrypted conversation history and preferences for each user
-- **Browser Text-to-Speech**: Web Speech API integration with voice selection and `jarvis.voice_enabled` config
-- **Advanced System Integration**: Real-time access to system status, alerts, logs, and comprehensive system tools
+### 🚀 **Critical Bug Fixes & System Stabilization**
+- **FIXED**: Infinite recursion bug in `get_client_ip()` function that was causing server crashes
+- **FIXED**: Alert categorization - memory/disk/CPU warnings no longer appear as security threats
+- **FIXED**: Jarvis memory persistence - AI now properly learns and retains context across sessions
+- **FIXED**: Terminal WebSocket connectivity issues with enhanced error diagnostics
+- **FIXED**: Config tab loading problems with comprehensive error handling
+- **FIXED**: Session management preventing multiple sessions on page reload
+- **FIXED**: IP logging now captures real device IPs instead of server URLs using X-Forwarded-For support
 
-### 🛡️ **Security Monitoring Revolution**
-- **Fixed "Unidentified" Alerts**: Security panel now shows detailed information with real IP addresses, timestamps, and user agents
-- **Clickable Expandable Logs**: All security events are clickable and expand to show full details including authentication data
-- **Real-time Dashboard Access Logging**: Every website access logged with comprehensive security information
-- **Enhanced Audit Trail**: Complete system operation logging with detailed event tracking
+### 🧠 **Enhanced Jarvis AI Intelligence & Memory System**
+- **Real Persistent Learning**: Jarvis now saves both user prompts AND AI replies to encrypted memory
+- **Auto-Memory Loading**: Memory automatically loads on login, reconnection, and page reloads
+- **Enhanced Learning Integration**: Every conversation triggers advanced learning and pattern analysis
+- **Improved Context Awareness**: Better conversational flow with memory of previous interactions
+- **Theme Persistence**: User theme preferences (420 mode vs default) properly saved and restored
+- **Per-User Encrypted Storage**: Each user has individual encrypted memory with file locking protection
 
-### 🖥️ **Terminal System Restoration**
-- **Black Screen Issue FIXED**: Complete rewrite of terminal connection logic with proper shell resolution
-- **Mobile Keyboard Support**: Auto-focus hidden input field for mobile keyboard activation on Termux/Android
-- **Enhanced Shell Resolution**: Intelligent shell detection preferring Termux bash → /bin/bash → /bin/zsh → /bin/sh
-- **Fullscreen Mode**: Toggle button with ESC key exit and proper focus management
-- **Real Terminal Linking**: Direct connection to user's actual terminal environment
+### 🛡️ **Advanced Security Monitoring & Logging**
+- **Real Client IP Logging**: Now captures actual device IPs with configurable proxy header trust
+- **Enhanced Security Categorization**: System resource warnings kept separate from real security threats
+- **Improved Alert Population**: Better alert display with categorized threat levels and descriptions
+- **Session Security**: Single active session per user with proper TTL handling and cleanup
+- **Authentication Improvements**: Better session validation before WebSocket connections
+- **CSRF Protection**: Enhanced token validation across all interactive elements
 
-### 🎨 **User Interface & Experience Overhaul**
-- **420 Theme Toggle**: Marijuana-themed color scheme with purple/green/blue styling (🌿 button in header)
-- **Bright Chat Colors**: User messages in bright purple (#e9b3ff), Jarvis messages in bright green (#7fff00)
-- **Enhanced Tools Panel**: Manual command execution interface with safety checks and command suggestions
-- **Fixed Header Buttons**: All dashboard action buttons (backup, snapshot, restart monitors) now functional
-- **Status Panel Repair**: Monitor control toggles working with proper CSRF validation and error handling
+### 🖥️ **Terminal System & Connectivity Enhancements**
+- **WebSocket Diagnostics**: Enhanced error codes and user-friendly reconnection messages
+- **Authentication Validation**: Proper session checks before terminal connection attempts
+- **Connection Resilience**: Improved reconnection logic with exponential backoff
+- **Mobile Support**: Better mobile keyboard handling and touch interface optimization
+- **Error Recovery**: Clear diagnostic messages when connections fail with troubleshooting guidance
+
+### 🎨 **User Interface & Experience Improvements**
+- **Config Tab Restoration**: Fixed empty config display with proper error handling and feedback
+- **Enhanced Loading States**: Better user feedback during data loading and error conditions
+- **Improved Memory Management**: Consolidated duplicate functions and improved sync across components
+- **Status Panel Reliability**: Better data population and error handling for status cards
+- **Alert Panel Functionality**: Improved alert display with proper categorization and filtering
+
+### 🔧 **Technical Improvements & Stability**
+- **File Locking**: Implemented fcntl locking for Jarvis memory operations preventing corruption
+- **Session Management**: Enhanced single-session-per-user enforcement with proper cleanup
+- **Keep-Alive System**: 5-minute ping intervals to prevent premature session expiration
+- **Error Recovery**: Comprehensive error handling throughout the system with user-friendly messages
+- **Configuration Management**: Editable config tab with save/reload/validate functionality
+- **User Management Panel**: Display of all usernames with active/inactive session indicators
+
+### 🚦 **System Monitoring & Alerts**
+- **Intelligent Alert Filtering**: Resource warnings (memory/CPU/disk) properly categorized as status-only
+- **Real-Time Monitoring**: Live status updates with verified metrics and alert population
+- **Enhanced Logging**: Comprehensive audit trail with proper IP logging and user agent tracking
+- **Security Event Tracking**: Detailed logging of authentication, CSRF failures, and security incidents
+- **Performance Optimization**: Efficient monitoring with minimal resource overhead
 
 ### 📱 **Enhanced Termux Integration**
 - **Comprehensive Auto-Setup**: Automatic installation of essential packages (htop, nano, vim, git, openssh, nmap, etc.)
@@ -324,7 +352,71 @@ The system automatically detects and prefers:
 - **Zero Breaking Changes**: Full backward compatibility maintained
 - **Safe Execution**: Command validation and timeout protection
 
-## 🛠️ Troubleshooting
+## 🛠️ Troubleshooting & Common Issues
+
+### Recently Fixed Issues (3.1.0 Update)
+
+**✅ Terminal Connection Problems**: Fixed WebSocket authentication and connection issues  
+**✅ Config Tab Empty**: Enhanced config loading with better error handling  
+**✅ Jarvis Memory Loss**: Implemented persistent per-user encrypted memory with auto-loading  
+**✅ Alert Panels Empty**: Fixed alert categorization and population issues  
+**✅ Multiple Sessions**: Enforced single session per user with proper cleanup  
+**✅ Wrong IP Logging**: Now captures real device IPs with proxy header support  
+
+### Common Issues & Solutions
+
+**Terminal Connection Issues:**
+```bash
+# Terminal shows "reconnecting" and fails:
+# 1. Check if you're logged in (session required for terminal)
+# 2. Verify WebSocket connection in browser developer tools  
+# 3. Try manual reconnect with the 🔄 button
+./novashield.sh --debug --start
+# Check logs: tail -f ~/.novashield/logs/security.log
+```
+
+**Config Tab Showing Nothing:**
+```bash
+# Config tab appears empty or shows errors:
+# 1. Ensure you're authenticated (login required)
+# 2. Check if config.yaml exists in ~/.novashield/
+# 3. Verify file permissions allow reading
+ls -la ~/.novashield/config.yaml
+# Recreate config: ./novashield.sh --reset-config
+```
+
+**Jarvis Memory Not Persisting:**
+```bash
+# Jarvis forgets conversations on reload:
+# 1. Memory now auto-loads on login and page refresh
+# 2. Check encrypted memory files exist:
+ls -la ~/.novashield/control/jarvis_memory.enc
+ls -la ~/.novashield/keys/aes.key
+```
+
+**Alerts Not Showing:**
+```bash
+# Alert panels appear empty:
+# 1. Check if monitoring is enabled (Status tab toggles)
+# 2. Memory/CPU warnings now appear in Status, not Security tab
+tail -f ~/.novashield/logs/alerts.log
+```
+
+**Session Issues (Multiple Sessions/Logouts):**
+```bash
+# Getting logged out frequently:
+# 1. Single session per user now enforced
+# 2. Keep-alive prevents premature timeouts
+# 3. Check session TTL in config.yaml
+```
+
+**Theme Not Loading Correctly:**
+```bash
+# 420 theme loading instead of default:
+# Theme preference is now saved per-user
+# Click 🌿 button to toggle between themes
+# Reset by clearing Jarvis memory and re-login
+```
 
 ### Common Issues
 
