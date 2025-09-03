@@ -4947,6 +4947,136 @@ class Handler(SimpleHTTPRequestHandler):
                 self.wfile.write(json.dumps({'error': str(e)}).encode('utf-8'))
                 return
 
+        if parsed.path == '/api/users':
+            if not require_auth(self): return
+            try:
+                db = users_db()
+                current_time = int(time.time())
+                users_list = []
+                
+                # Get all usernames from _userdb
+                userdb = db.get('_userdb', {})
+                active_sessions = {}
+                
+                # Count active sessions per user
+                for token, session_data in db.items():
+                    if token.startswith('_'):
+                        continue
+                    if isinstance(session_data, dict):
+                        user = session_data.get('user')
+                        expires = session_data.get('expires', 0)
+                        if user and expires > current_time:
+                            active_sessions[user] = active_sessions.get(user, 0) + 1
+                
+                # Build user list
+                for username in userdb.keys():
+                    active_count = active_sessions.get(username, 0)
+                    users_list.append({
+                        'username': username,
+                        'active': active_count > 0,
+                        'session_count': active_count
+                    })
+                
+                # Sort by username
+                users_list.sort(key=lambda x: x['username'])
+                
+                response = {
+                    'users': users_list,
+                    'total_users': len(users_list),
+                    'total_active_sessions': sum(active_sessions.values()),
+                    'timestamp': time.strftime('%Y-%m-%d %H:%M:%S')
+                }
+                
+                self._set_headers(200)
+                self.wfile.write(json.dumps(response).encode('utf-8'))
+                return
+                
+            except Exception as e:
+                security_log(f"USERS_API_ERROR error={str(e)}")
+                self._set_headers(500)
+                self.wfile.write(json.dumps({'error': str(e)}).encode('utf-8'))
+                return
+
+        if parsed.path == '/api/config/save':
+            if not require_auth(self): return
+            sess = get_session(self) or {}
+            
+            # Check CSRF if required
+            if csrf_required():
+                client_csrf = self.headers.get('X-CSRF','')
+                if client_csrf != sess.get('csrf',''):
+                    self._set_headers(403)
+                    self.wfile.write(json.dumps({'error': 'CSRF token mismatch'}).encode('utf-8'))
+                    return
+            
+            try:
+                # Read POST data
+                content_length = int(self.headers.get('Content-Length', 0))
+                if content_length == 0:
+                    self._set_headers(400)
+                    self.wfile.write(json.dumps({'error': 'No configuration data provided'}).encode('utf-8'))
+                    return
+                
+                post_data = self.rfile.read(content_length).decode('utf-8')
+                data = json.loads(post_data)
+                new_config = data.get('config', '')
+                
+                if not new_config.strip():
+                    self._set_headers(400)
+                    self.wfile.write(json.dumps({'error': 'Configuration cannot be empty'}).encode('utf-8'))
+                    return
+                
+                # Basic YAML validation (check for obvious syntax errors)
+                config_lines = new_config.split('\n')
+                for i, line in enumerate(config_lines, 1):
+                    stripped = line.strip()
+                    if stripped and not stripped.startswith('#'):
+                        # Basic checks for valid YAML structure
+                        if ':' not in stripped and not stripped.startswith('-'):
+                            if not stripped.replace(' ', '').replace('\t', ''):
+                                continue  # Skip empty lines
+                            self._set_headers(400)
+                            self.wfile.write(json.dumps({'error': f'Invalid YAML syntax on line {i}: missing colon'}).encode('utf-8'))
+                            return
+                
+                # Create backup of current config
+                if os.path.exists(CONFIG):
+                    backup_timestamp = time.strftime('%Y%m%d_%H%M%S')
+                    backup_path = f"{CONFIG}.bak.{backup_timestamp}"
+                    try:
+                        import shutil
+                        shutil.copy2(CONFIG, backup_path)
+                        security_log(f"CONFIG_BACKUP created={backup_path} user={sess.get('user', 'unknown')} ip={get_client_ip(self)}")
+                    except Exception as e:
+                        # Log but don't fail the save operation
+                        security_log(f"CONFIG_BACKUP_FAILED error={str(e)} user={sess.get('user', 'unknown')}")
+                
+                # Write new configuration
+                with open(CONFIG, 'w', encoding='utf-8') as f:
+                    f.write(new_config)
+                
+                # Log the configuration change
+                audit(f"CONFIG_SAVED user={sess.get('user', 'unknown')} ip={get_client_ip(self)} size={len(new_config)}")
+                security_log(f"CONFIG_MODIFIED user={sess.get('user', 'unknown')} ip={get_client_ip(self)}")
+                
+                self._set_headers(200)
+                self.wfile.write(json.dumps({
+                    'success': True, 
+                    'message': 'Configuration saved successfully',
+                    'backup_created': backup_path if 'backup_path' in locals() else None
+                }).encode('utf-8'))
+                return
+                
+            except json.JSONDecodeError:
+                self._set_headers(400)
+                self.wfile.write(json.dumps({'error': 'Invalid JSON in request'}).encode('utf-8'))
+                return
+            except Exception as e:
+                security_log(f"CONFIG_SAVE_ERROR user={sess.get('user', 'unknown')} ip={get_client_ip(self)} error={str(e)}")
+                self._set_headers(500)
+                self.wfile.write(json.dumps({'error': f'Failed to save configuration: {str(e)}'}).encode('utf-8'))
+                return
+
         self._set_headers(400); self.wfile.write(b'{"ok":false}')
 
 def pick_host_port():
@@ -5221,6 +5351,35 @@ write_dashboard(){
           <ul id="integrity-logs" class="log-list"></ul>
         </div>
       </div>
+      
+      <!-- Users & Sessions Panel -->
+      <div class="security-panel">
+        <h3>👥 Users & Sessions</h3>
+        <p class="panel-description">Active user accounts and session management. Monitor user login activity, session status, and account security.</p>
+        <div class="users-controls">
+          <button id="btn-refresh-users" type="button" title="Refresh user and session information">Refresh Users</button>
+        </div>
+        <div class="users-grid">
+          <div class="users-summary">
+            <div class="summary-item">
+              <span class="summary-label">Total Users:</span>
+              <span class="summary-value" id="total-users">0</span>
+            </div>
+            <div class="summary-item">
+              <span class="summary-label">Active Sessions:</span>
+              <span class="summary-value" id="active-sessions">0</span>
+            </div>
+            <div class="summary-item">
+              <span class="summary-label">Last Updated:</span>
+              <span class="summary-value" id="users-timestamp">Never</span>
+            </div>
+          </div>
+          <div class="users-list">
+            <h4>User Accounts</h4>
+            <ul id="users-list" class="user-list"></ul>
+          </div>
+        </div>
+      </div>
     </section>
 
     <section id="tab-tools" class="tab" aria-labelledby="Tools">
@@ -5491,9 +5650,22 @@ write_dashboard(){
 
     <section id="tab-config" class="tab" aria-labelledby="Config">
       <div class="panel">
-        <h3>Configuration Viewer</h3>
-        <p class="panel-description">View current NovaShield configuration settings including enabled features, monitoring thresholds, security options, and system paths. This is a read-only view - edit the configuration file directly to make changes.</p>
-        <pre id="config" style="white-space:pre-wrap;"></pre>
+        <h3>Configuration Editor</h3>
+        <p class="panel-description">Edit NovaShield configuration settings including enabled features, monitoring thresholds, security options, and system paths. Changes are saved to config.yaml with automatic backup.</p>
+        <div class="config-controls">
+          <button id="config-save" type="button" title="Save configuration changes to disk">💾 Save Configuration</button>
+          <button id="config-reload" type="button" title="Reload configuration from disk">🔄 Reload</button>
+          <button id="config-validate" type="button" title="Validate configuration syntax">✓ Validate</button>
+        </div>
+        <div class="config-editor">
+          <textarea id="config-text" placeholder="Loading configuration..." title="Edit YAML configuration - changes are saved with backup"></textarea>
+        </div>
+        <div id="config-status" class="config-status"></div>
+        <div class="config-readonly-fallback" style="display: none;">
+          <h4>Read-Only View</h4>
+          <p>Configuration editing requires authentication. Here's the current configuration:</p>
+          <pre id="config-readonly" style="white-space:pre-wrap;"></pre>
+        </div>
       </div>
     </section>
 
@@ -5657,6 +5829,42 @@ main{padding:16px}
 .filebar input{flex:1;padding:8px;border-radius:8px;border:1px solid #143055;background:#0b1830;color:#d7e3ff}
 #filelist{font-size:13px;white-space:pre-wrap;background:#081426;border:1px solid #143055;border-radius:8px;padding:8px}
 textarea#wcontent{width:100%;height:160px;background:#0b1830;color:#d7e3ff;border:1px solid #143055;border-radius:8px;padding:8px}
+
+/* Configuration Editor Styles */
+.config-controls{display:flex;gap:12px;margin-bottom:16px;flex-wrap:wrap}
+.config-controls button{padding:8px 16px;border-radius:8px;border:1px solid #143055;background:#0e1726;color:#d7e3ff;cursor:pointer;transition:all 0.3s ease}
+.config-controls button:hover{background:#173764;border-color:#1e5a96}
+.config-editor{margin-bottom:16px}
+#config-text{width:100%;height:400px;background:#0b1830;color:#d7e3ff;border:1px solid #143055;border-radius:8px;padding:12px;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;line-height:1.4;resize:vertical}
+.config-status{padding:8px 12px;border-radius:6px;margin-top:8px;font-size:13px;display:none}
+.config-status.success{background:#166534;border:1px solid #22c55e;color:#bbf7d0}
+.config-status.error{background:#7f1d1d;border:1px solid #ef4444;color:#fecaca}
+.config-status.warning{background:#92400e;border:1px solid #f59e0b;color:#fed7aa}
+.config-readonly-fallback pre{background:#081426;border:1px solid #143055;border-radius:8px;padding:12px;font-size:13px}
+
+/* Users & Sessions Panel Styles */
+.security-panel{background:var(--card);border:1px solid #143055;border-radius:12px;padding:16px;margin-top:20px}
+.security-panel h3{margin:0 0 12px 0;color:var(--accent);font-size:16px;font-weight:600}
+.users-controls{display:flex;gap:12px;margin-bottom:16px;flex-wrap:wrap}
+.users-controls button{padding:8px 16px;border-radius:8px;border:1px solid #143055;background:#0e1726;color:#d7e3ff;cursor:pointer;transition:all 0.3s ease}
+.users-controls button:hover{background:#173764;border-color:#1e5a96}
+.users-grid{display:grid;grid-template-columns:1fr 2fr;gap:20px}
+.users-summary{display:flex;flex-direction:column;gap:12px}
+.summary-item{display:flex;justify-content:space-between;padding:8px 12px;background:#0a1426;border-radius:6px;border:1px solid #143055}
+.summary-label{color:var(--muted);font-size:14px}
+.summary-value{color:var(--text);font-weight:600}
+.users-list h4{margin:0 0 12px 0;color:var(--accent);font-size:14px}
+.user-list{list-style:none;margin:0;padding:0;background:#0a1426;border-radius:8px;border:1px solid #143055;max-height:200px;overflow-y:auto}
+.user-list li{padding:8px 12px;border-bottom:1px solid #143055;display:flex;justify-content:space-between;align-items:center}
+.user-list li:last-child{border-bottom:none}
+.user-list li:hover{background:#0e1726}
+.user-name{color:var(--text);font-weight:500}
+.user-status{display:flex;align-items:center;gap:6px;font-size:12px}
+.status-indicator{width:8px;height:8px;border-radius:50%}
+.status-indicator.active{background:#10b981}
+.status-indicator.inactive{background:#6b7280}
+.session-count{color:var(--muted);font-size:11px}
+
 #term{background:#000;color:#9fe4b9;border:1px solid #173764;border-radius:10px;height:300px;overflow:auto;font-family:ui-monospace,Menlo,Consolas,monospace;padding:8px;white-space:pre-wrap;outline:none}
 .term-hint{color:#93a3c0;font-size:12px;margin-top:6px}
 
@@ -6981,13 +7189,203 @@ async function loadConfig() {
     const j = await r.json(); 
     CSRF = j.csrf || '';
     
-    // Update config display if elements exist
-    if (typeof updateConfigDisplay === 'function') {
-      updateConfigDisplay(j.config || {});
+    // Update editable config text area
+    const configTextEl = $('#config-text');
+    const configReadonlyEl = $('#config-readonly');
+    const editorEl = $('.config-editor');
+    const readonlyEl = $('.config-readonly-fallback');
+    
+    if (j.csrf && j.csrf !== 'public') {
+      // User is authenticated, show editable interface
+      if (configTextEl) {
+        configTextEl.value = j.config || '';
+        configTextEl.style.display = 'block';
+      }
+      if (editorEl) editorEl.style.display = 'block';
+      if (readonlyEl) readonlyEl.style.display = 'none';
+    } else {
+      // User not authenticated, show read-only interface
+      if (configReadonlyEl) {
+        configReadonlyEl.textContent = j.config || 'Configuration not available';
+      }
+      if (editorEl) editorEl.style.display = 'none';
+      if (readonlyEl) readonlyEl.style.display = 'block';
     }
+    
+    // Legacy config display (fallback)
+    const legacyConfigEl = $('#config');
+    if (legacyConfigEl) {
+      legacyConfigEl.textContent = j.config || 'Configuration not available';
+    }
+    
   } catch (e) {
     console.error('Failed to load config:', e);
     toast('Failed to load configuration', 'error');
+  }
+}
+
+// Save configuration changes
+async function saveConfig() {
+  const configTextEl = $('#config-text');
+  const statusEl = $('#config-status');
+  
+  if (!configTextEl) {
+    console.error('Config text element not found');
+    return;
+  }
+  
+  const newConfig = configTextEl.value;
+  
+  if (!newConfig.trim()) {
+    showConfigStatus('Configuration cannot be empty', 'error');
+    return;
+  }
+  
+  try {
+    showConfigStatus('Saving configuration...', 'warning');
+    
+    const response = await fetch('/api/config/save', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-CSRF': CSRF
+      },
+      body: JSON.stringify({ config: newConfig })
+    });
+    
+    const result = await response.json();
+    
+    if (response.ok && result.success) {
+      showConfigStatus(result.message + (result.backup_created ? ` (Backup: ${result.backup_created})` : ''), 'success');
+      toast('Configuration saved successfully', 'success');
+    } else {
+      showConfigStatus(result.error || 'Failed to save configuration', 'error');
+      toast(result.error || 'Failed to save configuration', 'error');
+    }
+  } catch (error) {
+    showConfigStatus(`Save failed: ${error.message}`, 'error');
+    toast(`Save failed: ${error.message}`, 'error');
+  }
+}
+
+// Validate configuration syntax
+function validateConfig() {
+  const configTextEl = $('#config-text');
+  const statusEl = $('#config-status');
+  
+  if (!configTextEl) {
+    return;
+  }
+  
+  const config = configTextEl.value;
+  const lines = config.split('\n');
+  const errors = [];
+  
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (line && !line.startsWith('#')) {
+      // Basic YAML syntax validation
+      if (!line.startsWith('-') && !line.includes(':') && line.replace(/\s/g, '') !== '') {
+        errors.push(`Line ${i + 1}: Missing colon in key-value pair`);
+      }
+    }
+  }
+  
+  if (errors.length > 0) {
+    showConfigStatus(`Validation errors: ${errors.join('; ')}`, 'error');
+  } else {
+    showConfigStatus('Configuration syntax appears valid', 'success');
+  }
+}
+
+// Show configuration status message
+function showConfigStatus(message, type) {
+  const statusEl = $('#config-status');
+  if (statusEl) {
+    statusEl.textContent = message;
+    statusEl.className = `config-status ${type}`;
+    statusEl.style.display = 'block';
+    
+    // Auto-hide success messages after 5 seconds
+    if (type === 'success') {
+      setTimeout(() => {
+        statusEl.style.display = 'none';
+      }, 5000);
+    }
+  }
+}
+
+// Load users and sessions data
+async function loadUsers() {
+  try {
+    const response = await api('/api/users');
+    const data = await response.json();
+    
+    // Update summary stats
+    const totalUsersEl = $('#total-users');
+    const activeSessionsEl = $('#active-sessions');
+    const timestampEl = $('#users-timestamp');
+    
+    if (totalUsersEl) totalUsersEl.textContent = data.total_users;
+    if (activeSessionsEl) activeSessionsEl.textContent = data.total_active_sessions;
+    if (timestampEl) timestampEl.textContent = data.timestamp;
+    
+    // Update users list
+    const usersListEl = $('#users-list');
+    if (usersListEl) {
+      usersListEl.innerHTML = '';
+      
+      if (data.users.length === 0) {
+        const li = document.createElement('li');
+        li.innerHTML = '<span class="user-name">No users found</span>';
+        li.style.fontStyle = 'italic';
+        li.style.color = '#93a3c0';
+        usersListEl.appendChild(li);
+      } else {
+        data.users.forEach(user => {
+          const li = document.createElement('li');
+          li.innerHTML = `
+            <span class="user-name">${user.username}</span>
+            <div class="user-status">
+              <div class="status-indicator ${user.active ? 'active' : 'inactive'}"></div>
+              <span>${user.active ? 'Active' : 'Inactive'}</span>
+              ${user.session_count > 0 ? `<span class="session-count">(${user.session_count} sessions)</span>` : ''}
+            </div>
+          `;
+          usersListEl.appendChild(li);
+        });
+      }
+    }
+  } catch (error) {
+    console.error('Failed to load users:', error);
+    toast('Failed to load users and sessions', 'error');
+  }
+}
+
+// Initialize config editor event handlers
+function initConfigEditor() {
+  const saveBtn = $('#config-save');
+  const reloadBtn = $('#config-reload');
+  const validateBtn = $('#config-validate');
+  const refreshUsersBtn = $('#btn-refresh-users');
+  
+  if (saveBtn) {
+    saveBtn.addEventListener('click', saveConfig);
+  }
+  
+  if (reloadBtn) {
+    reloadBtn.addEventListener('click', () => {
+      loadConfig();
+      toast('Configuration reloaded', 'info');
+    });
+  }
+  
+  if (validateBtn) {
+    validateBtn.addEventListener('click', validateConfig);
+  }
+  
+  if (refreshUsersBtn) {
+    refreshUsersBtn.addEventListener('click', loadUsers);
   }
 }
 
@@ -8609,8 +9007,16 @@ tabs.forEach(b => {
                     }
                 } else if (tab === 'config') {
                     loadConfig();
+                    if (!loadedTabs.has('config-editor')) {
+                        loadedTabs.add('config-editor');
+                        initConfigEditor();
+                    }
                 } else if (tab === 'security') {
                     loadSecurityLogs();
+                    if (!loadedTabs.has('users-panel')) {
+                        loadedTabs.add('users-panel');
+                        loadUsers();
+                    }
                 }
             }
         });
