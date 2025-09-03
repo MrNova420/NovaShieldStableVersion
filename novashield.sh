@@ -4417,20 +4417,14 @@ class Handler(SimpleHTTPRequestHandler):
             # Enhanced session handling with force_login_on_reload support
             force_login_on_reload = _coerce_bool(cfg_get('security.force_login_on_reload', False), False)
             
+            # Check if this is a fresh page load (not an AJAX request) by looking at headers
+            is_page_load = self.headers.get('Accept', '').startswith('text/html')
+            
             # If AUTH_STRICT is enabled and no valid session, clear session cookie
             if AUTH_STRICT and not sess:
                 self._set_headers(200, 'text/html; charset=utf-8', {'Set-Cookie': 'NSSESS=deleted; Path=/; HttpOnly; Max-Age=0; SameSite=Strict'})
-            # If force_login_on_reload is enabled, clear session cookie and invalidate database session (even if session is valid)
-            elif force_login_on_reload and sess:
-                # Clear the session from database too to prevent API auth issues
-                db = users_db()
-                # Find and remove the session token
-                for token, session_data in list(db.items()):
-                    if session_data.get('user') == sess.get('user'):
-                        del db[token]
-                set_users_db(db)
-                self._set_headers(200, 'text/html; charset=utf-8', {'Set-Cookie': 'NSSESS=deleted; Path=/; HttpOnly; Max-Age=0; SameSite=Strict'})
-            elif force_login_on_reload:
+            # If force_login_on_reload is enabled, only clear sessions on fresh page loads (not after login redirect)
+            elif force_login_on_reload and not sess and is_page_load:
                 self._set_headers(200, 'text/html; charset=utf-8', {'Set-Cookie': 'NSSESS=deleted; Path=/; HttpOnly; Max-Age=0; SameSite=Strict'})
             else:
                 self._set_headers(200, 'text/html; charset=utf-8')
@@ -7569,12 +7563,12 @@ async function refresh(){
     // Update session and user info displays
     updateSessionInfo(j);
     
-    // Auto-refresh memory and learning patterns every few refreshes
+    // Auto-refresh memory and learning patterns every 20 refreshes (every ~2 minutes)
     if (typeof refreshCounter === 'undefined') window.refreshCounter = 0;
     window.refreshCounter++;
     
-    if (window.refreshCounter % 5 === 0) {
-      // Every 5th refresh, ensure memory persistence
+    if (window.refreshCounter % 20 === 0) {
+      // Every 20th refresh, ensure memory persistence
       try {
         if (jarvisMemory) {
           jarvisMemory.last_seen = new Date().toISOString();
