@@ -382,6 +382,7 @@ security:
   session_ttl_min: 720      # Alternate naming for session TTL 
   strict_reload: false      # Force login on every page reload
   force_login_on_reload: false  # Force login on every page reload
+  trust_proxy: false       # Trust X-Forwarded-For headers from reverse proxies
 
 terminal:
   enabled: true
@@ -1430,6 +1431,34 @@ GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11'  # WebSocket
 # Environment variable checks
 AUTH_STRICT = os.environ.get('NOVASHIELD_AUTH_STRICT', '0') == '1'
 
+def get_client_ip(handler):
+    """Get the real client IP address, supporting X-Forwarded-For when trust_proxy is enabled"""
+    # Check if we should trust proxy headers
+    trust_proxy = _coerce_bool(cfg_get('security.trust_proxy', False), False)
+    
+    if trust_proxy:
+        # Check for X-Forwarded-For header (most common proxy header)
+        forwarded_for = handler.headers.get('X-Forwarded-For', '').strip()
+        if forwarded_for:
+            # X-Forwarded-For can contain multiple IPs: "client, proxy1, proxy2"
+            # We want the first (leftmost) IP which should be the original client
+            client_ip = forwarded_for.split(',')[0].strip()
+            if client_ip and client_ip != '':
+                return client_ip
+        
+        # Check for X-Real-IP header (nginx style)
+        real_ip = handler.headers.get('X-Real-IP', '').strip()
+        if real_ip:
+            return real_ip
+            
+        # Check for CF-Connecting-IP (Cloudflare)
+        cf_ip = handler.headers.get('CF-Connecting-IP', '').strip()
+        if cf_ip:
+            return cf_ip
+    
+    # Fallback to direct connection IP
+    return get_client_ip(handler)  # This was originally handler.client_address[0] but now uses the new function
+
 def py_alert(level, msg):
     """Helper to log security alerts to alerts.log in the same format as bash alert()"""
     try:
@@ -1862,14 +1891,38 @@ def totp_now(secret_b32, t=None):
     return f'{code:06d}'
 
 def new_session(username):
+    db = users_db()
+    
+    # SINGLE SESSION PER USER: Remove any existing sessions for this username
+    tokens_to_remove = []
+    for token, session_data in db.items():
+        # Skip non-session entries (like _userdb, _2fa)
+        if token.startswith('_'):
+            continue
+        
+        if isinstance(session_data, dict) and session_data.get('user') == username:
+            tokens_to_remove.append(token)
+    
+    # Remove existing sessions for this user
+    for token in tokens_to_remove:
+        del db[token]
+    
+    # Create new session
     token = hashlib.sha256(f'{username}:{time.time()}:{os.urandom(8)}'.encode()).hexdigest()
     csrf  = hashlib.sha256(f'csrf:{token}:{os.urandom(8)}'.encode()).hexdigest()
-    db = users_db()
+    
     # Add session TTL support
     session_ttl_minutes = _coerce_int(cfg_get('security.session_ttl_minutes', 120), 120)
     expires = int(time.time()) + (session_ttl_minutes * 60)
     db[token]={'user':username,'ts':int(time.time()),'csrf':csrf,'expires':expires}
     set_users_db(db)
+    
+    # Log the session creation with count of removed sessions
+    if tokens_to_remove:
+        security_log(f"NEW_SESSION user={username} removed_existing_sessions={len(tokens_to_remove)} ttl_minutes={session_ttl_minutes}")
+    else:
+        security_log(f"NEW_SESSION user={username} ttl_minutes={session_ttl_minutes}")
+    
     return token, csrf
 
 def get_session(handler):
@@ -1925,7 +1978,7 @@ def cleanup_expired_sessions():
         py_alert('WARN', f'Failed to cleanup expired sessions: {str(e)}')
 
 def require_auth(handler):
-    client_ip = handler.client_address[0]
+    client_ip = get_client_ip(handler)
     user_agent = handler.headers.get('User-Agent', 'Unknown')
     path = getattr(handler, 'path', 'unknown')
     
@@ -1980,7 +2033,7 @@ def require_auth(handler):
     return True
 
 def rate_limit_ok(handler, key='default'):
-    ip = handler.client_address[0]
+    ip = get_client_ip(handler)
     now = int(time.time())
     rl = read_json(RL_DB,{}) or {}
     per = rate_limit_per_min()
@@ -1998,7 +2051,7 @@ def rate_limit_ok(handler, key='default'):
     return ent['cnt']<=per
 
 def login_fail(handler):
-    ip=handler.client_address[0]
+    ip=get_client_ip(handler)
     user_agent = handler.headers.get('User-Agent', 'Unknown')
     rl = read_json(BANS_DB,{}) or {}
     now=int(time.time())
@@ -2026,7 +2079,7 @@ def login_fail(handler):
     except Exception: pass
 
 def login_ok(handler):
-    ip=handler.client_address[0]
+    ip=get_client_ip(handler)
     user_agent = handler.headers.get('User-Agent', 'Unknown')
     rl = read_json(BANS_DB,{}) or {}
     if ip in rl: rl.pop(ip,None); write_json(BANS_DB, rl)
@@ -2048,7 +2101,7 @@ def login_ok(handler):
     except Exception: pass
 
 def banned(handler):
-    ip=handler.client_address[0]
+    ip=get_client_ip(handler)
     rl = read_json(BANS_DB,{}) or {}
     now=int(time.time())
     ent=rl.get(ip)
@@ -2189,7 +2242,7 @@ def mirror_terminal(handler):
     allow_write = _coerce_bool(cfg_get('terminal.allow_write', 'true'), True)
     
     # Enhanced terminal security logging
-    security_log(f"TERMINAL_ACCESS user={user} ip={handler.client_address[0]} cols={cols} rows={rows}")
+    security_log(f"TERMINAL_ACCESS user={user} ip={get_client_ip(handler)} cols={cols} rows={rows}")
     
     # Check if terminal access should be restricted for dangerous operations
     terminal_security_level = cfg_get('security.terminal_verification', 'standard')
@@ -2207,7 +2260,7 @@ def mirror_terminal(handler):
     # Create a real PTY with enhanced error handling and cross-platform support
     try:
         pid, fd = spawn_pty(shell, cols, rows)
-        audit(f'TERM START user={user} pid={pid} ip={handler.client_address[0]}')
+        audit(f'TERM START user={user} pid={pid} ip={get_client_ip(handler)}')
         security_log(f"PTY_SPAWNED user={user} pid={pid} shell={shell}")
         
         # Send success notification
@@ -2377,7 +2430,7 @@ def mirror_terminal(handler):
         try: os.kill(pid, signal.SIGTERM)
         except: pass
         
-        audit(f'TERM END user={user} pid={pid} ip={handler.client_address[0]}')
+        audit(f'TERM END user={user} pid={pid} ip={get_client_ip(handler)}')
         security_log(f"TERMINAL_SESSION_END user={user} pid={pid}")
 
 # Add these functions before the Handler class:
@@ -6731,10 +6784,11 @@ async function refresh(){
       if(!el) return; el.classList.remove('ok','warn','crit'); if(map[v]) el.classList.add(map[v]);
     });
     
-    // Configuration display
-    const conf = await (await api('/api/config')).text(); 
+    // Configuration display - Fix: parse JSON correctly since server returns JSON
+    const configResponse = await api('/api/config');
+    const configData = await configResponse.json(); 
     const cfgEl = $('#config'); 
-    if(cfgEl) cfgEl.textContent = conf;
+    if(cfgEl) cfgEl.textContent = configData.config || 'No configuration available';
     
   }catch(e){ 
     console.error(e);
