@@ -76,20 +76,28 @@ alert(){
   echo "$line" | tee -a "$NS_ALERTS" >&2
   
   # Enhanced alert categorization - only log true security events to security.log
-  # Skip system resource warnings (memory, disk, CPU) from being security events
+  # Skip system resource warnings (memory, disk, CPU, network loss) from being security events
   case "$msg" in
-    *"Memory "*|*"Disk "*|*"CPU "*|*"load "*|*"storage "*|*"elevated"*|*"high: "*%)
+    *"Memory "*|*"Disk "*|*"CPU "*|*"load "*|*"storage "*|*"elevated"*|*"high: "*%|*"Network loss"*)
       # These are system resource warnings, not security threats - only log to alerts.log
       ;;
     *)
-      # Log actual security events to security.log
-      case "$level" in
-        CRIT|ERROR)
-          echo "$(ns_now) [THREAT] $level: $msg" | tee -a "$NS_LOGS/security.log" >/dev/null 2>&1
+      # Only log security-relevant events to security.log based on keywords
+      local msg_lower="$(echo "$msg" | tr '[:upper:]' '[:lower:]')"
+      case "$msg_lower" in
+        *intrusion*|*auth*|*unauthorized*|*csrf*|*brute*|*attack*|*forbidden*|*blocked*|*command*|*traversal*|*ban*|*"rate limit"*|*login*|*breach*|*suspicious*)
+          # This is a real security event
+          case "$level" in
+            CRIT|ERROR)
+              echo "$(ns_now) [SECURITY] $level: $msg" | tee -a "$NS_LOGS/security.log" >/dev/null 2>&1
+              ;;
+            WARN)
+              echo "$(ns_now) [SECURITY] $level: $msg" | tee -a "$NS_LOGS/security.log" >/dev/null 2>&1
+              ;;
+          esac
           ;;
-        WARN)
-          # Only log non-resource warnings as security events
-          echo "$(ns_now) [SECURITY] $level: $msg" | tee -a "$NS_LOGS/security.log" >/dev/null 2>&1
+        *)
+          # Non-security system alert - only goes to alerts.log (already logged above)
           ;;
       esac
       ;;
@@ -391,6 +399,7 @@ security:
   strict_reload: false      # Force login on every page reload
   force_login_on_reload: false  # Force login on every page reload
   trust_proxy: false       # Trust X-Forwarded-For headers from reverse proxies
+  single_session: true     # Enforce single active session per user
 
 terminal:
   enabled: true
@@ -467,13 +476,13 @@ scheduler:
 webgen:
   enabled: true
   site_name: "NovaShield Site"
-  theme: "jarvis-dark"
+  theme: "jarvis-blue"
 
 
 jarvis:
   personality: "helpful"  # helpful, snarky, professional
   memory_size: 50         # remember last N conversations (increased from 10)
-  voice_enabled: false    # future text-to-speech capability
+  voice_enabled: true     # Voice talk-back enabled by default
 YAML
 }
 
@@ -1929,19 +1938,23 @@ def totp_now(secret_b32, t=None):
 def new_session(username):
     db = users_db()
     
-    # SINGLE SESSION PER USER: Remove any existing sessions for this username
-    tokens_to_remove = []
-    for token, session_data in db.items():
-        # Skip non-session entries (like _userdb, _2fa)
-        if token.startswith('_'):
-            continue
-        
-        if isinstance(session_data, dict) and session_data.get('user') == username:
-            tokens_to_remove.append(token)
+    # Check if single session enforcement is enabled (default: true)
+    single_session_enabled = cfg_get('security.single_session', 'true').lower() in ('true', '1', 'yes')
     
-    # Remove existing sessions for this user
-    for token in tokens_to_remove:
-        del db[token]
+    if single_session_enabled:
+        # SINGLE SESSION PER USER: Remove any existing sessions for this username
+        tokens_to_remove = []
+        for token, session_data in db.items():
+            # Skip non-session entries (like _userdb, _2fa)
+            if token.startswith('_'):
+                continue
+            
+            if isinstance(session_data, dict) and session_data.get('user') == username:
+                tokens_to_remove.append(token)
+        
+        # Remove existing sessions for this user
+        for token in tokens_to_remove:
+            del db[token]
     
     # Create new session
     token = hashlib.sha256(f'{username}:{time.time()}:{os.urandom(8)}'.encode()).hexdigest()
@@ -2328,6 +2341,8 @@ def mirror_terminal(handler):
             return
         
     last_activity = time.time()
+    last_ping = time.time()
+    ping_interval = 30  # Send ping every 30 seconds
     connection_stable = True
     
     # Set terminal to raw mode with enhanced error handling
@@ -2387,6 +2402,18 @@ def mirror_terminal(handler):
     try:
         while connection_stable and reader_thread.is_alive():
             try:
+                # Check if we need to send a ping for keepalive
+                current_time = time.time()
+                if current_time - last_ping > ping_interval:
+                    try:
+                        # Send ping frame to keep connection alive
+                        ws_send(client, b'ping', opcode=9)
+                        last_ping = current_time
+                        security_log(f"TERMINAL_PING_SENT user={user} pid={pid}")
+                    except Exception as e:
+                        security_log(f"TERMINAL_PING_SEND_ERROR user={user} pid={pid} error={str(e)}")
+                        break
+                
                 if time.time() - last_activity > idle_timeout:
                     try:
                         ws_send(client, '\r\n[Session idle timeout - disconnecting]\r\n')
@@ -2625,8 +2652,7 @@ def load_user_memory(username):
                     if "user_profile" in user_memory:
                         user_memory["user_profile"]["total_sessions"] = user_memory["user_profile"].get("total_sessions", 0) + 1
                     
-                    # Auto-save the updated memory immediately
-                    auto_save_user_memory(username, user_memory)
+                    # Note: Auto-save removed to prevent recursion - memory will be saved when modified
                     return user_memory
         
         # Create new user with defaults and save immediately
@@ -2817,7 +2843,7 @@ def ai_reply(prompt, username, user_ip):
     personality = get_jarvis_personality()
     
     # Enhanced conversation memory size based on user preferences
-    memory_size = user_memory.get("preferences", {}).get("conversation_memory_size", 50)
+    memory_size = int(user_memory.get("preferences", {}).get("conversation_memory_size", 50))
     
     # Add this conversation to user memory history with enhanced context
     user_memory["history"].append({
@@ -3175,53 +3201,7 @@ def save_ai_response(username, reply, user_memory, memory_size):
     except Exception as e:
         py_alert('WARN', f'Failed to save AI response for {username}: {str(e)}')
 
-def get_personalized_jarvis_response(username, base_reply):
-        if len(reply) > 200:
-            patterns["prefers_detailed"] = patterns.get("prefers_detailed", 0) + 1
-        else:
-            patterns["prefers_concise"] = patterns.get("prefers_concise", 0) + 1
-        
-        # Determine interaction style preference
-        detailed = patterns.get("prefers_detailed", 0)
-        concise = patterns.get("prefers_concise", 0)
-        if detailed > concise * 1.5:
-            patterns["interaction_style"] = "detailed"
-        elif concise > detailed * 1.5:
-            patterns["interaction_style"] = "concise"
-        else:
-            patterns["interaction_style"] = "balanced"
-        
-        # Track time patterns for personalization
-        current_hour = int(time.strftime('%H'))
-        if "active_hours" not in patterns:
-            patterns["active_hours"] = {}
-        patterns["active_hours"][str(current_hour)] = patterns["active_hours"].get(str(current_hour), 0) + 1
-        
-        # Keep memory at configured size
-        # Trim memory to keep only recent history
-        if len(user_memory["history"]) > memory_size * 2:  # *2 for user+AI pairs
-            user_memory["history"] = user_memory["history"][-memory_size * 2:]
-        
-        # Save updated memory with enhanced data
-        save_user_memory(username, user_memory)
-        
-        # Enhanced learning - analyze patterns for future responses
-        enhanced_jarvis_learning(username, "", {"reply": reply})
-        
-        # Global conversation logging for cross-user learning (encrypted)
-        try:
-            global_log_path = os.path.join(NS_CTRL, 'global_conversations.enc')
-            metadata = {
-                "timestamp": now,
-                "username": username,
-                "prompt_length": len(reply.split()),
-                "response_type": "ai_reply",
-                "topics": list(patterns.get("topics", {}).keys()),
-                "interaction_style": patterns.get("interaction_style", "balanced")
-            }
-            # In a full implementation, this would be encrypted
-        except Exception:
-            pass  # Fail silently for global logging
+
 
 def get_personalized_jarvis_response(username, base_response):
     """Enhance response with personalization based on user learning patterns"""
@@ -3817,27 +3797,7 @@ def save_command_result(tool_name, command, output, username):
     except Exception as e:
         security_log(f"RESULT_SAVE_ERROR user={username} tool={tool_name} error={str(e)}")
 
-def get_personalized_jarvis_response(username, base_response):
-    """Generate personalized responses based on user learning patterns"""
-    try:
-        user_memory = load_user_memory(username)
-        patterns = user_memory.get('learning_patterns', {})
-        style = patterns.get('interaction_style', 'formal')
-        
-        # Adapt response style
-        if style == 'casual':
-            base_response = base_response.replace('I recommend', "I'd suggest")
-            base_response = base_response.replace('You may', "You might wanna")
-            base_response = base_response.replace('Please', "")
-        elif style == 'technical':
-            base_response = base_response.replace('check', 'analyze')
-            base_response = base_response.replace('look at', 'examine')
-            base_response = base_response.replace('run', 'execute')
-        
-        return base_response
-        
-    except Exception:
-        return base_response
+
 
 # Old ai_reply function removed - using enhanced version above
 
@@ -4539,6 +4499,7 @@ class Handler(SimpleHTTPRequestHandler):
                 'version': read_text(os.path.join(NS_HOME,'version.txt'),'unknown'),
                 'csrf': sess.get('csrf','') if auth_enabled() else 'public',
                 'voice_enabled': cfg_get('jarvis.voice_enabled', False),
+                'ui_theme': cfg_get('webgen.theme', 'jarvis-dark'),
                 # Add monitor enabled state flags for dashboard UI
                 'integrity_enabled': monitor_enabled('integrity'),
                 'process_enabled': monitor_enabled('process'),
@@ -4806,7 +4767,7 @@ class Handler(SimpleHTTPRequestHandler):
                 })
                 
                 # Keep conversation history manageable
-                memory_size = cfg_get('jarvis.memory_size', 50)
+                memory_size = int(cfg_get('jarvis.memory_size', 50))
                 if len(user_memory["history"]) > memory_size * 2:  # *2 for user+AI pairs
                     user_memory["history"] = user_memory["history"][-memory_size * 2:]
                 
@@ -5511,6 +5472,120 @@ class Handler(SimpleHTTPRequestHandler):
                 security_log(f"CONFIG_SAVE_ERROR user={sess.get('user', 'unknown')} ip={get_client_ip(self)} error={str(e)}")
                 self._set_headers(500)
                 self.wfile.write(json.dumps({'error': f'Failed to save configuration: {str(e)}'}).encode('utf-8'))
+                return
+
+        if parsed.path == '/api/security/action':
+            if not require_auth(self): return
+            sess = get_session(self) or {}
+            
+            # Check CSRF if required
+            if csrf_required():
+                client_csrf = self.headers.get('X-CSRF','')
+                if client_csrf != sess.get('csrf',''):
+                    self._set_headers(403)
+                    self.wfile.write(json.dumps({'error': 'CSRF token mismatch'}).encode('utf-8'))
+                    return
+            
+            try:
+                # Read POST data
+                content_length = int(self.headers.get('Content-Length', 0))
+                if content_length == 0:
+                    self._set_headers(400)
+                    self.wfile.write(json.dumps({'error': 'No action data provided'}).encode('utf-8'))
+                    return
+                
+                post_data = self.rfile.read(content_length).decode('utf-8')
+                data = json.loads(post_data)
+                action = data.get('action', '')
+                ip_address = data.get('ip', '')
+                
+                if not action:
+                    self._set_headers(400)
+                    self.wfile.write(json.dumps({'error': 'No action specified'}).encode('utf-8'))
+                    return
+                
+                # Load bans database
+                bans = read_json(BANS_DB, {})
+                
+                # Perform the requested action
+                result = {}
+                if action == 'ban_ip':
+                    if not ip_address:
+                        self._set_headers(400)
+                        self.wfile.write(json.dumps({'error': 'IP address required for ban action'}).encode('utf-8'))
+                        return
+                    
+                    # Add IP to bans
+                    bans[ip_address] = {
+                        'banned_at': time.strftime('%Y-%m-%d %H:%M:%S'),
+                        'banned_by': sess.get('user', 'unknown'),
+                        'reason': data.get('reason', 'Manual ban via security actions')
+                    }
+                    write_json(BANS_DB, bans)
+                    
+                    audit(f"SECURITY_ACTION action=ban_ip ip={ip_address} user={sess.get('user', 'unknown')}")
+                    security_log(f"IP_BANNED ip={ip_address} user={sess.get('user', 'unknown')} reason={data.get('reason', 'Manual')}")
+                    
+                    result = {'success': True, 'message': f'IP {ip_address} banned successfully'}
+                    
+                elif action == 'unban_ip':
+                    if not ip_address:
+                        self._set_headers(400)
+                        self.wfile.write(json.dumps({'error': 'IP address required for unban action'}).encode('utf-8'))
+                        return
+                    
+                    # Remove IP from bans
+                    if ip_address in bans:
+                        del bans[ip_address]
+                        write_json(BANS_DB, bans)
+                        
+                        audit(f"SECURITY_ACTION action=unban_ip ip={ip_address} user={sess.get('user', 'unknown')}")
+                        security_log(f"IP_UNBANNED ip={ip_address} user={sess.get('user', 'unknown')}")
+                        
+                        result = {'success': True, 'message': f'IP {ip_address} unbanned successfully'}
+                    else:
+                        result = {'success': False, 'message': f'IP {ip_address} was not banned'}
+                        
+                elif action == 'list_banned_ips':
+                    # Return list of banned IPs
+                    banned_list = []
+                    for ip, info in bans.items():
+                        banned_list.append({
+                            'ip': ip,
+                            'banned_at': info.get('banned_at', 'Unknown'),
+                            'banned_by': info.get('banned_by', 'Unknown'),
+                            'reason': info.get('reason', 'No reason provided')
+                        })
+                    
+                    result = {
+                        'success': True,
+                        'banned_ips': banned_list,
+                        'total_banned': len(banned_list)
+                    }
+                    
+                else:
+                    self._set_headers(400)
+                    self.wfile.write(json.dumps({'error': f'Unknown action: {action}'}).encode('utf-8'))
+                    return
+                
+                # Add updated stats
+                result['stats'] = {
+                    'total_banned_ips': len(bans),
+                    'timestamp': time.strftime('%Y-%m-%d %H:%M:%S')
+                }
+                
+                self._set_headers(200)
+                self.wfile.write(json.dumps(result).encode('utf-8'))
+                return
+                
+            except json.JSONDecodeError:
+                self._set_headers(400)
+                self.wfile.write(json.dumps({'error': 'Invalid JSON in request'}).encode('utf-8'))
+                return
+            except Exception as e:
+                security_log(f"SECURITY_ACTION_ERROR action={action} user={sess.get('user', 'unknown')} ip={get_client_ip(self)} error={str(e)}")
+                self._set_headers(500)
+                self.wfile.write(json.dumps({'error': f'Security action failed: {str(e)}'}).encode('utf-8'))
                 return
 
         self._set_headers(400); self.wfile.write(b'{"ok":false}')
@@ -7365,6 +7440,26 @@ async function refresh(){
     // If we got here successfully, ensure login overlay is off
     hideLogin();
     
+    // Apply theme from config unless user has set a preference in Jarvis memory
+    if (j.ui_theme && !jarvisMemory?.preferences?.theme) {
+      const root = document.documentElement;
+      const btn = $('#btn-420-theme');
+      
+      if (j.ui_theme === 'theme-420' || j.ui_theme === '420') {
+        root.classList.add('theme-420');
+        if (btn) {
+          btn.textContent = '🌿 Classic Mode';
+          btn.classList.add('active');
+        }
+      } else {
+        root.classList.remove('theme-420');
+        if (btn) {
+          btn.textContent = '🌿 420 Mode';
+          btn.classList.remove('active');
+        }
+      }
+    }
+    
     // Enhanced Jarvis memory loading and auto-sync on every refresh
     try {
       console.log('🔄 Loading Jarvis memory during refresh...');
@@ -7481,12 +7576,7 @@ async function refresh(){
       }
     }
     
-  } catch(e) {
-    console.error('Refresh error:', e);
-    // If we can't reach the API, show login 
-    showLogin();
-  }
-}
+    // Status updates
     setCard('user', `User sessions: ${j.active_sessions || '?'} | Login monitoring: ${j.userlogins_enabled ? 'Active' : 'Inactive'}`);
     setCard('svc', `Service monitoring: ${j.services_enabled ? 'Active' : 'Inactive'} | Services watched: ${j.services_count || '?'}`);
     
@@ -7498,16 +7588,9 @@ async function refresh(){
     // Alerts with better formatting
     const ul = $('#alerts'); if(ul){ 
         ul.innerHTML=''; 
-        const alerts = (j.alerts||[]).slice(-50).reverse(); // Show last 50 alerts
-        if (alerts.length === 0) {
-            const li = document.createElement('li');
-            li.textContent = 'No recent alerts';
-            li.style.fontStyle = 'italic';
-            li.style.color = '#93a3c0';
-            ul.appendChild(li);
-        } else {
-            alerts.forEach(line => { 
-                const li = document.createElement('li'); 
+        if(j.alerts && j.alerts.length){
+            j.alerts.forEach(line => {
+                const li = document.createElement('li');
                 li.textContent = line;
                 // Color code alerts by level
                 if (line.includes('[CRIT]')) li.style.color = '#ef4444';
@@ -7529,16 +7612,21 @@ async function refresh(){
     });
     
     // Configuration display - Fix: parse JSON correctly since server returns JSON
-    const configResponse = await api('/api/config');
-    const configData = await configResponse.json(); 
-    const cfgEl = $('#config'); 
-    if(cfgEl) cfgEl.textContent = configData.config || 'No configuration available';
-    
-  }catch(e){ 
-    console.error(e);
-    if (e.message === 'unauthorized') {
-        showLogin();
+    try {
+      const configResponse = await api('/api/config');
+      const configData = await configResponse.json(); 
+      const cfgEl = $('#config'); 
+      if(cfgEl) cfgEl.textContent = configData.config || 'No configuration available';
+    } catch (configError) {
+      console.warn('Failed to load config:', configError);
+      const cfgEl = $('#config'); 
+      if(cfgEl) cfgEl.textContent = 'Configuration unavailable';
     }
+    
+  } catch(e) {
+    console.error('Refresh error:', e);
+    // If we can't reach the API, show login 
+    showLogin();
   }
 }
 
@@ -9298,7 +9386,6 @@ async function executeManualCommand() {
 // ========== ENHANCED JARVIS AI FUNCTIONALITY ==========
 let conversationHistory = [];
 let userPreferences = {};
-let jarvisMemory = {};
 
 // Enhanced chat functionality
 function initEnhancedAI() {
