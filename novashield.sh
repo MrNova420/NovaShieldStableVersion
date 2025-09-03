@@ -4573,6 +4573,57 @@ class Handler(SimpleHTTPRequestHandler):
                 }).encode('utf-8'))
             return
 
+        # Users and sessions management - GET handler
+        if parsed.path == '/api/users':
+            if not require_auth(self): return
+            try:
+                db = users_db()
+                current_time = int(time.time())
+                users_list = []
+                
+                # Get all usernames from _userdb
+                userdb = db.get('_userdb', {})
+                active_sessions = {}
+                
+                # Count active sessions per user
+                for token, session_data in db.items():
+                    if token.startswith('_'):
+                        continue
+                    if isinstance(session_data, dict):
+                        user = session_data.get('user')
+                        expires = session_data.get('expires', 0)
+                        if user and expires > current_time:
+                            active_sessions[user] = active_sessions.get(user, 0) + 1
+                
+                # Build user list
+                for username in userdb.keys():
+                    active_count = active_sessions.get(username, 0)
+                    users_list.append({
+                        'username': username,
+                        'active': active_count > 0,
+                        'session_count': active_count
+                    })
+                
+                # Sort by username
+                users_list.sort(key=lambda x: x['username'])
+                
+                response = {
+                    'users': users_list,
+                    'total_users': len(users_list),
+                    'total_active_sessions': sum(active_sessions.values()),
+                    'timestamp': time.strftime('%Y-%m-%d %H:%M:%S')
+                }
+                
+                self._set_headers(200)
+                self.wfile.write(json.dumps(response).encode('utf-8'))
+                return
+                
+            except Exception as e:
+                security_log(f"USERS_API_ERROR error={str(e)}")
+                self._set_headers(500)
+                self.wfile.write(json.dumps({'error': str(e)}).encode('utf-8'))
+                return
+
         if parsed.path == '/api/logs':
             if not require_auth(self): return
             q = parse_qs(parsed.query); name = (q.get('name', ['launcher.log'])[0]).replace('..','')
@@ -5283,56 +5334,6 @@ class Handler(SimpleHTTPRequestHandler):
             except Exception as e:
                 print(f"Security API error: {e}")
                 self._set_headers(500); 
-                self.wfile.write(json.dumps({'error': str(e)}).encode('utf-8'))
-                return
-
-        if parsed.path == '/api/users':
-            if not require_auth(self): return
-            try:
-                db = users_db()
-                current_time = int(time.time())
-                users_list = []
-                
-                # Get all usernames from _userdb
-                userdb = db.get('_userdb', {})
-                active_sessions = {}
-                
-                # Count active sessions per user
-                for token, session_data in db.items():
-                    if token.startswith('_'):
-                        continue
-                    if isinstance(session_data, dict):
-                        user = session_data.get('user')
-                        expires = session_data.get('expires', 0)
-                        if user and expires > current_time:
-                            active_sessions[user] = active_sessions.get(user, 0) + 1
-                
-                # Build user list
-                for username in userdb.keys():
-                    active_count = active_sessions.get(username, 0)
-                    users_list.append({
-                        'username': username,
-                        'active': active_count > 0,
-                        'session_count': active_count
-                    })
-                
-                # Sort by username
-                users_list.sort(key=lambda x: x['username'])
-                
-                response = {
-                    'users': users_list,
-                    'total_users': len(users_list),
-                    'total_active_sessions': sum(active_sessions.values()),
-                    'timestamp': time.strftime('%Y-%m-%d %H:%M:%S')
-                }
-                
-                self._set_headers(200)
-                self.wfile.write(json.dumps(response).encode('utf-8'))
-                return
-                
-            except Exception as e:
-                security_log(f"USERS_API_ERROR error={str(e)}")
-                self._set_headers(500)
                 self.wfile.write(json.dumps({'error': str(e)}).encode('utf-8'))
                 return
 
