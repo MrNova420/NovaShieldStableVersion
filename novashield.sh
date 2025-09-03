@@ -2373,6 +2373,20 @@ def mirror_terminal(handler):
                 if opcode == 8:  # Close frame
                     security_log(f"TERMINAL_CLOSE_FRAME user={user} pid={pid}")
                     break
+                
+                if opcode == 9:  # Ping frame
+                    try:
+                        # Respond with pong frame
+                        ws_send(client, data, opcode=10)
+                        security_log(f"TERMINAL_PING_PONG user={user} pid={pid}")
+                    except Exception as e:
+                        security_log(f"TERMINAL_PONG_ERROR user={user} pid={pid} error={str(e)}")
+                    continue
+                
+                if opcode == 10:  # Pong frame
+                    # Client responded to our ping - connection is alive
+                    security_log(f"TERMINAL_PONG_RECEIVED user={user} pid={pid}")
+                    continue
                     
                 if opcode in (1, 2) and allow_write:  # Text/binary frame
                     try:
@@ -4023,9 +4037,14 @@ def ws_handshake(handler):
     headers = {
         'Upgrade': 'websocket',
         'Connection': 'Upgrade',
-        'Sec-WebSocket-Accept': accept,
-        'Sec-WebSocket-Protocol': 'chat'
+        'Sec-WebSocket-Accept': accept
     }
+    
+    # Only send Sec-WebSocket-Protocol if the client requested specific protocols
+    client_protocols = handler.headers.get('Sec-WebSocket-Protocol')
+    if client_protocols and 'chat' in client_protocols:
+        headers['Sec-WebSocket-Protocol'] = 'chat'
+    
     handler._set_headers(101, 'application/octet-stream', headers)
     return True
 
@@ -4048,7 +4067,7 @@ class Handler(SimpleHTTPRequestHandler):
 
     def do_GET(self):
         # Enhanced connection logging - log all incoming connections
-        ip = self.client_address[0]
+        ip = get_client_ip(self)
         user_agent = self.headers.get('User-Agent', 'Unknown')
         path = self.path
         
@@ -4113,6 +4132,31 @@ class Handler(SimpleHTTPRequestHandler):
                 if p.endswith('.html'): ctype='text/html; charset=utf-8'
                 self._set_headers(200, ctype); self.wfile.write(read_text(p).encode('utf-8')); return
             self._set_headers(404); self.wfile.write(b'{}'); return
+
+        if parsed.path == '/api/ping':
+            # Keep-alive endpoint to prevent session expiration
+            if not auth_enabled():
+                # If auth is disabled, always return success
+                self._set_headers(200)
+                self.wfile.write(json.dumps({'status': 'ok', 'auth': 'disabled'}).encode('utf-8'))
+                return
+            
+            sess = get_session(self)
+            if not sess:
+                self._set_headers(401)
+                self.wfile.write(json.dumps({'error': 'unauthorized'}).encode('utf-8'))
+                return
+                
+            # Session is valid, return success with basic info
+            data = {
+                'status': 'ok',
+                'user': sess.get('user', 'unknown'),
+                'timestamp': time.strftime('%Y-%m-%d %H:%M:%S'),
+                'session_valid': True
+            }
+            self._set_headers(200)
+            self.wfile.write(json.dumps(data).encode('utf-8'))
+            return
 
         if parsed.path == '/api/status':
             if not require_auth(self): return
@@ -8546,6 +8590,67 @@ tabs.forEach(b => {
         });
     };
 });
+
+// Keep-alive functionality to prevent session expiration
+let keepAliveInterval = null;
+
+function startKeepAlive() {
+    // Only start keep-alive if not already running
+    if (keepAliveInterval) return;
+    
+    // Ping every 5 minutes to keep session alive
+    keepAliveInterval = setInterval(async () => {
+        try {
+            const response = await fetch('/api/ping', {
+                method: 'GET',
+                headers: {
+                    'Cache-Control': 'no-cache'
+                }
+            });
+            
+            if (response.status === 401) {
+                // Session expired, show login
+                showLogin();
+                stopKeepAlive();
+            } else if (response.ok) {
+                const data = await response.json();
+                console.log(`Keep-alive: ${data.status} (${data.timestamp})`);
+            }
+        } catch (error) {
+            console.warn('Keep-alive failed:', error);
+            // Don't stop keep-alive on network errors - might be temporary
+        }
+    }, 5 * 60 * 1000); // 5 minutes
+    
+    console.log('Keep-alive started (5 minute intervals)');
+}
+
+function stopKeepAlive() {
+    if (keepAliveInterval) {
+        clearInterval(keepAliveInterval);
+        keepAliveInterval = null;
+        console.log('Keep-alive stopped');
+    }
+}
+
+// Start keep-alive when page is visible and focused
+function handleVisibilityChange() {
+    if (document.hidden) {
+        // Page is hidden, could stop keep-alive to save resources
+        // But we'll keep it running for now to maintain sessions
+    } else {
+        // Page is visible, ensure keep-alive is running
+        startKeepAlive();
+    }
+}
+
+// Listen for visibility changes
+document.addEventListener('visibilitychange', handleVisibilityChange);
+
+// Start keep-alive immediately if page is visible
+if (!document.hidden) {
+    startKeepAlive();
+}
 
 // Initialize AI enhancements on page load
 initEnhancedAI();
