@@ -2509,66 +2509,271 @@ def user_memory_path(username):
     """Get the path to a user's encrypted memory file - using single jarvis_memory.enc as per requirements."""
     return os.path.join(NS_CTRL, 'jarvis_memory.enc')
 
+def deep_merge_memory(user_memory, default_memory):
+    """Deep merge user memory with defaults to ensure all required keys exist."""
+    def merge_dict(source, destination):
+        for key, value in source.items():
+            if isinstance(value, dict):
+                node = destination.setdefault(key, {})
+                merge_dict(value, node)
+            else:
+                destination.setdefault(key, value)
+        return destination
+    
+    # Create a copy of user memory to avoid modifying the original
+    merged = dict(user_memory)
+    merge_dict(default_memory, merged)
+    return merged
+
+def file_lock_context(file_path):
+    """Context manager for file locking to prevent concurrent access issues."""
+    import fcntl
+    
+    class FileLock:
+        def __init__(self, path):
+            self.path = path
+            self.file = None
+            
+        def __enter__(self):
+            try:
+                # Create directory if it doesn't exist
+                os.makedirs(os.path.dirname(self.path), exist_ok=True)
+                
+                # Open file for reading/writing, create if doesn't exist
+                self.file = open(self.path, 'a+')
+                fcntl.flock(self.file.fileno(), fcntl.LOCK_EX)
+                return self.file
+            except Exception as e:
+                if self.file:
+                    self.file.close()
+                raise e
+                
+        def __exit__(self, exc_type, exc_val, exc_tb):
+            if self.file:
+                try:
+                    fcntl.flock(self.file.fileno(), fcntl.LOCK_UN)
+                    self.file.close()
+                except Exception:
+                    pass
+    
+    return FileLock(file_path)
+
+def auto_save_user_memory(username, memory):
+    """Auto-save user memory with enhanced error handling and backup."""
+    try:
+        # Update auto-save timestamp
+        memory["preferences"]["last_auto_save"] = time.strftime('%Y-%m-%d %H:%M:%S')
+        save_user_memory(username, memory)
+    except Exception as e:
+        py_alert('WARN', f'Auto-save failed for user {username}: {str(e)}')
+
 def load_user_memory(username):
-    """Load per-user encrypted memory from shared jarvis_memory.enc file."""
+    """Load per-user encrypted memory from shared jarvis_memory.enc file with enhanced auto-loading."""
     safe_username = sanitize_username(username)
     enc_path = user_memory_path(username)
     
-    # Default empty memory structure for this user
+    # Enhanced default memory structure with comprehensive learning patterns
     default_user_memory = {
-        "memory": {},
-        "preferences": {"theme": "jarvis-dark", "last_active_tab": "ai"},
+        "memory": {
+            "learning_patterns": {
+                "interaction_style": "formal",
+                "frequent_commands": {},
+                "command_preferences": {},
+                "conversation_topics": {},
+                "response_complexity": {"simple": 0, "detailed": 0, "technical": 0},
+                "emotional_preferences": {"formal": 0, "friendly": 0, "enthusiastic": 0},
+                "last_learning_update": time.strftime('%Y-%m-%d %H:%M:%S'),
+                "learning_sessions": 0,
+                "auto_learn_enabled": True
+            },
+            "conversation_context": {
+                "recent_topics": [],
+                "current_session_start": time.strftime('%Y-%m-%d %H:%M:%S'),
+                "total_conversations": 0
+            }
+        },
         "history": [],
-        "last_seen": time.strftime('%Y-%m-%d %H:%M:%S')
+        "preferences": {
+            "theme": "jarvis-dark", 
+            "last_active_tab": "ai",
+            "auto_save": True,
+            "learning_mode": "enhanced",
+            "conversation_memory_size": 50
+        },
+        "last_seen": time.strftime('%Y-%m-%d %H:%M:%S'),
+        "user_profile": {
+            "created": time.strftime('%Y-%m-%d %H:%M:%S'),
+            "total_sessions": 0,
+            "favorite_features": [],
+            "security_awareness_level": "medium"
+        }
     }
     
-    # Try to load encrypted file first
-    if os.path.exists(enc_path):
-        all_memory = dec_json_from_file(enc_path)
-        if all_memory and isinstance(all_memory, dict):
-            # Get this user's memory from the structure {username: {memory, preferences, etc}}
-            user_memory = all_memory.get(safe_username, default_user_memory)
-            # Ensure all required fields exist
-            for key in default_user_memory:
-                if key not in user_memory:
-                    user_memory[key] = default_user_memory[key]
-            user_memory["last_seen"] = time.strftime('%Y-%m-%d %H:%M:%S')
-            return user_memory
-    
-    # Return default and save it
-    save_user_memory(username, default_user_memory)
-    return default_user_memory
+    try:
+        if os.path.exists(enc_path):
+            # Implement file locking for safe concurrent access
+            with file_lock_context(enc_path):
+                all_user_data = dec_json_from_file(enc_path)
+                if all_user_data and isinstance(all_user_data, dict) and safe_username in all_user_data:
+                    user_memory = all_user_data[safe_username]
+                    
+                    # Deep merge with defaults to ensure all required keys exist
+                    user_memory = deep_merge_memory(user_memory, default_user_memory)
+                    user_memory["last_seen"] = time.strftime('%Y-%m-%d %H:%M:%S')
+                    
+                    # Increment session counter on load
+                    if "user_profile" in user_memory:
+                        user_memory["user_profile"]["total_sessions"] = user_memory["user_profile"].get("total_sessions", 0) + 1
+                    
+                    # Auto-save the updated memory immediately
+                    auto_save_user_memory(username, user_memory)
+                    return user_memory
+        
+        # Create new user with defaults and save immediately
+        default_user_memory["user_profile"]["created"] = time.strftime('%Y-%m-%d %H:%M:%S')
+        save_user_memory(username, default_user_memory)
+        py_alert('INFO', f'Created new user memory for {username}')
+        return default_user_memory
+        
+    except Exception as e:
+        py_alert('ERROR', f'Failed to load user memory for {username}: {str(e)}')
+        # Return defaults without saving to avoid corruption
+        return default_user_memory
 
 def save_user_memory(username, memory):
-    """Save per-user encrypted memory to shared jarvis_memory.enc file."""
+    """Save per-user encrypted memory to shared jarvis_memory.enc file with enhanced auto-sync."""
     safe_username = sanitize_username(username)
     enc_path = user_memory_path(username)
     
-    # Update last seen timestamp
-    memory["last_seen"] = time.strftime('%Y-%m-%d %H:%M:%S')
-    
-    # Ensure directory exists
-    os.makedirs(os.path.dirname(enc_path), exist_ok=True)
-    
-    # Load existing memory structure or create new one
-    all_memory = {}
-    if os.path.exists(enc_path):
-        existing = dec_json_from_file(enc_path)
-        if existing and isinstance(existing, dict):
-            all_memory = existing
-    
-    # Update this user's memory
-    all_memory[safe_username] = memory
-    
-    # Save encrypted
-    success = enc_json_to_file(all_memory, enc_path)
-    
-    if not success:
-        # Fallback: log error but don't fail
-        py_alert('ERROR', f'Failed to encrypt Jarvis memory for user {username}')
+    try:
+        # Update timestamps and metadata
+        memory["last_seen"] = time.strftime('%Y-%m-%d %H:%M:%S')
+        memory["preferences"]["last_save"] = time.strftime('%Y-%m-%d %H:%M:%S')
+        
+        # Increment save counter for statistics
+        if "user_profile" not in memory:
+            memory["user_profile"] = {}
+        memory["user_profile"]["total_saves"] = memory["user_profile"].get("total_saves", 0) + 1
+        
+        # Ensure directory exists
+        os.makedirs(os.path.dirname(enc_path), exist_ok=True)
+        
+        # Use file locking to prevent concurrent access issues
+        with file_lock_context(enc_path):
+            # Load existing memory structure or create new one
+            all_memory = {}
+            if os.path.exists(enc_path):
+                existing = dec_json_from_file(enc_path)
+                if existing and isinstance(existing, dict):
+                    all_memory = existing
+            
+            # Update this user's memory
+            all_memory[safe_username] = memory
+            
+            # Create backup before saving
+            backup_path = f"{enc_path}.backup"
+            if os.path.exists(enc_path):
+                try:
+                    import shutil
+                    shutil.copy2(enc_path, backup_path)
+                except Exception:
+                    pass  # Backup failure shouldn't stop save
+            
+            # Save encrypted with enhanced error handling
+            success = enc_json_to_file(all_memory, enc_path)
+            
+            if not success:
+                # Try to restore from backup if save failed
+                if os.path.exists(backup_path):
+                    try:
+                        import shutil
+                        shutil.copy2(backup_path, enc_path)
+                        py_alert('WARN', f'Restored memory from backup for user {username}')
+                    except Exception:
+                        pass
+                
+                py_alert('ERROR', f'Failed to encrypt Jarvis memory for user {username}')
+                return False
+        
+        # Log successful auto-sync
+        py_alert('INFO', f'Auto-synced memory for user {username} (save #{memory["user_profile"].get("total_saves", 1)})')
+        return True
+        
+    except Exception as e:
+        py_alert('ERROR', f'Critical error saving memory for user {username}: {str(e)}')
         return False
+
+def analyze_conversation_context(user_memory, current_prompt):
+    """Analyze conversation context to provide better responses."""
+    history = user_memory.get("history", [])
+    if not history:
+        return "first_interaction"
     
-    return True
+    # Get last few user interactions for context
+    recent_user_prompts = [h.get("prompt", "") for h in history[-6:] if h.get("type") == "user"]
+    
+    # Check for follow-up questions
+    current_low = current_prompt.lower()
+    follow_up_indicators = ["also", "and", "what about", "how about", "can you also", "tell me more"]
+    if any(indicator in current_low for indicator in follow_up_indicators):
+        return "follow_up"
+    
+    # Check for repeated topics
+    if len(recent_user_prompts) > 1:
+        common_words = set(current_low.split()) & set(" ".join(recent_user_prompts).lower().split())
+        if len(common_words) > 2:
+            return "continuing_topic"
+    
+    # Check for troubleshooting sequence
+    problem_indicators = ["error", "not working", "problem", "issue", "help", "fix"]
+    if any(indicator in current_low for indicator in problem_indicators):
+        return "troubleshooting"
+    
+    return "new_topic"
+
+def get_recent_conversation_topics(user_memory):
+    """Extract recent conversation topics for context awareness."""
+    history = user_memory.get("history", [])
+    topics = []
+    
+    # Analyze last 10 interactions
+    recent_history = history[-20:] if len(history) > 20 else history
+    
+    topic_keywords = {
+        "security": ["security", "scan", "vulnerability", "threat", "attack", "breach", "intrusion"],
+        "system": ["system", "cpu", "memory", "disk", "performance", "status", "monitor"],
+        "network": ["network", "ping", "connection", "ip", "dns", "internet"],
+        "tools": ["tool", "nmap", "netstat", "ps", "execute", "run", "command"],
+        "files": ["file", "directory", "folder", "ls", "find", "cat", "grep"],
+        "terminal": ["terminal", "shell", "command", "bash", "console"],
+        "backup": ["backup", "restore", "snapshot", "archive", "save"],
+        "config": ["config", "configuration", "settings", "preferences"]
+    }
+    
+    for interaction in recent_history:
+        if interaction.get("type") == "user":
+            prompt = interaction.get("prompt", "").lower()
+            for topic, keywords in topic_keywords.items():
+                if any(keyword in prompt for keyword in keywords):
+                    if topic not in topics:
+                        topics.append(topic)
+    
+    return topics[-5:]  # Return last 5 unique topics
+
+def get_preferred_response_complexity(learning_patterns):
+    """Determine user's preferred response complexity based on learning patterns."""
+    complexity_prefs = learning_patterns.get("response_complexity", {})
+    
+    if not complexity_prefs:
+        return "balanced"
+    
+    # Find the most preferred complexity
+    max_count = max(complexity_prefs.values())
+    for complexity, count in complexity_prefs.items():
+        if count == max_count:
+            return complexity
+    
+    return "balanced"
 
 def get_jarvis_personality():
     """Get the configured Jarvis personality type."""
@@ -2578,16 +2783,27 @@ def get_jarvis_personality():
     return personality
 
 def ai_reply(prompt, username, user_ip):
-    """Generate a more Jarvis-like reply with per-user memory and expanded intents."""
+    """Generate a more Jarvis-like reply with enhanced conversational awareness and per-user memory."""
     if not prompt or not prompt.strip():
         return "How can I assist you today?"
     
     prompt_low = prompt.lower()
     now = time.strftime('%Y-%m-%d %H:%M:%S')
     
-    # Load per-user memory using new encrypted system
+    # Load per-user memory using enhanced encrypted system
     user_memory = load_user_memory(username)
     user_memory["last_seen"] = now
+    
+    # Enhanced context analysis from conversation history
+    conversation_context = analyze_conversation_context(user_memory, prompt)
+    
+    # Get recent conversation topics for better context awareness
+    recent_topics = get_recent_conversation_topics(user_memory)
+    
+    # Enhanced learning patterns from user profile
+    learning_patterns = user_memory.get("memory", {}).get("learning_patterns", {})
+    interaction_style = learning_patterns.get("interaction_style", "formal")
+    preferred_complexity = get_preferred_response_complexity(learning_patterns)
     
     # Status data collection
     status = {
@@ -2600,8 +2816,10 @@ def ai_reply(prompt, username, user_ip):
     # Get personality traits
     personality = get_jarvis_personality()
     
-    # Add this conversation to user memory history
-    memory_size = _coerce_int(cfg_get('jarvis.memory_size', 10), 10)
+    # Enhanced conversation memory size based on user preferences
+    memory_size = user_memory.get("preferences", {}).get("conversation_memory_size", 50)
+    
+    # Add this conversation to user memory history with enhanced context
     user_memory["history"].append({
         "timestamp": now,
         "type": "user",
@@ -2610,20 +2828,23 @@ def ai_reply(prompt, username, user_ip):
         "context": {
             "cpu_load": status['cpu'].get('load1','?'),
             "mem_used": status['mem'].get('used_pct','?'),
-            "disk_used": status['disk'].get('use_pct','?')
+            "disk_used": status['disk'].get('use_pct','?'),
+            "conversation_context": conversation_context,
+            "recent_topics": recent_topics,
+            "interaction_style": interaction_style
         }
     })
+    
+    # Update conversation counter
+    if "conversation_context" in user_memory.get("memory", {}):
+        user_memory["memory"]["conversation_context"]["total_conversations"] += 1
     
     # Keep only last N conversations
     if len(user_memory["history"]) > memory_size * 2:  # *2 for user+AI pairs
         user_memory["history"] = user_memory["history"][-memory_size * 2:]
     
-    # Keep memory at configured size
-    # Trim memory to keep only recent history
-    if len(user_memory["history"]) > memory_size * 2:  # *2 for user+AI pairs  
-        user_memory["history"] = user_memory["history"][-memory_size * 2:]
-    
-    save_user_memory(username, user_memory)
+    # Auto-save memory after updating with user prompt
+    auto_save_user_memory(username, user_memory)
     
     # Expanded intents processing
     # Status intent
@@ -3359,98 +3580,197 @@ def jarvis_security_integration():
     return security_data
 
 def enhanced_jarvis_learning(username, prompt, reply_context):
-    """Enhanced learning system for Jarvis AI with advanced pattern analysis"""
+    """Enhanced learning system for Jarvis AI with comprehensive pattern analysis and auto-learning."""
     try:
         user_memory = load_user_memory(username)
         
-        if "learning_patterns" not in user_memory:
-            user_memory["learning_patterns"] = {}
+        # Ensure learning patterns structure exists
+        if "memory" not in user_memory:
+            user_memory["memory"] = {}
+        if "learning_patterns" not in user_memory["memory"]:
+            user_memory["memory"]["learning_patterns"] = {}
         
-        patterns = user_memory["learning_patterns"]
+        patterns = user_memory["memory"]["learning_patterns"]
         
-        # Enhanced pattern analysis
+        # Initialize learning tracking structures
+        learning_structures = {
+            "frequent_commands": {},
+            "command_preferences": {},
+            "conversation_topics": {},
+            "response_complexity": {"simple": 0, "detailed": 0, "technical": 0},
+            "emotional_preferences": {"formal": 0, "friendly": 0, "enthusiastic": 0},
+            "interaction_patterns": {"question": 0, "command": 0, "conversation": 0},
+            "time_patterns": {},
+            "error_patterns": {},
+            "success_patterns": {},
+            "contextual_preferences": {}
+        }
+        
+        for key, default_value in learning_structures.items():
+            if key not in patterns:
+                patterns[key] = default_value
+        
+        # Enhanced conversation analysis
         conversations = user_memory.get('history', [])
         
-        # Track command usage patterns
-        if "frequent_commands" not in patterns:
-            patterns["frequent_commands"] = {}
-        
-        # Extract commands from user prompts
+        # Learn from current prompt
         if prompt:
             prompt_lower = prompt.lower()
-            command_indicators = ['run ', 'execute ', 'launch ', 'start ', 'scan ', 'check ', 'analyze ']
+            
+            # Enhanced command extraction
+            command_indicators = [
+                'run ', 'execute ', 'launch ', 'start ', 'scan ', 'check ', 'analyze ',
+                'show ', 'display ', 'list ', 'find ', 'search ', 'get ', 'tell me'
+            ]
+            
             for indicator in command_indicators:
                 if indicator in prompt_lower:
                     cmd_start = prompt_lower.find(indicator) + len(indicator)
                     potential_cmd = prompt_lower[cmd_start:].split()[0] if cmd_start < len(prompt_lower) else ''
-                    if potential_cmd:
+                    if potential_cmd and len(potential_cmd) > 1:
                         patterns["frequent_commands"][potential_cmd] = patterns["frequent_commands"].get(potential_cmd, 0) + 1
+            
+            # Classify interaction type
+            if '?' in prompt or any(q in prompt_lower for q in ['what', 'how', 'why', 'when', 'where', 'who']):
+                patterns["interaction_patterns"]["question"] += 1
+            elif any(cmd in prompt_lower for cmd in ['run', 'execute', 'start', 'stop', 'restart']):
+                patterns["interaction_patterns"]["command"] += 1
+            else:
+                patterns["interaction_patterns"]["conversation"] += 1
+            
+            # Track time patterns (hour of day)
+            current_hour = int(time.strftime('%H'))
+            hour_key = f"hour_{current_hour}"
+            patterns["time_patterns"][hour_key] = patterns["time_patterns"].get(hour_key, 0) + 1
+            
+            # Analyze contextual preferences (sentiment/mood)
+            polite_indicators = ['please', 'thank you', 'thanks', 'appreciate']
+            urgent_indicators = ['urgent', 'quickly', 'asap', 'emergency', 'critical']
+            casual_indicators = ['hey', 'hi', 'hello', 'cool', 'awesome', 'nice']
+            
+            if any(indicator in prompt_lower for indicator in polite_indicators):
+                patterns["contextual_preferences"]["polite"] = patterns["contextual_preferences"].get("polite", 0) + 1
+            if any(indicator in prompt_lower for indicator in urgent_indicators):
+                patterns["contextual_preferences"]["urgent"] = patterns["contextual_preferences"].get("urgent", 0) + 1
+            if any(indicator in prompt_lower for indicator in casual_indicators):
+                patterns["contextual_preferences"]["casual"] = patterns["contextual_preferences"].get("casual", 0) + 1
         
-        # Analyze AI response patterns
+        # Learn from AI response analysis
         if reply_context and "reply" in reply_context:
             reply = reply_context["reply"]
+            reply_text = reply if isinstance(reply, str) else str(reply)
             
-            # Track response complexity preferences
-            if "response_complexity" not in patterns:
-                patterns["response_complexity"] = {"simple": 0, "detailed": 0, "technical": 0}
-            
-            if len(reply) > 500:
+            # Enhanced response complexity analysis
+            word_count = len(reply_text.split())
+            if word_count > 100:
                 patterns["response_complexity"]["detailed"] += 1
-            elif any(tech_term in reply.lower() for tech_term in ['cpu', 'memory', 'process', 'command', 'log']):
+            elif any(tech_term in reply_text.lower() for tech_term in 
+                    ['cpu', 'memory', 'process', 'command', 'log', 'system', 'network', 'security']):
                 patterns["response_complexity"]["technical"] += 1
             else:
                 patterns["response_complexity"]["simple"] += 1
             
-            # Track emotional tone preferences (basic sentiment analysis)
-            if "emotional_preferences" not in patterns:
-                patterns["emotional_preferences"] = {"formal": 0, "friendly": 0, "enthusiastic": 0}
-            
-            if any(enthusiastic in reply for enthusiastic in ['!', 'great', 'excellent', 'perfect']):
+            # Enhanced emotional tone analysis
+            if any(enthusiastic in reply_text for enthusiastic in ['!', '🎉', '✅', 'great', 'excellent', 'perfect', 'awesome']):
                 patterns["emotional_preferences"]["enthusiastic"] += 1
-            elif any(friendly in reply for friendly in ['please', 'sure', 'happy to', 'glad to']):
+            elif any(friendly in reply_text for friendly in ['please', 'sure', 'happy to', 'glad to', 'here to help']):
                 patterns["emotional_preferences"]["friendly"] += 1
             else:
                 patterns["emotional_preferences"]["formal"] += 1
+            
+            # Track success vs error patterns
+            if any(error in reply_text.lower() for error in ['error', 'failed', 'couldn\'t', 'unable', 'problem']):
+                error_type = "general"
+                if "permission" in reply_text.lower():
+                    error_type = "permission"
+                elif "network" in reply_text.lower():
+                    error_type = "network"
+                elif "file" in reply_text.lower():
+                    error_type = "file"
+                patterns["error_patterns"][error_type] = patterns["error_patterns"].get(error_type, 0) + 1
+            else:
+                patterns["success_patterns"]["successful_responses"] = patterns["success_patterns"].get("successful_responses", 0) + 1
         
-        # Legacy compatibility - analyze conversation history
-        user_patterns = {
-            'frequent_commands': patterns.get("frequent_commands", {}),
-            'preferred_tools': {},
-            'interaction_style': 'formal',  # formal, casual, technical
-            'response_preferences': {},
-            'security_awareness': 'medium'  # low, medium, high
-        }
-        
-        # Learn from conversation history
-        for conv in conversations:
-            if conv.get('type') == 'user':
+        # Advanced conversation history analysis
+        if len(conversations) > 0:
+            # Analyze conversation flow patterns
+            user_conversations = [c for c in conversations[-20:] if c.get('type') == 'user']
+            
+            for conv in user_conversations:
                 prompt_text = conv.get('prompt', '').lower()
                 
-                # Track command preferences
-                for tool in ['nmap', 'ping', 'netstat', 'ps', 'htop', 'curl', 'grep', 'find', 'ls']:
+                # Enhanced tool preference tracking
+                for tool in ['nmap', 'ping', 'netstat', 'ps', 'htop', 'curl', 'grep', 'find', 'ls', 'cat', 'tail', 'head']:
                     if tool in prompt_text:
-                        user_patterns['frequent_commands'][tool] = user_patterns['frequent_commands'].get(tool, 0) + 1
+                        patterns["command_preferences"][tool] = patterns["command_preferences"].get(tool, 0) + 1
                 
-                # Determine interaction style
-                if any(casual in prompt_text for casual in ['hey', 'hi', 'thanks', 'cool', 'awesome']):
-                    user_patterns['interaction_style'] = 'casual'
-                elif any(tech in prompt_text for tech in ['process', 'thread', 'memory', 'cpu', 'kernel']):
-                    user_patterns['interaction_style'] = 'technical'
+                # Conversation topic analysis
+                topic_mapping = {
+                    'security': ['security', 'vulnerability', 'threat', 'attack', 'breach', 'hack', 'scan'],
+                    'system': ['system', 'cpu', 'memory', 'disk', 'performance', 'monitor', 'status'],
+                    'network': ['network', 'ping', 'connection', 'ip', 'dns', 'internet', 'port'],
+                    'files': ['file', 'directory', 'folder', 'ls', 'find', 'cat', 'grep', 'search'],
+                    'troubleshooting': ['error', 'problem', 'issue', 'fix', 'help', 'not working', 'broken'],
+                    'automation': ['script', 'automate', 'schedule', 'cron', 'batch', 'automatic'],
+                    'configuration': ['config', 'setting', 'configure', 'setup', 'install', 'update']
+                }
                 
-                # Assess security awareness
-                if any(sec in prompt_text for sec in ['security', 'vulnerability', 'threat', 'attack', 'breach']):
-                    user_patterns['security_awareness'] = 'high'
+                for topic, keywords in topic_mapping.items():
+                    if any(keyword in prompt_text for keyword in keywords):
+                        patterns["conversation_topics"][topic] = patterns["conversation_topics"].get(topic, 0) + 1
         
-        # Update patterns with learned data
-        patterns.update(user_patterns)
+        # Determine user's interaction style based on accumulated patterns
+        total_interactions = sum(patterns["interaction_patterns"].values())
+        if total_interactions > 5:  # Only classify after sufficient data
+            if patterns["contextual_preferences"].get("casual", 0) > total_interactions * 0.3:
+                patterns["interaction_style"] = "casual"
+            elif patterns["response_complexity"]["technical"] > patterns["response_complexity"]["simple"]:
+                patterns["interaction_style"] = "technical"
+            elif patterns["contextual_preferences"].get("polite", 0) > total_interactions * 0.4:
+                patterns["interaction_style"] = "professional"
+            else:
+                patterns["interaction_style"] = "balanced"
+        
+        # Update learning metadata
         patterns["last_learning_update"] = time.strftime('%Y-%m-%d %H:%M:%S')
         patterns["learning_sessions"] = patterns.get("learning_sessions", 0) + 1
+        patterns["total_interactions"] = patterns.get("total_interactions", 0) + 1
         
-        # Save updated learning patterns
+        # Enhanced auto-learning features
+        patterns["auto_learn_enabled"] = True
+        patterns["learning_quality_score"] = calculate_learning_quality(patterns)
+        
+        # Auto-save enhanced memory with learning patterns
         save_user_memory(username, user_memory)
         
+        # Log successful learning session
+        py_alert('INFO', f'Enhanced learning completed for {username} (session #{patterns["learning_sessions"]})')
+        
     except Exception as e:
-        security_log(f"JARVIS_LEARNING_ERROR user={username} error={str(e)}")
+        py_alert('ERROR', f'Enhanced Jarvis learning error for {username}: {str(e)}')
+
+def calculate_learning_quality(patterns):
+    """Calculate a quality score for the learning patterns."""
+    score = 0
+    
+    # Points for interaction diversity
+    interaction_types = len([v for v in patterns.get("interaction_patterns", {}).values() if v > 0])
+    score += interaction_types * 10
+    
+    # Points for topic diversity
+    topic_count = len([v for v in patterns.get("conversation_topics", {}).values() if v > 0])
+    score += topic_count * 5
+    
+    # Points for command familiarity
+    command_count = len([v for v in patterns.get("frequent_commands", {}).values() if v > 2])
+    score += command_count * 3
+    
+    # Points for consistency (balanced preferences)
+    complexity_prefs = patterns.get("response_complexity", {})
+    if complexity_prefs and max(complexity_prefs.values()) < sum(complexity_prefs.values()) * 0.8:
+        score += 20  # Bonus for balanced complexity preferences
+    
+    return min(score, 100)  # Cap at 100
 
 def save_command_result(tool_name, command, output, username):
     """Save command results to the results panel for comprehensive tracking"""
@@ -7045,11 +7365,44 @@ async function refresh(){
     // If we got here successfully, ensure login overlay is off
     hideLogin();
     
-    // Load Jarvis memory on successful status call (indicates valid session)
+    // Enhanced Jarvis memory loading and auto-sync on every refresh
     try {
+      console.log('🔄 Loading Jarvis memory during refresh...');
       await loadJarvisMemory();
+      
+      // Trigger auto-save after successful memory load to update session info
+      await autoSaveAfterInteraction('page_refresh');
+      
+      console.log('✅ Jarvis memory loaded and synced on refresh');
     } catch (error) {
-      console.warn('Failed to load Jarvis memory during refresh:', error);
+      console.warn('❌ Failed to load Jarvis memory during refresh:', error);
+      // Attempt to create default memory structure
+      try {
+        jarvisMemory = {
+          memory: {
+            learning_patterns: {},
+            conversation_context: {
+              recent_topics: [],
+              current_session_start: new Date().toISOString(),
+              total_conversations: 0
+            }
+          },
+          preferences: { 
+            theme: 'jarvis-dark',
+            auto_save: true,
+            learning_mode: 'enhanced'
+          },
+          history: [],
+          last_seen: new Date().toISOString(),
+          user_profile: {
+            created: new Date().toISOString(),
+            total_sessions: 1
+          }
+        };
+        console.log('🔧 Created fallback memory structure');
+      } catch (fallbackError) {
+        console.error('Failed to create fallback memory:', fallbackError);
+      }
     }
 
     // Update Live Stats Panel
@@ -7059,6 +7412,81 @@ async function refresh(){
     const cpu = j.cpu || {};
     setCard('cpu', `Load: ${human(cpu.load1)} (1m) | Warn: ${cpu.warn || '2.0'} | Crit: ${cpu.crit || '4.0'} | Status: ${cpu.level || 'OK'}`);
     
+    // Enhanced Memory information
+    const mem = j.mem || {};
+    setCard('memory', `Used: ${human(mem.used_pct)}% | Total: ${human(mem.total)} | Free: ${human(mem.available)} | Status: ${mem.level || 'OK'}`);
+    
+    // Enhanced Disk information  
+    const disk = j.disk || {};
+    setCard('disk', `Used: ${human(disk.use_pct)}% | Total: ${human(disk.total)} | Free: ${human(disk.available)} | Status: ${disk.level || 'OK'}`);
+    
+    // Enhanced Network information
+    const net = j.net || {};
+    setCard('network', `IP: ${net.ip || 'N/A'} | Public: ${net.public_ip || 'N/A'} | Status: ${net.level || 'OK'}`);
+    
+    // Enhanced Services information (fix for services_count bug)
+    const services = j.services || {};
+    const servicesCount = services.count || Object.keys(services).length || 0;
+    setCard('services', `Active: ${servicesCount} | Status: ${services.level || 'OK'}`);
+    
+    // Update Enhanced Alerts panel with better data population
+    const alertsEl = $('#alerts');
+    if (alertsEl && j.alerts) {
+      alertsEl.innerHTML = '';
+      const alerts = j.alerts.slice(-10); // Show last 10 alerts
+      if (alerts.length === 0) {
+        const li = document.createElement('li');
+        li.textContent = 'No alerts - system running smoothly';
+        li.style.color = '#00ff00';
+        alertsEl.appendChild(li);
+      } else {
+        alerts.forEach(alert => {
+          const li = document.createElement('li');
+          li.textContent = alert;
+          // Color code alerts by severity
+          if (alert.includes('[CRIT]') || alert.includes('[ERROR]')) {
+            li.style.color = '#ff6b6b';
+          } else if (alert.includes('[WARN]')) {
+            li.style.color = '#ffa500';
+          } else {
+            li.style.color = '#e0e0e0';
+          }
+          alertsEl.appendChild(li);
+        });
+      }
+    }
+    
+    // Update Enhanced AI statistics with memory data
+    if (jarvisMemory) {
+      updateAIStats(jarvisMemory);
+    }
+    
+    // Update session and user info displays
+    updateSessionInfo(j);
+    
+    // Auto-refresh memory and learning patterns every few refreshes
+    if (typeof refreshCounter === 'undefined') window.refreshCounter = 0;
+    window.refreshCounter++;
+    
+    if (window.refreshCounter % 5 === 0) {
+      // Every 5th refresh, ensure memory persistence
+      try {
+        if (jarvisMemory) {
+          jarvisMemory.last_seen = new Date().toISOString();
+          await saveJarvisMemory();
+          console.log('🔄 Periodic memory sync completed');
+        }
+      } catch (syncError) {
+        console.warn('Periodic sync failed:', syncError);
+      }
+    }
+    
+  } catch(e) {
+    console.error('Refresh error:', e);
+    // If we can't reach the API, show login 
+    showLogin();
+  }
+}
     // Enhanced Memory information  
     const mem = j.memory || {};
     const memUsed = mem.used_pct || '?';
@@ -7468,86 +7896,264 @@ async function loadUsers() {
 
 // Jarvis Memory & Theme Management
 let jarvisMemory = null;
+let autoSaveEnabled = true;
+let lastAutoSave = Date.now();
 
-// Load Jarvis memory on page load and apply theme
+// Enhanced Jarvis memory loading with auto-sync capabilities
 async function loadJarvisMemory() {
   try {
     const response = await api('/api/jarvis/memory');
     const memory = await response.json();
     jarvisMemory = memory;
     
-    // Apply saved theme preference
+    // Apply saved theme preference with enhanced handling
     const savedTheme = memory.preferences?.theme;
-    if (savedTheme && savedTheme === 'theme-420') {
+    if (savedTheme === 'theme-420') {
       document.documentElement.classList.add('theme-420');
       const btn420 = $('#btn-420-theme');
       if (btn420) {
         btn420.textContent = '🌿 Classic Mode';
         btn420.classList.add('active');
       }
+    } else {
+      // Ensure default theme is applied if not 420 mode
+      document.documentElement.classList.remove('theme-420');
+      const btn420 = $('#btn-420-theme');
+      if (btn420) {
+        btn420.textContent = '🌿 420 Mode';
+        btn420.classList.remove('active');
+      }
     }
     
     // Update AI stats and sync global variables
     updateAIStats(memory);
     
-    // Update global variables for enhanced AI features
+    // Enhanced synchronization of global variables
     if (typeof userPreferences !== 'undefined') {
-      userPreferences = memory.preferences || {};
+      userPreferences = { ...memory.preferences } || {};
     }
     if (typeof conversationHistory !== 'undefined') {
-      conversationHistory = memory.history || [];
+      conversationHistory = [...memory.history] || [];
     }
     
+    // Initialize auto-save if enabled
+    if (memory.preferences?.auto_save !== false) {
+      autoSaveEnabled = true;
+      scheduleAutoSave();
+    }
+    
+    // Update last load timestamp
+    lastAutoSave = Date.now();
+    
+    console.log('✅ Jarvis memory loaded and synced successfully');
     return memory;
   } catch (error) {
     console.warn('Failed to load Jarvis memory:', error);
-    // Return default memory structure
+    // Return enhanced default memory structure
     jarvisMemory = {
-      memory: {},
-      preferences: { theme: 'jarvis-dark' },
+      memory: {
+        learning_patterns: {},
+        conversation_context: {
+          recent_topics: [],
+          current_session_start: new Date().toISOString(),
+          total_conversations: 0
+        }
+      },
+      preferences: { 
+        theme: 'jarvis-dark',
+        auto_save: true,
+        learning_mode: 'enhanced'
+      },
       history: [],
-      last_seen: new Date().toISOString()
-    };
-    return jarvisMemory;
-  }
-}
-  } catch (error) {
-    console.warn('Failed to load Jarvis memory:', error);
-    // Return default memory structure
-    jarvisMemory = {
-      memory: {},
-      preferences: { theme: 'jarvis-dark' },
-      history: [],
-      last_seen: new Date().toISOString()
+      last_seen: new Date().toISOString(),
+      user_profile: {
+        created: new Date().toISOString(),
+        total_sessions: 1
+      }
     };
     return jarvisMemory;
   }
 }
 
-// Save Jarvis memory
+// Enhanced Jarvis memory saving with auto-sync capabilities
 async function saveJarvisMemory(updates) {
   try {
+    // Merge updates with existing memory
+    if (jarvisMemory && updates) {
+      // Deep merge to preserve existing data
+      jarvisMemory = deepMerge(jarvisMemory, updates);
+    }
+    
     const response = await fetch('/api/jarvis/memory', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'X-CSRF': CSRF
       },
-      body: JSON.stringify(updates)
+      body: JSON.stringify(updates || jarvisMemory)
     });
     
     const result = await response.json();
     
     if (response.ok && result.success) {
-      console.log('Jarvis memory saved successfully');
+      lastAutoSave = Date.now();
+      console.log('✅ Jarvis memory saved and synced successfully');
       return true;
     } else {
-      console.error('Failed to save Jarvis memory:', result.error);
+      console.error('❌ Failed to save Jarvis memory:', result.error);
       return false;
     }
   } catch (error) {
-    console.error('Error saving Jarvis memory:', error);
+    console.error('❌ Error saving Jarvis memory:', error);
     return false;
+  }
+}
+
+// Auto-save scheduler for continuous memory persistence
+function scheduleAutoSave() {
+  if (!autoSaveEnabled) return;
+  
+  // Auto-save every 30 seconds if there are changes
+  setInterval(async () => {
+    if (autoSaveEnabled && jarvisMemory && (Date.now() - lastAutoSave) > 25000) {
+      try {
+        // Update last activity timestamp
+        jarvisMemory.last_seen = new Date().toISOString();
+        await saveJarvisMemory();
+        console.log('🔄 Auto-save completed');
+      } catch (error) {
+        console.warn('Auto-save failed:', error);
+      }
+    }
+  }, 30000);
+}
+
+// Enhanced auto-save after user interactions
+async function autoSaveAfterInteraction(interactionType = 'general') {
+  if (!autoSaveEnabled || !jarvisMemory) return;
+  
+  try {
+    // Update interaction tracking
+    if (!jarvisMemory.user_profile) jarvisMemory.user_profile = {};
+    jarvisMemory.user_profile.last_interaction = new Date().toISOString();
+    jarvisMemory.user_profile.interaction_count = (jarvisMemory.user_profile.interaction_count || 0) + 1;
+    
+    // Track interaction type
+    if (!jarvisMemory.user_profile.interaction_types) jarvisMemory.user_profile.interaction_types = {};
+    jarvisMemory.user_profile.interaction_types[interactionType] = (jarvisMemory.user_profile.interaction_types[interactionType] || 0) + 1;
+    
+    await saveJarvisMemory();
+    console.log(`🔄 Auto-saved after ${interactionType} interaction`);
+  } catch (error) {
+    console.warn('Auto-save after interaction failed:', error);
+  }
+}
+
+// Deep merge utility for memory updates
+function deepMerge(target, source) {
+  const output = Object.assign({}, target);
+  if (isObject(target) && isObject(source)) {
+    Object.keys(source).forEach(key => {
+      if (isObject(source[key])) {
+        if (!(key in target))
+          Object.assign(output, { [key]: source[key] });
+        else
+          output[key] = deepMerge(target[key], source[key]);
+      } else {
+        Object.assign(output, { [key]: source[key] });
+      }
+    });
+  }
+  return output;
+}
+
+function isObject(item) {
+  return (item && typeof item === "object" && !Array.isArray(item));
+}
+
+// Enhanced session info update
+function updateSessionInfo(statusData) {
+  try {
+    // Update session counter if element exists
+    const sessionEl = $('#session-info');
+    if (sessionEl && jarvisMemory?.user_profile) {
+      const sessionCount = jarvisMemory.user_profile.total_sessions || 1;
+      const lastSeen = jarvisMemory.last_seen || 'Unknown';
+      sessionEl.textContent = `Session #${sessionCount} | Last seen: ${new Date(lastSeen).toLocaleString()}`;
+    }
+    
+    // Update conversation count
+    const conversationEl = $('#conversation-count');
+    if (conversationEl && jarvisMemory?.memory?.conversation_context) {
+      const totalConversations = jarvisMemory.memory.conversation_context.total_conversations || 0;
+      conversationEl.textContent = `${totalConversations} conversations`;
+    }
+    
+    // Update learning statistics
+    const learningEl = $('#learning-stats');
+    if (learningEl && jarvisMemory?.memory?.learning_patterns) {
+      const patterns = jarvisMemory.memory.learning_patterns;
+      const learningScore = patterns.learning_quality_score || 0;
+      const learningSessions = patterns.learning_sessions || 0;
+      learningEl.textContent = `Learning Score: ${learningScore}/100 | Sessions: ${learningSessions}`;
+    }
+  } catch (error) {
+    console.warn('Failed to update session info:', error);
+  }
+}
+
+// Enhanced AI stats update with comprehensive memory data
+function updateAIStats(memory = null) {
+  try {
+    const memoryData = memory || jarvisMemory;
+    if (!memoryData) return;
+    
+    // Update conversation count
+    const conversationCount = memoryData.history?.length || 0;
+    const conversationEl = $('#ai-conversations');
+    if (conversationEl) {
+      conversationEl.textContent = conversationCount.toString();
+    }
+    
+    // Update learning patterns count
+    const learningPatterns = memoryData.memory?.learning_patterns || {};
+    const patternsCount = Object.keys(learningPatterns).length;
+    const patternsEl = $('#ai-patterns');
+    if (patternsEl) {
+      patternsEl.textContent = patternsCount.toString();
+    }
+    
+    // Update memory size
+    const memorySize = JSON.stringify(memoryData).length;
+    const memorySizeEl = $('#ai-memory-size');
+    if (memorySizeEl) {
+      memorySizeEl.textContent = `${(memorySize / 1024).toFixed(1)}KB`;
+    }
+    
+    // Update learning quality score
+    const qualityScore = learningPatterns.learning_quality_score || 0;
+    const qualityEl = $('#ai-quality');
+    if (qualityEl) {
+      qualityEl.textContent = `${qualityScore}/100`;
+    }
+    
+    // Update last learning session
+    const lastLearning = learningPatterns.last_learning_update || 'Never';
+    const lastLearningEl = $('#ai-last-learning');
+    if (lastLearningEl) {
+      lastLearningEl.textContent = new Date(lastLearning).toLocaleString();
+    }
+    
+    // Update auto-save status
+    const autoSaveStatus = memoryData.preferences?.auto_save ? 'Enabled' : 'Disabled';
+    const autoSaveEl = $('#ai-auto-save');
+    if (autoSaveEl) {
+      autoSaveEl.textContent = autoSaveStatus;
+      autoSaveEl.style.color = memoryData.preferences?.auto_save ? '#00ff00' : '#ff6b6b';
+    }
+    
+  } catch (error) {
+    console.warn('Failed to update AI stats:', error);
   }
 }
 
@@ -9216,18 +9822,77 @@ async function sendChat() {
       speak(j.reply);
     }
     
-    // Update learning data
-    if (typeof updateUserLearning === 'function') {
-      updateUserLearning(prompt);
-    }
-    if (typeof saveJarvisMemory === 'function') {
-      saveJarvisMemory();
-    }
-    if (typeof updateAIStats === 'function') {
-      updateAIStats();
+    // Enhanced learning and auto-save after every conversation
+    try {
+      // Add AI response to conversation history for enhanced learning
+      if (typeof conversationHistory !== 'undefined') {
+        conversationHistory.push({
+          type: 'ai',
+          message: j.reply,
+          timestamp: new Date().toISOString(),
+          action: j.action || null
+        });
+      }
+      
+      // Update Jarvis memory with enhanced conversation data
+      if (jarvisMemory) {
+        if (!jarvisMemory.history) jarvisMemory.history = [];
+        
+        // Add both user prompt and AI response to memory
+        jarvisMemory.history.push({
+          timestamp: new Date().toISOString(),
+          type: 'conversation',
+          user_prompt: prompt,
+          ai_response: j.reply,
+          context: {
+            had_action: !!j.action,
+            action_type: j.action?.type || null,
+            interaction_quality: 'completed'
+          }
+        });
+        
+        // Keep conversation history manageable
+        const maxHistory = jarvisMemory.preferences?.conversation_memory_size || 50;
+        if (jarvisMemory.history.length > maxHistory * 2) {
+          jarvisMemory.history = jarvisMemory.history.slice(-maxHistory * 2);
+        }
+        
+        // Update learning metrics
+        if (!jarvisMemory.memory) jarvisMemory.memory = {};
+        if (!jarvisMemory.memory.conversation_context) jarvisMemory.memory.conversation_context = {};
+        
+        jarvisMemory.memory.conversation_context.total_conversations = 
+          (jarvisMemory.memory.conversation_context.total_conversations || 0) + 1;
+        jarvisMemory.memory.conversation_context.last_conversation = new Date().toISOString();
+        
+        // Track conversation success
+        if (!jarvisMemory.memory.conversation_context.success_rate) {
+          jarvisMemory.memory.conversation_context.success_rate = { successful: 0, total: 0 };
+        }
+        jarvisMemory.memory.conversation_context.success_rate.successful += 1;
+        jarvisMemory.memory.conversation_context.success_rate.total += 1;
+      }
+      
+      // Trigger enhanced auto-save after conversation
+      await autoSaveAfterInteraction('conversation');
+      
+      // Update learning patterns (this happens on backend, but we track frontend too)
+      if (typeof updateUserLearning === 'function') {
+        updateUserLearning(prompt, j.reply);
+      }
+      
+      // Update AI statistics display
+      if (typeof updateAIStats === 'function') {
+        updateAIStats(jarvisMemory);
+      }
+      
+      console.log('🧠 Enhanced learning and auto-save completed after conversation');
+      
+    } catch (learningError) {
+      console.warn('Learning/auto-save failed:', learningError);
     }
     
-    // Update last interaction
+    // Update last interaction timestamp in UI
     const lastInteractionEl = $('#last-interaction');
     if (lastInteractionEl) {
       lastInteractionEl.textContent = new Date().toLocaleString();
