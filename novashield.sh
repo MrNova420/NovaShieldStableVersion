@@ -4495,6 +4495,7 @@ class Handler(SimpleHTTPRequestHandler):
                 'version': read_text(os.path.join(NS_HOME,'version.txt'),'unknown'),
                 'csrf': sess.get('csrf','') if auth_enabled() else 'public',
                 'voice_enabled': cfg_get('jarvis.voice_enabled', False),
+                'ui_theme': cfg_get('webgen.theme', 'jarvis-dark'),
                 # Add monitor enabled state flags for dashboard UI
                 'integrity_enabled': monitor_enabled('integrity'),
                 'process_enabled': monitor_enabled('process'),
@@ -7434,6 +7435,26 @@ async function refresh(){
     CSRF = j.csrf || '';
     // If we got here successfully, ensure login overlay is off
     hideLogin();
+    
+    // Apply theme from config unless user has set a preference in Jarvis memory
+    if (j.ui_theme && !jarvisMemory?.preferences?.theme) {
+      const root = document.documentElement;
+      const btn = $('#btn-420-theme');
+      
+      if (j.ui_theme === 'theme-420' || j.ui_theme === '420') {
+        root.classList.add('theme-420');
+        if (btn) {
+          btn.textContent = '🌿 Classic Mode';
+          btn.classList.add('active');
+        }
+      } else {
+        root.classList.remove('theme-420');
+        if (btn) {
+          btn.textContent = '🌿 420 Mode';
+          btn.classList.remove('active');
+        }
+      }
+    }
     
     // Enhanced Jarvis memory loading and auto-sync on every refresh
     try {
