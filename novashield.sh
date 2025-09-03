@@ -7044,6 +7044,13 @@ async function refresh(){
     CSRF = j.csrf || '';
     // If we got here successfully, ensure login overlay is off
     hideLogin();
+    
+    // Load Jarvis memory on successful status call (indicates valid session)
+    try {
+      await loadJarvisMemory();
+    } catch (error) {
+      console.warn('Failed to load Jarvis memory during refresh:', error);
+    }
 
     // Update Live Stats Panel
     updateLiveStats(j);
@@ -7286,15 +7293,17 @@ async function loadConfig() {
     if (j.csrf && j.csrf !== 'public') {
       // User is authenticated, show editable interface
       if (configTextEl) {
-        configTextEl.value = j.config || '';
+        const configContent = j.config || '# No configuration found\n# Please check if config.yaml exists and is readable';
+        configTextEl.value = configContent;
         configTextEl.style.display = 'block';
+        configTextEl.placeholder = 'Edit YAML configuration...';
       }
       if (editorEl) editorEl.style.display = 'block';
       if (readonlyEl) readonlyEl.style.display = 'none';
     } else {
       // User not authenticated, show read-only interface
       if (configReadonlyEl) {
-        configReadonlyEl.textContent = j.config || 'Configuration not available';
+        configReadonlyEl.textContent = j.config || 'Configuration not available - authentication required';
       }
       if (editorEl) editorEl.style.display = 'none';
       if (readonlyEl) readonlyEl.style.display = 'block';
@@ -7309,6 +7318,13 @@ async function loadConfig() {
   } catch (e) {
     console.error('Failed to load config:', e);
     toast('Failed to load configuration', 'error');
+    
+    // Show error in config textarea
+    const configTextEl = $('#config-text');
+    if (configTextEl) {
+      configTextEl.value = `# Error loading configuration: ${e.message}\n# Please check:\n# 1. Your session is valid\n# 2. config.yaml exists in the NovaShield directory\n# 3. File permissions allow reading\n# 4. Server is responding properly`;
+      configTextEl.placeholder = 'Configuration loading failed';
+    }
   }
 }
 
@@ -7471,10 +7487,30 @@ async function loadJarvisMemory() {
       }
     }
     
-    // Update AI stats
+    // Update AI stats and sync global variables
     updateAIStats(memory);
     
+    // Update global variables for enhanced AI features
+    if (typeof userPreferences !== 'undefined') {
+      userPreferences = memory.preferences || {};
+    }
+    if (typeof conversationHistory !== 'undefined') {
+      conversationHistory = memory.history || [];
+    }
+    
     return memory;
+  } catch (error) {
+    console.warn('Failed to load Jarvis memory:', error);
+    // Return default memory structure
+    jarvisMemory = {
+      memory: {},
+      preferences: { theme: 'jarvis-dark' },
+      history: [],
+      last_seen: new Date().toISOString()
+    };
+    return jarvisMemory;
+  }
+}
   } catch (error) {
     console.warn('Failed to load Jarvis memory:', error);
     // Return default memory structure
@@ -7830,6 +7866,13 @@ function connectTerm() {
         return; // Already connected
     }
     
+    // Check if we have a valid session before attempting WebSocket connection
+    if (!CSRF || CSRF === '') {
+        console.warn('No CSRF token - session may be invalid');
+        toast('Authentication required for terminal access', 'warning');
+        return;
+    }
+    
     try {
         const proto = location.protocol === 'https:' ? 'wss' : 'ws';
         ws = new WebSocket(`${proto}://${location.host}/ws/term`);
@@ -7891,17 +7934,28 @@ function connectTerm() {
         ws.onclose = (event) => { 
             console.log('Terminal WebSocket closed:', event.code, event.reason);
             
+            // Handle different close codes for better diagnosis
+            if (event.code === 1002) {
+                toast('Terminal disconnected: Protocol error', 'error');
+            } else if (event.code === 1006) {
+                toast('Terminal disconnected: Connection lost', 'warning');
+            } else if (event.code === 1011) {
+                toast('Terminal disconnected: Server error', 'error');
+            } else {
+                toast(`Terminal disconnected (code: ${event.code})`, 'warning');
+            }
+            
             if (reconnectAttempts < maxReconnectAttempts) {
                 const delay = reconnectDelay * Math.pow(1.5, reconnectAttempts); // Exponential backoff
-                toast(`Terminal disconnected - reconnecting in ${Math.round(delay/1000)}s... (${reconnectAttempts + 1}/${maxReconnectAttempts})`); 
+                toast(`Terminal reconnecting in ${Math.round(delay/1000)}s... (${reconnectAttempts + 1}/${maxReconnectAttempts})`); 
                 
                 setTimeout(() => {
                     reconnectAttempts++;
                     connectTerm();
                 }, delay);
             } else {
-                toast('Terminal connection failed - max retry attempts reached. Please refresh the page.', 'error');
-                term.textContent += '\n❌ Connection lost. Please refresh the page to reconnect.\n';
+                toast('Terminal connection failed - max retry attempts reached. Check your session and refresh the page.', 'error');
+                term.textContent += '\n❌ Connection lost. Possible causes:\n• Session expired (please refresh and login again)\n• Server overloaded\n• Network connectivity issues\n• Please refresh the page to reconnect.\n';
             }
             
             ws = null; 
@@ -8163,6 +8217,10 @@ $('#li-btn').onclick = async () => {
             CSRF = j.csrf || ''; 
             hideLogin(); 
             toast('Login successful'); 
+            
+            // Load Jarvis memory immediately after successful login
+            await loadJarvisMemory();
+            
             refresh(); 
         } else if (r.status === 401) {
             const j = await r.json().catch(() => ({}));
@@ -8902,20 +8960,7 @@ async function executeToolRequest(tool) {
     return data.output || 'No output generated';
 }
 
-async function loadJarvisMemory() {
-    try {
-        const response = await fetch('/api/jarvis/memory');
-        if (response.ok) {
-            const data = await response.json();
-            jarvisMemory = data.memory || {};
-            userPreferences = data.preferences || {};
-            conversationHistory = data.history || [];
-            updateAIStats();
-        }
-    } catch (err) {
-        console.error('Failed to load Jarvis memory:', err);
-    }
-}
+
 
 async function saveJarvisMemory() {
     try {
