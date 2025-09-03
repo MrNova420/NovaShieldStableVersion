@@ -4415,6 +4415,7 @@ class Handler(SimpleHTTPRequestHandler):
                 audit(f'UNAUTHORIZED_ACCESS ip={client_ip}')
             
             # Enhanced session handling with force_login_on_reload support
+            # Note: Jarvis memory is stored separately from sessions and persists across session clears
             force_login_on_reload = _coerce_bool(cfg_get('security.force_login_on_reload', False), False)
             
             # Check if this is a fresh page load (not an AJAX request) by looking at headers
@@ -4423,7 +4424,8 @@ class Handler(SimpleHTTPRequestHandler):
             # If AUTH_STRICT is enabled and no valid session, clear session cookie
             if AUTH_STRICT and not sess:
                 self._set_headers(200, 'text/html; charset=utf-8', {'Set-Cookie': 'NSSESS=deleted; Path=/; HttpOnly; Max-Age=0; SameSite=Strict'})
-            # If force_login_on_reload is enabled, only clear sessions on fresh page loads (not after login redirect)
+            # If force_login_on_reload is enabled, clear session cookie on fresh page loads without session
+            # This ensures login prompt appears on refresh while preserving API access after successful login
             elif force_login_on_reload and not sess and is_page_load:
                 self._set_headers(200, 'text/html; charset=utf-8', {'Set-Cookie': 'NSSESS=deleted; Path=/; HttpOnly; Max-Age=0; SameSite=Strict'})
             else:
@@ -4752,7 +4754,8 @@ class Handler(SimpleHTTPRequestHandler):
                                 f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} [2FA_FAIL] IP={ip} User={user} UserAgent='{user_agent[:100]}'\n")
                         except Exception: pass
                         self._set_headers(401); self.wfile.write(b'{"ok":false,"need_2fa":true}'); return
-                        
+                
+                # Create session after all authentication checks pass (moved outside 2FA block)
                 token, csrf = new_session(user)
                 login_ok(self)
                 py_alert('INFO', f'LOGIN OK user={user} ip={ip}')
