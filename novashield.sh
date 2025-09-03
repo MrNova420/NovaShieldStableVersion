@@ -75,15 +75,23 @@ alert(){
   mkdir -p "$(dirname "$NS_ALERTS")" 2>/dev/null
   echo "$line" | tee -a "$NS_ALERTS" >&2
   
-  # Enhanced alert categorization
-  case "$level" in
-    CRIT|ERROR)
-      # Critical security events
-      echo "$(ns_now) [THREAT] $level: $msg" | tee -a "$NS_LOGS/security.log" >/dev/null 2>&1
+  # Enhanced alert categorization - only log true security events to security.log
+  # Skip system resource warnings (memory, disk, CPU) from being security events
+  case "$msg" in
+    *"Memory "*|*"Disk "*|*"CPU "*|*"load "*|*"storage "*|*"elevated"*|*"high: "*%)
+      # These are system resource warnings, not security threats - only log to alerts.log
       ;;
-    WARN)
-      # Warning-level security events
-      echo "$(ns_now) [SECURITY] $level: $msg" | tee -a "$NS_LOGS/security.log" >/dev/null 2>&1
+    *)
+      # Log actual security events to security.log
+      case "$level" in
+        CRIT|ERROR)
+          echo "$(ns_now) [THREAT] $level: $msg" | tee -a "$NS_LOGS/security.log" >/dev/null 2>&1
+          ;;
+        WARN)
+          # Only log non-resource warnings as security events
+          echo "$(ns_now) [SECURITY] $level: $msg" | tee -a "$NS_LOGS/security.log" >/dev/null 2>&1
+          ;;
+      esac
       ;;
   esac
   
@@ -1456,8 +1464,8 @@ def get_client_ip(handler):
         if cf_ip:
             return cf_ip
     
-    # Fallback to direct connection IP
-    return get_client_ip(handler)  # This was originally handler.client_address[0] but now uses the new function
+    # Fallback to direct connection IP (fixed recursive call)
+    return handler.client_address[0]
 
 def py_alert(level, msg):
     """Helper to log security alerts to alerts.log in the same format as bash alert()"""
@@ -4499,6 +4507,24 @@ class Handler(SimpleHTTPRequestHandler):
                     open(CHATLOG,'a',encoding='utf-8').write(f'{time.strftime("%Y-%m-%d %H:%M:%S")} User:{username} IP:{user_ip} Q:{prompt} A:{reply_text}\n')
                 except Exception: 
                     py_alert('WARN', f'Failed to write chat log for {username}@{user_ip}')
+                
+                # Save AI reply to user memory for learning
+                user_memory["history"].append({
+                    "timestamp": now,
+                    "type": "ai",
+                    "user": username,
+                    "reply": reply_text,
+                    "context": {
+                        "response_length": len(reply_text),
+                        "prompt_analyzed": prompt
+                    }
+                })
+                
+                # Enhanced learning from both prompt and reply
+                enhanced_jarvis_learning(username, prompt, {"reply": reply_text, "action": action})
+                
+                # Save updated memory after AI reply
+                save_user_memory(username, user_memory)
                     
                 response_data = {'ok': True, 'reply': reply_text}
                 if voice_enabled:
