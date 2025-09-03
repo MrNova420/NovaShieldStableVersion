@@ -1755,62 +1755,90 @@ def aes_key_path():
     return os.path.join(NS_HOME, aes_file)
 
 def enc_json_to_file(obj, out_path_enc):
-    """Encrypt a JSON object to a file using AES-256-CBC"""
-    import tempfile, subprocess
+    """Encrypt a JSON object to a file using AES-256-CBC with file locking"""
+    import tempfile, subprocess, fcntl
+    
+    # Create a lock file to prevent concurrent access
+    lock_path = out_path_enc + '.lock'
+    
     try:
-        # Write JSON to temporary file
-        with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.json') as tmp:
-            json.dump(obj, tmp, ensure_ascii=False, indent=2)
-            tmp_path = tmp.name
-        
-        # Encrypt using OpenSSL
-        key_path = aes_key_path()
-        if not os.path.exists(key_path):
-            # Generate key if it doesn't exist with proper permissions
-            os.makedirs(os.path.dirname(key_path), exist_ok=True)
-            with open(key_path, 'wb') as f:
-                # Generate 64 bytes (512 bits) of entropy for stronger key
-                f.write(os.urandom(64))
-            # Set restrictive permissions on key file
-            os.chmod(key_path, 0o600)
-        
-        cmd = ['openssl', 'enc', '-aes-256-cbc', '-salt', '-pbkdf2', 
-               '-in', tmp_path, '-out', out_path_enc, '-pass', f'file:{key_path}']
-        result = subprocess.run(cmd, capture_output=True, timeout=30)
-        
-        # Clean up temp file
-        os.unlink(tmp_path)
-        
-        return result.returncode == 0
+        # Acquire file lock to prevent race conditions
+        with open(lock_path, 'w') as lock_file:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+            
+            # Write JSON to temporary file
+            with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.json') as tmp:
+                json.dump(obj, tmp, ensure_ascii=False, indent=2)
+                tmp_path = tmp.name
+            
+            # Encrypt using OpenSSL
+            key_path = aes_key_path()
+            if not os.path.exists(key_path):
+                # Generate key if it doesn't exist with proper permissions
+                os.makedirs(os.path.dirname(key_path), exist_ok=True)
+                with open(key_path, 'wb') as f:
+                    # Generate 64 bytes (512 bits) of entropy for stronger key
+                    f.write(os.urandom(64))
+                # Set restrictive permissions on key file
+                os.chmod(key_path, 0o600)
+            
+            cmd = ['openssl', 'enc', '-aes-256-cbc', '-salt', '-pbkdf2', 
+                   '-in', tmp_path, '-out', out_path_enc, '-pass', f'file:{key_path}']
+            result = subprocess.run(cmd, capture_output=True, timeout=30)
+            
+            # Clean up temp file
+            os.unlink(tmp_path)
+            
+            return result.returncode == 0
     except Exception:
         return False
+    finally:
+        # Clean up lock file
+        try:
+            os.remove(lock_path)
+        except:
+            pass
 
 def dec_json_from_file(in_path_enc):
-    """Decrypt a JSON file using AES-256-CBC"""
-    import tempfile, subprocess
+    """Decrypt a JSON file using AES-256-CBC with file locking"""
+    import tempfile, subprocess, fcntl
+    
+    # Create a lock file to prevent concurrent access
+    lock_path = in_path_enc + '.lock'
+    
     try:
-        key_path = aes_key_path()
-        if not os.path.exists(key_path):
-            return None
-        
-        # Decrypt to temporary file
-        with tempfile.NamedTemporaryFile(mode='r', delete=False, suffix='.json') as tmp:
-            tmp_path = tmp.name
-        
-        cmd = ['openssl', 'enc', '-d', '-aes-256-cbc', '-pbkdf2',
-               '-in', in_path_enc, '-out', tmp_path, '-pass', f'file:{key_path}']
-        result = subprocess.run(cmd, capture_output=True, timeout=30)
-        
-        if result.returncode == 0:
-            with open(tmp_path, 'r', encoding='utf-8') as f:
-                obj = json.load(f)
-            os.unlink(tmp_path)
-            return obj
-        else:
-            os.unlink(tmp_path)
-            return None
+        # Acquire file lock to prevent race conditions
+        with open(lock_path, 'w') as lock_file:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+            
+            key_path = aes_key_path()
+            if not os.path.exists(key_path):
+                return None
+            
+            # Decrypt to temporary file
+            with tempfile.NamedTemporaryFile(mode='r', delete=False, suffix='.json') as tmp:
+                tmp_path = tmp.name
+            
+            cmd = ['openssl', 'enc', '-d', '-aes-256-cbc', '-pbkdf2',
+                   '-in', in_path_enc, '-out', tmp_path, '-pass', f'file:{key_path}']
+            result = subprocess.run(cmd, capture_output=True, timeout=30)
+            
+            if result.returncode == 0:
+                with open(tmp_path, 'r', encoding='utf-8') as f:
+                    obj = json.load(f)
+                os.unlink(tmp_path)
+                return obj
+            else:
+                os.unlink(tmp_path)
+                return None
     except Exception:
         return None
+    finally:
+        # Clean up lock file
+        try:
+            os.remove(lock_path)
+        except:
+            pass
 
 def _coerce_bool(v, default=False):
     if isinstance(v, bool): return v
@@ -4947,6 +4975,68 @@ class Handler(SimpleHTTPRequestHandler):
                 self.wfile.write(json.dumps({'error': str(e)}).encode('utf-8'))
                 return
 
+        if parsed.path == '/api/jarvis/memory':
+            if not require_auth(self): return
+            sess = get_session(self) or {}
+            username = sess.get('user', 'anonymous')
+            
+            if self.command == 'GET':
+                # Load user memory
+                try:
+                    user_memory = load_user_memory(username)
+                    self._set_headers(200)
+                    self.wfile.write(json.dumps(user_memory).encode('utf-8'))
+                    return
+                except Exception as e:
+                    self._set_headers(500)
+                    self.wfile.write(json.dumps({'error': str(e)}).encode('utf-8'))
+                    return
+            
+            elif self.command == 'POST':
+                # Save user memory/preferences
+                try:
+                    content_length = int(self.headers.get('Content-Length', 0))
+                    if content_length == 0:
+                        self._set_headers(400)
+                        self.wfile.write(json.dumps({'error': 'No data provided'}).encode('utf-8'))
+                        return
+                    
+                    post_data = self.rfile.read(content_length).decode('utf-8')
+                    data = json.loads(post_data)
+                    
+                    # Load current memory
+                    user_memory = load_user_memory(username)
+                    
+                    # Update preferences if provided
+                    if 'preferences' in data:
+                        user_memory['preferences'].update(data['preferences'])
+                        security_log(f"JARVIS_PREFERENCES_UPDATED user={username} preferences={data['preferences']}")
+                    
+                    # Update specific fields if provided
+                    for field in ['memory', 'history']:
+                        if field in data:
+                            user_memory[field] = data[field]
+                    
+                    # Save updated memory
+                    success = save_user_memory(username, user_memory)
+                    
+                    if success:
+                        self._set_headers(200)
+                        self.wfile.write(json.dumps({'success': True, 'message': 'Memory updated'}).encode('utf-8'))
+                    else:
+                        self._set_headers(500)
+                        self.wfile.write(json.dumps({'error': 'Failed to save memory'}).encode('utf-8'))
+                    return
+                    
+                except json.JSONDecodeError:
+                    self._set_headers(400)
+                    self.wfile.write(json.dumps({'error': 'Invalid JSON'}).encode('utf-8'))
+                    return
+                except Exception as e:
+                    self._set_headers(500)
+                    self.wfile.write(json.dumps({'error': str(e)}).encode('utf-8'))
+                    return
+
         if parsed.path == '/api/users':
             if not require_auth(self): return
             try:
@@ -6782,36 +6872,8 @@ let CSRF = '';
 
 $('#btn-refresh').onclick = () => location.reload();
 
-// 420 Theme Toggle
-$('#btn-420-theme').onclick = () => {
-  const root = document.documentElement;
-  const btn = $('#btn-420-theme');
-  const is420Active = root.classList.contains('theme-420');
-  
-  if (is420Active) {
-    root.classList.remove('theme-420');
-    btn.textContent = '🌿 420 Mode';
-    btn.title = 'Toggle 420 themed colors (purple, green, blue)';
-    localStorage.setItem('theme-420', 'false');
-    toast('🌿 420 Theme Disabled');
-  } else {
-    root.classList.add('theme-420');
-    btn.textContent = '🌿 Classic';
-    btn.title = 'Switch back to classic blue theme';
-    localStorage.setItem('theme-420', 'true');
-    toast('🌿 420 Theme Activated - Purple & Green Power!');
-  }
-};
-
-// Initialize 420 theme on page load
-if (localStorage.getItem('theme-420') === 'true') {
-  document.documentElement.classList.add('theme-420');
-  const btn = $('#btn-420-theme');
-  if (btn) {
-    btn.textContent = '🌿 Classic';
-    btn.title = 'Switch back to classic blue theme';
-  }
-}
+// 420 Theme Toggle with Jarvis memory persistence
+$('#btn-420-theme').onclick = toggle420Theme;
 
 // Header actions
 $$('header .actions button[data-act]').forEach(btn=>{
@@ -7362,6 +7424,141 @@ async function loadUsers() {
   }
 }
 
+// Jarvis Memory & Theme Management
+let jarvisMemory = null;
+
+// Load Jarvis memory on page load and apply theme
+async function loadJarvisMemory() {
+  try {
+    const response = await api('/api/jarvis/memory');
+    const memory = await response.json();
+    jarvisMemory = memory;
+    
+    // Apply saved theme preference
+    const savedTheme = memory.preferences?.theme;
+    if (savedTheme && savedTheme === 'theme-420') {
+      document.documentElement.classList.add('theme-420');
+      const btn420 = $('#btn-420-theme');
+      if (btn420) {
+        btn420.textContent = '🌿 Classic Mode';
+        btn420.classList.add('active');
+      }
+    }
+    
+    // Update AI stats
+    updateAIStats(memory);
+    
+    return memory;
+  } catch (error) {
+    console.warn('Failed to load Jarvis memory:', error);
+    // Return default memory structure
+    jarvisMemory = {
+      memory: {},
+      preferences: { theme: 'jarvis-dark' },
+      history: [],
+      last_seen: new Date().toISOString()
+    };
+    return jarvisMemory;
+  }
+}
+
+// Save Jarvis memory
+async function saveJarvisMemory(updates) {
+  try {
+    const response = await fetch('/api/jarvis/memory', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-CSRF': CSRF
+      },
+      body: JSON.stringify(updates)
+    });
+    
+    const result = await response.json();
+    
+    if (response.ok && result.success) {
+      console.log('Jarvis memory saved successfully');
+      return true;
+    } else {
+      console.error('Failed to save Jarvis memory:', result.error);
+      return false;
+    }
+  } catch (error) {
+    console.error('Error saving Jarvis memory:', error);
+    return false;
+  }
+}
+
+// Save theme preference
+async function saveThemePreference(theme) {
+  if (!jarvisMemory) {
+    await loadJarvisMemory();
+  }
+  
+  const updates = {
+    preferences: {
+      ...jarvisMemory.preferences,
+      theme: theme
+    }
+  };
+  
+  const success = await saveJarvisMemory(updates);
+  if (success) {
+    jarvisMemory.preferences.theme = theme;
+  }
+  
+  return success;
+}
+
+// Enhanced 420 theme toggle with persistence
+function toggle420Theme() {
+  const root = document.documentElement;
+  const btn = $('#btn-420-theme');
+  const isActive = root.classList.contains('theme-420');
+  
+  if (isActive) {
+    // Switch to classic theme
+    root.classList.remove('theme-420');
+    if (btn) {
+      btn.textContent = '🌿 420 Mode';
+      btn.classList.remove('active');
+    }
+    saveThemePreference('jarvis-dark');
+  } else {
+    // Switch to 420 theme
+    root.classList.add('theme-420');
+    if (btn) {
+      btn.textContent = '🌿 Classic Mode';
+      btn.classList.add('active');
+    }
+    saveThemePreference('theme-420');
+  }
+}
+
+// Update AI learning stats from memory
+function updateAIStats(memory) {
+  if (!memory) return;
+  
+  const conversationCount = memory.history ? memory.history.filter(h => h.type === 'user').length : 0;
+  const memorySize = JSON.stringify(memory).length;
+  const lastSeen = memory.last_seen || 'Never';
+  
+  const conversationEl = $('#conversation-count');
+  const memorySizeEl = $('#memory-size');
+  const lastInteractionEl = $('#last-interaction');
+  
+  if (conversationEl) conversationEl.textContent = conversationCount;
+  if (memorySizeEl) memorySizeEl.textContent = `${Math.round(memorySize / 1024)} KB`;
+  if (lastInteractionEl) lastInteractionEl.textContent = lastSeen;
+  
+  // Update learning panel
+  const preferredThemeEl = $('#preferred-theme');
+  if (preferredThemeEl) {
+    const themeDisplay = memory.preferences?.theme === 'theme-420' ? '420 Mode' : 'JARVIS Dark';
+    preferredThemeEl.textContent = themeDisplay;
+  }
+}
+
 // Initialize config editor event handlers
 function initConfigEditor() {
   const saveBtn = $('#config-save');
@@ -7386,6 +7583,51 @@ function initConfigEditor() {
   
   if (refreshUsersBtn) {
     refreshUsersBtn.addEventListener('click', loadUsers);
+  }
+  
+  // Memory management buttons
+  const clearMemoryBtn = $('#clear-memory');
+  const exportMemoryBtn = $('#export-memory');
+  
+  if (clearMemoryBtn) {
+    clearMemoryBtn.addEventListener('click', async () => {
+      if (confirm('Are you sure you want to clear all Jarvis memory? This cannot be undone.')) {
+        const success = await saveJarvisMemory({
+          memory: {},
+          history: [],
+          preferences: { theme: jarvisMemory?.preferences?.theme || 'jarvis-dark' }
+        });
+        
+        if (success) {
+          toast('Jarvis memory cleared successfully', 'success');
+          jarvisMemory.memory = {};
+          jarvisMemory.history = [];
+          updateAIStats(jarvisMemory);
+        } else {
+          toast('Failed to clear memory', 'error');
+        }
+      }
+    });
+  }
+  
+  if (exportMemoryBtn) {
+    exportMemoryBtn.addEventListener('click', async () => {
+      if (jarvisMemory) {
+        const dataStr = JSON.stringify(jarvisMemory, null, 2);
+        const dataBlob = new Blob([dataStr], { type: 'application/json' });
+        const url = URL.createObjectURL(dataBlob);
+        
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `jarvis-memory-${new Date().toISOString().split('T')[0]}.json`;
+        a.click();
+        
+        URL.revokeObjectURL(url);
+        toast('Memory exported successfully', 'success');
+      } else {
+        toast('No memory data to export', 'warning');
+      }
+    });
   }
 }
 
@@ -8969,6 +9211,7 @@ tabs.forEach(b => {
         if (activeTab === 'ai' && !loadedTabs.has('ai-enhanced')) {
             loadedTabs.add('ai-enhanced');
             initEnhancedAI();
+            initConfigEditor(); // Initialize memory management buttons
         }
         
         if (activeTab === 'results' && !loadedTabs.has('results')) {
@@ -9083,6 +9326,13 @@ document.addEventListener('visibilitychange', handleVisibilityChange);
 if (!document.hidden) {
     startKeepAlive();
 }
+
+// Load Jarvis memory and apply theme on page load
+loadJarvisMemory().then(() => {
+    console.log('Jarvis memory loaded and theme applied');
+}).catch(error => {
+    console.warn('Failed to load Jarvis memory:', error);
+});
 
 // Initialize AI enhancements on page load
 initEnhancedAI();
