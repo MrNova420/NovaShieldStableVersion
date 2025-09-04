@@ -1,0 +1,24 @@
+# NovaShield .gitignore
+# Temporary test directories
+/tmp/
+tmp/
+
+# Build artifacts
+*.pyc
+__pycache__/
+
+# NovaShield runtime files (these would be in ~/.novashield, but just in case)
+logs/
+.pids/
+control/
+keys/
+www/
+.tmp/
+
+# IDE files  
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db
