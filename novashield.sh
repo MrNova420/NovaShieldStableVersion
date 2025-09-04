@@ -7827,12 +7827,18 @@ function runDiagnostics() {
                 diagnostics.learning_capability = '⚠️ Limited';
             }
             
+            // Add system health score
+            const healthScore = getSystemHealthScore();
+            diagnostics.system_health = `${healthScore}% (${healthScore >= 90 ? '✅ Excellent' : healthScore >= 70 ? '⚠️ Good' : '❌ Needs attention'})`;
+            
             // Display results
             const report = Object.entries(diagnostics)
                 .map(([key, value]) => `${key.replace(/_/g, ' ').toUpperCase()}: ${value}`)
                 .join('\n');
+            
+            const metricsReport = `\nPERFORMANCE METRICS:\nAPI Calls: ${performanceMetrics.apiCalls}\nAPI Errors: ${performanceMetrics.apiErrors}\nTab Switches: ${performanceMetrics.tabSwitches}\nWS Reconnections: ${performanceMetrics.wsReconnections}`;
                 
-            console.log('🔍 System Diagnostics Report:\n' + report);
+            console.log('🔍 System Diagnostics Report:\n' + report + metricsReport);
             toast('Diagnostics complete - check console for details', 'success');
             
             if (voiceEnabled) {
@@ -8002,6 +8008,8 @@ function toast(msg){
 }
 
 async function api(path, opts, retries = 3){
+  trackPerformanceMetric('apiCalls');
+  
   for (let attempt = 1; attempt <= retries; attempt++) {
     try {
       const r = await fetch(path, Object.assign({
@@ -8010,6 +8018,7 @@ async function api(path, opts, retries = 3){
       },opts||{}));
       
       if(r.status===401){
+        trackPerformanceMetric('apiErrors');
         // Enhanced 401 handling to prevent login loops
         console.warn(`401 error on ${path}, attempt ${attempt}/${retries}`);
         if (attempt === 1) {
@@ -8025,12 +8034,14 @@ async function api(path, opts, retries = 3){
       }
       
       if(r.status===403){
+        trackPerformanceMetric('apiErrors');
         console.warn(`403 error on ${path} - CSRF or permission issue`);
         toast('Forbidden or CSRF token expired', 'warning'); 
         throw new Error('forbidden');
       }
       
       if(r.status >= 500) {
+        trackPerformanceMetric('apiErrors');
         console.warn(`Server error ${r.status} on ${path}, attempt ${attempt}/${retries}`);
         if (attempt < retries) {
           await new Promise(resolve => setTimeout(resolve, 2000 * attempt)); // longer delay for server errors
@@ -8041,6 +8052,7 @@ async function api(path, opts, retries = 3){
       }
       
       if(!r.ok){ 
+        trackPerformanceMetric('apiErrors');
         console.warn(`API error ${r.status} on ${path}, attempt ${attempt}/${retries}`);
         if (attempt < retries) {
           await new Promise(resolve => setTimeout(resolve, 1000 * attempt)); // exponential backoff
@@ -8917,6 +8929,45 @@ async function saveJarvisMemory(updates) {
   }
 }
 
+// Enhanced performance monitoring for system health tracking
+let performanceMetrics = {
+    apiCalls: 0,
+    apiErrors: 0,
+    tabSwitches: 0,
+    wsReconnections: 0,
+    lastResetTime: Date.now()
+};
+
+function trackPerformanceMetric(metric, increment = 1) {
+    if (performanceMetrics[metric] !== undefined) {
+        performanceMetrics[metric] += increment;
+    }
+    
+    // Reset metrics every hour to prevent memory buildup
+    if (Date.now() - performanceMetrics.lastResetTime > 3600000) {
+        console.log('📊 Performance metrics (last hour):', performanceMetrics);
+        performanceMetrics = {
+            apiCalls: 0,
+            apiErrors: 0,
+            tabSwitches: 0,
+            wsReconnections: 0,
+            lastResetTime: Date.now()
+        };
+    }
+}
+
+function getSystemHealthScore() {
+    const errorRate = performanceMetrics.apiCalls > 0 ? 
+        (performanceMetrics.apiErrors / performanceMetrics.apiCalls) : 0;
+    const reconnectionRate = performanceMetrics.wsReconnections;
+    
+    let score = 100;
+    score -= Math.min(errorRate * 100, 50); // Max 50 point penalty for errors
+    score -= Math.min(reconnectionRate * 5, 30); // Max 30 point penalty for reconnections
+    
+    return Math.max(score, 0);
+}
+
 // Auto-save scheduler for continuous memory persistence
 function scheduleAutoSave() {
   if (!autoSaveEnabled) return;
@@ -9474,6 +9525,7 @@ function connectTerm() {
                     }).then(response => {
                         if (response.ok) {
                             console.log('🔄 Session valid, attempting WebSocket reconnection...');
+                            trackPerformanceMetric('wsReconnections');
                             connectTerm();
                         } else if (response.status === 401) {
                             console.warn('❌ Session expired, redirecting to login');
@@ -11058,6 +11110,7 @@ tabs.forEach(b => {
     b.onclick = async () => {
         try {
             // Enhanced tab switching with error handling and stability improvements
+            trackPerformanceMetric('tabSwitches');
             console.log(`🔄 Switching to tab: ${b.dataset.tab}`);
             
             // Save current state before switching
