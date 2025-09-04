@@ -5265,10 +5265,10 @@ class Handler(SimpleHTTPRequestHandler):
                         'ok': True,
                         'output': output
                     }).encode('utf-8'))
-                except Exception as e:
-                    security_log(f"COMMAND_ERROR user={username} ip={user_ip} error={str(e)}")
-                    self._set_headers(500)
-                    self.wfile.write(json.dumps({'ok': False, 'error': str(e)}).encode('utf-8'))
+            except Exception as e:
+                security_log(f"COMMAND_ERROR user={username} ip={user_ip} error={str(e)}")
+                self._set_headers(500)
+                self.wfile.write(json.dumps({'ok': False, 'error': str(e)}).encode('utf-8'))
             return
             
             if parsed.path == '/api/webgen':
@@ -5277,10 +5277,10 @@ class Handler(SimpleHTTPRequestHandler):
                     data = json.loads(body or '{}')
                 except Exception:
                     data = {}
-            title = data.get('title','Untitled'); content = data.get('content','')
-            slug = ''.join([c.lower() if c.isalnum() else '-' for c in title]).strip('-') or f'page-{int(time.time())}'
-            Path(SITE_DIR).mkdir(parents=True, exist_ok=True)
-            page_path = os.path.join(SITE_DIR, f'{slug}.html')
+                title = data.get('title','Untitled'); content = data.get('content','')
+                slug = ''.join([c.lower() if c.isalnum() else '-' for c in title]).strip('-') or f'page-{int(time.time())}'
+                Path(SITE_DIR).mkdir(parents=True, exist_ok=True)
+                page_path = os.path.join(SITE_DIR, f'{slug}.html')
             write_text(page_path, f'<!DOCTYPE html><html><head><meta charset="utf-8"><title>{title}</title></head><body><h1>{title}</h1><div>{content}</div></body></html>')
             pages = [p for p in os.listdir(SITE_DIR) if p.endswith('.html')]
             links = '\n'.join([f'<li><a href="/site/{p}">{p}</a></li>' for p in pages if p!='index.html'])
