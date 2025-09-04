@@ -7806,7 +7806,11 @@ function runDiagnostics() {
             }
             
             // Check connection status
-            fetch('/api/status', { method: 'GET' })
+            fetch('/api/status', { 
+                method: 'GET',
+                credentials: 'same-origin',
+                headers: { 'Content-Type': 'application/json' }
+            })
                 .then(r => r.ok ? (diagnostics.connection_status = '✅ Connected') : (diagnostics.connection_status = '❌ Issues'))
                 .catch(() => diagnostics.connection_status = '❌ Failed');
             
@@ -9927,7 +9931,10 @@ $('#li-btn').onclick = async () => {
 // Check authentication status on page load
 async function checkAuth() {
     try {
-        const r = await fetch('/api/status');
+        const r = await fetch('/api/status', {
+            credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json' }
+        });
         if (r.status === 401) {
             showLogin();
         } else {
@@ -10425,7 +10432,10 @@ async function initializeVoice() {
         
         // Try to load voice_enabled setting from status API
         try {
-            const response = await fetch('/api/status');
+            const response = await fetch('/api/status', {
+                credentials: 'same-origin',
+                headers: { 'Content-Type': 'application/json' }
+            });
             if (response.ok) {
                 const data = await response.json();
                 voiceEnabled = data.voice_enabled !== undefined ? data.voice_enabled : true;
