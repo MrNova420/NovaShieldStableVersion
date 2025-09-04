@@ -3805,39 +3805,105 @@ def save_command_result(tool_name, command, output, username):
 def scan_system_tools():
     """Scan system for available tools and return their status."""
     tools = {
-        # Security tools
+        # Security tools - Core security suite
         'nmap': {'description': 'Network Mapper - Port scanning and network discovery', 'category': 'security'},
         'netstat': {'description': 'Display network connections and listening ports', 'category': 'network'},
         'ss': {'description': 'Modern replacement for netstat - socket statistics', 'category': 'network'},
         'iptables': {'description': 'Configure Linux firewall rules', 'category': 'security'},
+        'nftables': {'description': 'Modern Linux firewall management', 'category': 'security'},
+        'ufw': {'description': 'Uncomplicated Firewall - simplified iptables', 'category': 'security'},
+        'fail2ban': {'description': 'Intrusion prevention software framework', 'category': 'security'},
+        'chkrootkit': {'description': 'Rootkit detection utility', 'category': 'security'},
+        'rkhunter': {'description': 'Rootkit Hunter - malware scanner', 'category': 'security'},
+        'lynis': {'description': 'Security auditing tool for Unix-based systems', 'category': 'security'},
         
-        # Network tools
+        # Network tools - Comprehensive networking suite  
         'ping': {'description': 'Test network connectivity to hosts', 'category': 'network'},
         'curl': {'description': 'Transfer data to/from servers - HTTP client', 'category': 'network'},
         'wget': {'description': 'Download files from web servers', 'category': 'network'},
         'dig': {'description': 'DNS lookup utility for domain name resolution', 'category': 'network'},
+        'nslookup': {'description': 'DNS lookup utility - legacy version', 'category': 'network'},
         'traceroute': {'description': 'Trace packet route to destination', 'category': 'network'},
+        'tracepath': {'description': 'Traces path to destination discovering MTU', 'category': 'network'},
+        'mtr': {'description': 'Network diagnostic tool (ping + traceroute)', 'category': 'network'},
+        'nc': {'description': 'Netcat - networking utility for TCP/UDP connections', 'category': 'network'},
+        'netcat': {'description': 'Alternative name for nc - networking utility', 'category': 'network'},
+        'socat': {'description': 'Multipurpose relay - advanced netcat', 'category': 'network'},
+        'tcpdump': {'description': 'Network packet analyzer and sniffer', 'category': 'network'},
+        'wireshark': {'description': 'Network protocol analyzer with GUI', 'category': 'network'},
+        'tshark': {'description': 'Terminal-based network protocol analyzer', 'category': 'network'},
+        'ngrep': {'description': 'Network packet grep - search network traffic', 'category': 'network'},
+        'arp': {'description': 'Manipulate ARP cache entries', 'category': 'network'},
+        'route': {'description': 'Display and manipulate routing table', 'category': 'network'},
+        'ip': {'description': 'Show and manipulate routing, network devices', 'category': 'network'},
+        'ifconfig': {'description': 'Configure network interface', 'category': 'network'},
         
-        # System tools
+        # System tools - Core system utilities
         'htop': {'description': 'Interactive process viewer and system monitor', 'category': 'system'},
         'lsof': {'description': 'List open files and network connections', 'category': 'system'},
         'df': {'description': 'Display filesystem disk space usage', 'category': 'system'},
         'ps': {'description': 'Display running processes', 'category': 'system'},
+        'pstree': {'description': 'Display processes in tree format', 'category': 'system'},
         'top': {'description': 'Display system processes and resource usage', 'category': 'system'},
-        'iotop': {'description': 'Display I/O usage by processes', 'category': 'system'},
-        'iostat': {'description': 'I/O statistics monitoring', 'category': 'monitoring'},
+        'killall': {'description': 'Kill processes by name', 'category': 'system'},
+        'pkill': {'description': 'Kill processes based on criteria', 'category': 'system'},
+        'pgrep': {'description': 'Find processes based on criteria', 'category': 'system'},
+        'uptime': {'description': 'Show system uptime and load', 'category': 'system'},
+        'w': {'description': 'Show who is logged on and what they are doing', 'category': 'system'},
+        'who': {'description': 'Show who is logged on', 'category': 'system'},
+        'whoami': {'description': 'Print current username', 'category': 'system'},
+        'id': {'description': 'Print user and group IDs', 'category': 'system'},
+        'su': {'description': 'Switch user', 'category': 'system'},
+        'sudo': {'description': 'Execute commands as another user', 'category': 'system'},
+        'screen': {'description': 'Full-screen window manager with detach', 'category': 'system'},
+        'tmux': {'description': 'Terminal multiplexer', 'category': 'system'},
         
-        # Monitoring tools
+        # Monitoring tools - System performance monitoring
+        'iotop': {'description': 'Display I/O usage by processes', 'category': 'monitoring'},
+        'iostat': {'description': 'I/O statistics monitoring', 'category': 'monitoring'},
         'vmstat': {'description': 'Virtual memory statistics', 'category': 'monitoring'},
         'sar': {'description': 'System activity reporter', 'category': 'monitoring'},
         'dstat': {'description': 'Versatile resource statistics', 'category': 'monitoring'},
+        'free': {'description': 'Display memory usage', 'category': 'monitoring'},
+        'watch': {'description': 'Execute program periodically showing output', 'category': 'monitoring'},
+        'strace': {'description': 'Trace system calls and signals', 'category': 'monitoring'},
+        'ltrace': {'description': 'Library call tracer', 'category': 'monitoring'},
+        'ldd': {'description': 'Print shared library dependencies', 'category': 'monitoring'},
+        'perf': {'description': 'Performance analysis tools', 'category': 'monitoring'},
+        'sysstat': {'description': 'System performance monitoring utilities', 'category': 'monitoring'},
         
-        # Forensics tools
+        # Forensics tools - File analysis and investigation
         'strings': {'description': 'Extract text strings from binary files', 'category': 'forensics'},
         'file': {'description': 'Determine file type', 'category': 'forensics'},
         'xxd': {'description': 'Hex dump utility', 'category': 'forensics'},
+        'hexdump': {'description': 'ASCII, decimal, hex, octal dump', 'category': 'forensics'},
+        'od': {'description': 'Octal dump - display files in various formats', 'category': 'forensics'},
         'md5sum': {'description': 'Calculate MD5 checksums', 'category': 'forensics'},
         'sha256sum': {'description': 'Calculate SHA256 checksums', 'category': 'forensics'},
+        'sha1sum': {'description': 'Calculate SHA1 checksums', 'category': 'forensics'},
+        'sha512sum': {'description': 'Calculate SHA512 checksums', 'category': 'forensics'},
+        'stat': {'description': 'Display file or filesystem status', 'category': 'forensics'},
+        'find': {'description': 'Search for files and directories', 'category': 'forensics'},
+        'locate': {'description': 'Find files by name using database', 'category': 'forensics'},
+        'which': {'description': 'Locate command in PATH', 'category': 'forensics'},
+        'whereis': {'description': 'Locate binary, source, manual page', 'category': 'forensics'},
+        'grep': {'description': 'Search text patterns in files', 'category': 'forensics'},
+        'egrep': {'description': 'Extended regular expression grep', 'category': 'forensics'},
+        'fgrep': {'description': 'Fixed string grep', 'category': 'forensics'},
+        'awk': {'description': 'Text processing tool', 'category': 'forensics'},
+        'sed': {'description': 'Stream editor for filtering and transforming text', 'category': 'forensics'},
+        'sort': {'description': 'Sort lines of text files', 'category': 'forensics'},
+        'uniq': {'description': 'Report or filter unique lines', 'category': 'forensics'},
+        'wc': {'description': 'Word, line, character, and byte count', 'category': 'forensics'},
+        'head': {'description': 'Display first lines of files', 'category': 'forensics'},
+        'tail': {'description': 'Display last lines of files', 'category': 'forensics'},
+        'less': {'description': 'File viewer with backward navigation', 'category': 'forensics'},
+        'more': {'description': 'File viewer - forward navigation only', 'category': 'forensics'},
+        'cat': {'description': 'Display file contents', 'category': 'forensics'},
+        'tac': {'description': 'Display file contents in reverse', 'category': 'forensics'},
+        'diff': {'description': 'Compare files line by line', 'category': 'forensics'},
+        'cmp': {'description': 'Compare two files byte by byte', 'category': 'forensics'},
+        'comm': {'description': 'Compare sorted files line by line', 'category': 'forensics'},
     }
     
     # Check availability of each tool
@@ -10007,6 +10073,7 @@ $('#li-btn').onclick = async () => {
         const r = await fetch('/api/login', {
             method: 'POST', 
             headers: {'Content-Type': 'application/json'}, 
+            credentials: 'same-origin',
             body: JSON.stringify({user, pass, otp})
         });
         
