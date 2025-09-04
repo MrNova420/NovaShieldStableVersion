@@ -396,8 +396,8 @@ security:
   tls_key: "keys/tls.key"
   session_ttl_minutes: 720  # Session timeout in minutes (default: 12 hours)
   session_ttl_min: 720      # Alternate naming for session TTL 
-  strict_reload: false      # Force login on every page reload
-  force_login_on_reload: false  # Force login on every page reload (disabled for stability)
+  strict_reload: false      # Force login on every page reload  
+  force_login_on_reload: false  # Force login on every page reload (disabled to prevent loops)
   trust_proxy: false       # Trust X-Forwarded-For headers from reverse proxies
   single_session: true     # Enforce single active session per user
 
@@ -6113,9 +6113,30 @@ write_dashboard(){
             <h5>⚡ Training Actions</h5>
             <div class="training-actions">
               <button onclick="trainNow()" class="primary-btn" title="Start an immediate training session">🚀 Train Now</button>
+              <button onclick="optimizePerformance()" class="primary-btn" title="Optimize Jarvis performance">⚡ Optimize</button>
               <button onclick="clearMemory()" class="warning-btn" title="Clear all Jarvis memory">🗑️ Clear Memory</button>
               <button onclick="exportMemory()" class="control-btn" title="Export conversation history">💾 Export</button>
               <button onclick="importMemory()" class="control-btn" title="Import conversation history">📁 Import</button>
+              <button onclick="runDiagnostics()" class="control-btn" title="Run system diagnostics">🔍 Diagnostics</button>
+            </div>
+          </div>
+          
+          <!-- Advanced Controls -->
+          <div class="training-section">
+            <h5>🎛️ Advanced Controls</h5>
+            <div class="advanced-controls">
+              <label>Response Style: <select id="response-style-select" onchange="updateResponseStyle()">
+                <option value="professional">Professional</option>
+                <option value="casual">Casual</option>
+                <option value="technical" selected>Technical</option>
+                <option value="creative">Creative</option>
+              </select></label>
+              <label>Learning Sensitivity: <input type="range" id="learning-sensitivity" min="1" max="10" value="7" onchange="updateLearningSensitivity()"></label>
+              <div class="toggle-controls">
+                <label><input type="checkbox" id="auto-learn" checked onchange="toggleAutoLearning()"> Auto-learning</label>
+                <label><input type="checkbox" id="context-awareness" checked onchange="toggleContextAwareness()"> Context Awareness</label>
+                <label><input type="checkbox" id="personality-adaptation" onchange="togglePersonalityAdaptation()"> Personality Adaptation</label>
+              </div>
             </div>
           </div>
           
@@ -6976,6 +6997,7 @@ body.login-active header, body.login-active nav, body.login-active main{
     transition: all 0.2s;
     border: 1px solid;
     font-weight: 500;
+    margin: 2px;
 }
 
 .control-btn {
@@ -7045,6 +7067,58 @@ body.login-active header, body.login-active nav, body.login-active main{
 .memory-value {
     color: #cfe6ff;
     font-weight: 500;
+}
+
+.advanced-controls {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.advanced-controls label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: #94a3b8;
+    font-size: 11px;
+    margin-bottom: 4px;
+}
+
+.advanced-controls select {
+    padding: 4px 8px;
+    border-radius: 4px;
+    border: 1px solid #173764;
+    background: var(--card);
+    color: #cfe6ff;
+    font-size: 11px;
+    margin-left: auto;
+    min-width: 100px;
+}
+
+.advanced-controls input[type="range"] {
+    margin-left: auto;
+    width: 100px;
+}
+
+.toggle-controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-top: 8px;
+}
+
+.toggle-controls label {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 10px;
+    color: #94a3b8;
+    cursor: pointer;
+}
+
+.toggle-controls input[type="checkbox"] {
+    accent-color: var(--accent);
+    transform: scale(0.9);
 }
 
 #voice-input {
@@ -7659,6 +7733,209 @@ function importMemory() {
     input.click();
 }
 
+// Enhanced Training Dashboard Functions
+
+// Optimize Jarvis performance
+function optimizePerformance() {
+    if (!jarvisMemory) return;
+    
+    try {
+        // Clean up old conversation data
+        if (jarvisMemory.history && jarvisMemory.history.length > 100) {
+            jarvisMemory.history = jarvisMemory.history.slice(-50); // Keep last 50 conversations
+        }
+        
+        // Reset learning patterns if they get too complex
+        if (jarvisMemory.memory && jarvisMemory.memory.learning_patterns) {
+            const patterns = jarvisMemory.memory.learning_patterns;
+            Object.keys(patterns).forEach(key => {
+                if (patterns[key] && typeof patterns[key] === 'object' && Object.keys(patterns[key]).length > 100) {
+                    patterns[key] = {}; // Reset overly complex patterns
+                }
+            });
+        }
+        
+        // Update performance metrics
+        if (!jarvisMemory.memory.performance_metrics) {
+            jarvisMemory.memory.performance_metrics = {
+                last_optimization: new Date().toISOString(),
+                optimization_count: 1,
+                response_time_avg: 0.8
+            };
+        } else {
+            jarvisMemory.memory.performance_metrics.last_optimization = new Date().toISOString();
+            jarvisMemory.memory.performance_metrics.optimization_count += 1;
+        }
+        
+        saveJarvisMemory();
+        toast('🚀 Jarvis performance optimized', 'success');
+        
+        if (voiceEnabled) {
+            speak("Performance optimization complete. I'm running more efficiently now.");
+        }
+        
+        // Update UI stats
+        updateAIStats(jarvisMemory);
+        
+    } catch (error) {
+        console.error('Performance optimization failed:', error);
+        toast('Failed to optimize performance', 'error');
+    }
+}
+
+// Run comprehensive diagnostics
+function runDiagnostics() {
+    const diagnostics = {
+        memory_health: 'checking...',
+        connection_status: 'checking...',
+        voice_system: 'checking...',
+        auto_save: 'checking...',
+        learning_capability: 'checking...'
+    };
+    
+    // Show initial diagnostics
+    toast('🔍 Running system diagnostics...', 'info');
+    
+    setTimeout(() => {
+        try {
+            // Check memory health
+            if (jarvisMemory && jarvisMemory.memory && jarvisMemory.history) {
+                diagnostics.memory_health = '✅ Healthy';
+            } else {
+                diagnostics.memory_health = '⚠️ Issues detected';
+            }
+            
+            // Check connection status
+            fetch('/api/status', { method: 'GET' })
+                .then(r => r.ok ? (diagnostics.connection_status = '✅ Connected') : (diagnostics.connection_status = '❌ Issues'))
+                .catch(() => diagnostics.connection_status = '❌ Failed');
+            
+            // Check voice system
+            if (typeof speechSynthesis !== 'undefined' && speechSynthesis.getVoices().length > 0) {
+                diagnostics.voice_system = '✅ Available';
+            } else {
+                diagnostics.voice_system = '⚠️ Limited';
+            }
+            
+            // Check auto-save
+            diagnostics.auto_save = autoSaveEnabled ? '✅ Enabled' : '⚠️ Disabled';
+            
+            // Check learning capability
+            if (jarvisMemory?.memory?.learning_patterns) {
+                diagnostics.learning_capability = '✅ Active';
+            } else {
+                diagnostics.learning_capability = '⚠️ Limited';
+            }
+            
+            // Display results
+            const report = Object.entries(diagnostics)
+                .map(([key, value]) => `${key.replace(/_/g, ' ').toUpperCase()}: ${value}`)
+                .join('\n');
+                
+            console.log('🔍 System Diagnostics Report:\n' + report);
+            toast('Diagnostics complete - check console for details', 'success');
+            
+            if (voiceEnabled) {
+                const healthyCount = Object.values(diagnostics).filter(v => v.includes('✅')).length;
+                speak(`Diagnostics complete. ${healthyCount} out of ${Object.keys(diagnostics).length} systems are healthy.`);
+            }
+            
+        } catch (error) {
+            console.error('Diagnostics failed:', error);
+            toast('Diagnostics failed', 'error');
+        }
+    }, 2000);
+}
+
+// Update response style
+function updateResponseStyle() {
+    const select = $('#response-style-select');
+    if (!select || !jarvisMemory) return;
+    
+    const style = select.value;
+    if (!jarvisMemory.preferences.advanced_settings) {
+        jarvisMemory.preferences.advanced_settings = {};
+    }
+    
+    jarvisMemory.preferences.advanced_settings.response_style = style;
+    saveJarvisMemory();
+    
+    toast(`Response style updated to ${style}`, 'info');
+    
+    if (voiceEnabled) {
+        speak(`Response style changed to ${style} mode.`);
+    }
+}
+
+// Update learning sensitivity
+function updateLearningSensitivity() {
+    const slider = $('#learning-sensitivity');
+    if (!slider || !jarvisMemory) return;
+    
+    const sensitivity = parseInt(slider.value);
+    if (!jarvisMemory.preferences.advanced_settings) {
+        jarvisMemory.preferences.advanced_settings = {};
+    }
+    
+    jarvisMemory.preferences.advanced_settings.learning_sensitivity = sensitivity;
+    saveJarvisMemory();
+    
+    toast(`Learning sensitivity set to ${sensitivity}/10`, 'info');
+}
+
+// Toggle auto-learning
+function toggleAutoLearning() {
+    const checkbox = $('#auto-learn');
+    if (!checkbox || !jarvisMemory) return;
+    
+    if (!jarvisMemory.preferences.advanced_settings) {
+        jarvisMemory.preferences.advanced_settings = {};
+    }
+    
+    jarvisMemory.preferences.advanced_settings.auto_learning = checkbox.checked;
+    saveJarvisMemory();
+    
+    toast(`Auto-learning ${checkbox.checked ? 'enabled' : 'disabled'}`, 'info');
+    
+    if (voiceEnabled) {
+        speak(`Auto-learning has been ${checkbox.checked ? 'enabled' : 'disabled'}.`);
+    }
+}
+
+// Toggle context awareness
+function toggleContextAwareness() {
+    const checkbox = $('#context-awareness');
+    if (!checkbox || !jarvisMemory) return;
+    
+    if (!jarvisMemory.preferences.advanced_settings) {
+        jarvisMemory.preferences.advanced_settings = {};
+    }
+    
+    jarvisMemory.preferences.advanced_settings.context_awareness = checkbox.checked;
+    saveJarvisMemory();
+    
+    toast(`Context awareness ${checkbox.checked ? 'enabled' : 'disabled'}`, 'info');
+}
+
+// Toggle personality adaptation
+function togglePersonalityAdaptation() {
+    const checkbox = $('#personality-adaptation');
+    if (!checkbox || !jarvisMemory) return;
+    
+    if (!jarvisMemory.preferences.advanced_settings) {
+        jarvisMemory.preferences.advanced_settings = {};
+    }
+    
+    jarvisMemory.preferences.advanced_settings.personality_adaptation = checkbox.checked;
+    saveJarvisMemory();
+    
+    toast(`Personality adaptation ${checkbox.checked ? 'enabled' : 'disabled'}`, 'info');
+    
+    if (voiceEnabled) {
+        speak(`Personality adaptation ${checkbox.checked ? 'activated' : 'deactivated'}.`);
+    }
+}
+
 // Update TTS button appearance
 function updateTTSButton() {
     const ttsBtn = $('#tts-toggle');
@@ -7727,19 +8004,42 @@ function toast(msg){
 async function api(path, opts, retries = 3){
   for (let attempt = 1; attempt <= retries; attempt++) {
     try {
-      const r = await fetch(path, Object.assign({headers:{'Content-Type':'application/json'}},opts||{}));
+      const r = await fetch(path, Object.assign({
+        headers:{'Content-Type':'application/json'},
+        credentials: 'same-origin'
+      },opts||{}));
+      
       if(r.status===401){
-        // On first 401 error, try to refresh the page if force_login_on_reload is enabled
-        if (attempt === 1 && window.location.pathname === '/') {
-          console.warn(`401 error on ${path}, attempt ${attempt}/${retries}`);
-          await new Promise(resolve => setTimeout(resolve, 1000 * attempt)); // exponential backoff
+        // Enhanced 401 handling to prevent login loops
+        console.warn(`401 error on ${path}, attempt ${attempt}/${retries}`);
+        if (attempt === 1) {
+          // Check if this is a legitimate session expiry vs login loop
+          const isAPICall = path.startsWith('/api/');
+          if (isAPICall && window.location.pathname === '/') {
+            await new Promise(resolve => setTimeout(resolve, 1000 * attempt)); // exponential backoff
+            continue;
+          }
+        }
+        showLogin(); 
+        throw new Error('unauthorized');
+      }
+      
+      if(r.status===403){
+        console.warn(`403 error on ${path} - CSRF or permission issue`);
+        toast('Forbidden or CSRF token expired', 'warning'); 
+        throw new Error('forbidden');
+      }
+      
+      if(r.status >= 500) {
+        console.warn(`Server error ${r.status} on ${path}, attempt ${attempt}/${retries}`);
+        if (attempt < retries) {
+          await new Promise(resolve => setTimeout(resolve, 2000 * attempt)); // longer delay for server errors
           continue;
         }
-        showLogin(); throw new Error('unauthorized');
+        toast(`Server error (${r.status})`, 'error');
+        throw new Error(`server_error_${r.status}`);
       }
-      if(r.status===403){
-        toast('Forbidden or CSRF'); throw new Error('forbidden');
-      }
+      
       if(!r.ok){ 
         console.warn(`API error ${r.status} on ${path}, attempt ${attempt}/${retries}`);
         if (attempt < retries) {
@@ -8546,7 +8846,38 @@ function initializeTrainingDashboard() {
       learningScoreEl.textContent = `${jarvisMemory.memory.learning_score}/100`;
     }
     
-    console.log('🎯 Training dashboard initialized with current settings');
+    // Initialize advanced settings
+    const advancedSettings = jarvisMemory.preferences.advanced_settings || {};
+    
+    // Initialize response style select
+    const responseStyleSelect = $('#response-style-select');
+    if (responseStyleSelect) {
+      responseStyleSelect.value = advancedSettings.response_style || 'technical';
+    }
+    
+    // Initialize learning sensitivity slider
+    const learningSensitivity = $('#learning-sensitivity');
+    if (learningSensitivity) {
+      learningSensitivity.value = advancedSettings.learning_sensitivity || 7;
+    }
+    
+    // Initialize toggle controls
+    const autoLearnCheckbox = $('#auto-learn');
+    if (autoLearnCheckbox) {
+      autoLearnCheckbox.checked = advancedSettings.auto_learning !== false;
+    }
+    
+    const contextAwarenessCheckbox = $('#context-awareness');
+    if (contextAwarenessCheckbox) {
+      contextAwarenessCheckbox.checked = advancedSettings.context_awareness !== false;
+    }
+    
+    const personalityAdaptationCheckbox = $('#personality-adaptation');
+    if (personalityAdaptationCheckbox) {
+      personalityAdaptationCheckbox.checked = advancedSettings.personality_adaptation || false;
+    }
+    
+    console.log('🎯 Training dashboard initialized with current settings and advanced controls');
   } catch (error) {
     console.warn('Failed to initialize training dashboard:', error);
   }
@@ -9135,18 +9466,25 @@ function connectTerm() {
                 setTimeout(() => {
                     reconnectAttempts++;
                     
-                    // Check if session is still valid before reconnecting
+                    // Enhanced session validation before reconnecting
                     fetch('/api/status', {
                         method: 'GET',
-                        headers: { 'Content-Type': 'application/json' }
+                        headers: { 'Content-Type': 'application/json' },
+                        credentials: 'same-origin'
                     }).then(response => {
                         if (response.ok) {
+                            console.log('🔄 Session valid, attempting WebSocket reconnection...');
                             connectTerm();
+                        } else if (response.status === 401) {
+                            console.warn('❌ Session expired, redirecting to login');
+                            showLogin();
+                            toast('Session expired - please login again', 'warning');
                         } else {
-                            console.warn('Session may be invalid, skipping reconnect attempt');
-                            toast('Session expired - please refresh and login again', 'warning');
+                            console.warn('⚠️ Server response issue, will retry');
+                            toast('Server connection issue - retrying...', 'warning');
                         }
-                    }).catch(() => {
+                    }).catch(error => {
+                        console.warn('🌐 Network error during status check:', error);
                         // Network issue or server down - still try to reconnect
                         connectTerm();
                     });
@@ -10717,85 +11055,157 @@ if (document.readyState === 'loading') {
   initializeNovaShield();
 }
 tabs.forEach(b => {
-    b.onclick = () => {
-        // Call original tab switching logic
-        tabs.forEach(x => x.classList.remove('active'));
-        b.classList.add('active');
-        $$('.tab').forEach(x => x.classList.remove('active'));
-        const tabId = 'tab-' + b.dataset.tab;
-        $('#' + tabId).classList.add('active');
-        
-        activeTab = b.dataset.tab;
-        
-        // Initialize enhanced features for specific tabs
-        if (activeTab === 'tools' && !loadedTabs.has('tools')) {
-            initTools();
-        }
-        
-        if (activeTab === 'ai' && !loadedTabs.has('ai-enhanced')) {
-            loadedTabs.add('ai-enhanced');
-            initEnhancedAI();
-            initConfigEditor(); // Initialize memory management buttons
-        }
-        
-        if (activeTab === 'results' && !loadedTabs.has('results')) {
-            loadedTabs.add('results');
-            initializeResultsPage();
-        }
-        
-        // Original polling and loading logic
-        if (activeTab === 'status' && !loadedTabs.has('status')) {
-            loadedTabs.add('status');
-            loadStatus();
-            if (!statusPolling) {
-                statusPolling = setInterval(loadStatus, 3000);
+    b.onclick = async () => {
+        try {
+            // Enhanced tab switching with error handling and stability improvements
+            console.log(`🔄 Switching to tab: ${b.dataset.tab}`);
+            
+            // Save current state before switching
+            if (jarvisMemory && autoSaveEnabled) {
+                jarvisMemory.preferences.last_active_tab = b.dataset.tab;
+                await autoSaveAfterInteraction('tab_change');
             }
-        } else if (activeTab !== 'status' && statusPolling) {
-            clearInterval(statusPolling);
-            statusPolling = null;
-        }
-        
-        // Load other tabs on demand
-        ['files', 'terminal', 'webgen', 'config', 'security'].forEach(tab => {
-            if (activeTab === tab && !loadedTabs.has(tab)) {
-                loadedTabs.add(tab);
-                if (tab === 'files') {
-                    loadFiles();
-                } else if (tab === 'terminal') {
-                    connectTerm();
-                    // Focus the hidden input for mobile keyboard support
-                    const termInput = $('#terminal-input');
-                    if (termInput) {
-                        setTimeout(() => {
-                            termInput.focus();
-                            // Try to trigger mobile keyboard
-                            termInput.click();
-                        }, 100);
-                    }
-                } else if (tab === 'config') {
-                    loadConfig();
-                    if (!loadedTabs.has('config-editor')) {
-                        loadedTabs.add('config-editor');
-                        initConfigEditor();
-                    }
-                } else if (tab === 'security') {
-                    loadSecurityLogs();
-                    if (!loadedTabs.has('users-panel')) {
-                        loadedTabs.add('users-panel');
-                        loadUsers();
-                    }
+            
+            // Call original tab switching logic with enhanced error handling
+            tabs.forEach(x => x.classList.remove('active'));
+            b.classList.add('active');
+            $$('.tab').forEach(x => x.classList.remove('active'));
+            const tabId = 'tab-' + b.dataset.tab;
+            const targetTab = $('#' + tabId);
+            
+            if (!targetTab) {
+                console.error(`❌ Tab element not found: ${tabId}`);
+                toast(`Tab ${b.dataset.tab} not available`, 'error');
+                return;
+            }
+            
+            targetTab.classList.add('active');
+            activeTab = b.dataset.tab;
+            
+            // Initialize enhanced features for specific tabs with error protection
+            if (activeTab === 'tools' && !loadedTabs.has('tools')) {
+                try {
+                    initTools();
+                    console.log('✅ Tools tab initialized');
+                } catch (error) {
+                    console.error('❌ Failed to initialize tools tab:', error);
+                    toast('Tools tab initialization failed', 'warning');
                 }
             }
-        });
+            
+            if (activeTab === 'ai' && !loadedTabs.has('ai-enhanced')) {
+                try {
+                    loadedTabs.add('ai-enhanced');
+                    initEnhancedAI();
+                    initConfigEditor(); // Initialize memory management buttons
+                    console.log('✅ AI tab enhanced features initialized');
+                } catch (error) {
+                    console.error('❌ Failed to initialize AI tab:', error);
+                    toast('AI tab initialization failed', 'warning');
+                }
+            }
+            
+            if (activeTab === 'results' && !loadedTabs.has('results')) {
+                try {
+                    loadedTabs.add('results');
+                    initializeResultsPage();
+                    console.log('✅ Results tab initialized');
+                } catch (error) {
+                    console.error('❌ Failed to initialize results tab:', error);
+                    toast('Results tab initialization failed', 'warning');
+                }
+            }
+            
+            // Original polling and loading logic with error protection
+            if (activeTab === 'status' && !loadedTabs.has('status')) {
+                try {
+                    loadedTabs.add('status');
+                    loadStatus();
+                    if (!statusPolling) {
+                        statusPolling = setInterval(loadStatus, 3000);
+                    }
+                    console.log('✅ Status tab initialized');
+                } catch (error) {
+                    console.error('❌ Failed to initialize status tab:', error);
+                    toast('Status tab initialization failed', 'warning');
+                }
+            } else if (activeTab !== 'status' && statusPolling) {
+                clearInterval(statusPolling);
+                statusPolling = null;
+            }
+        
+            // Load other tabs on demand with enhanced error handling
+            ['files', 'terminal', 'webgen', 'config', 'security'].forEach(tab => {
+                if (activeTab === tab && !loadedTabs.has(tab)) {
+                    try {
+                        loadedTabs.add(tab);
+                        if (tab === 'files') {
+                            loadFiles();
+                            console.log('✅ Files tab loaded');
+                        } else if (tab === 'terminal') {
+                            connectTerm();
+            // Enhanced mobile keyboard support with better error handling
+            const termInput = $('#terminal-input');
+            if (termInput) {
+                setTimeout(() => {
+                    try {
+                        // Enhanced mobile keyboard triggering
+                        termInput.focus();
+                        if (isMobile()) {
+                            // Additional mobile-specific triggers
+                            termInput.click();
+                            termInput.setAttribute('readonly', false);
+                            termInput.removeAttribute('readonly');
+                            // Trigger input event to ensure keyboard appears
+                            termInput.dispatchEvent(new Event('touchstart', { bubbles: true }));
+                        }
+                    } catch (error) {
+                        console.warn('Mobile keyboard trigger failed:', error);
+                    }
+                }, 100);
+                            }
+                            console.log('✅ Terminal tab connected');
+                        } else if (tab === 'config') {
+                            loadConfig();
+                            if (!loadedTabs.has('config-editor')) {
+                                loadedTabs.add('config-editor');
+                                initConfigEditor();
+                            }
+                            console.log('✅ Config tab loaded');
+                        } else if (tab === 'security') {
+                            loadSecurityLogs();
+                            if (!loadedTabs.has('users-panel')) {
+                                loadedTabs.add('users-panel');
+                                loadUsers();
+                            }
+                            console.log('✅ Security tab loaded');
+                        }
+                    } catch (error) {
+                        console.error(`❌ Failed to load ${tab} tab:`, error);
+                        toast(`${tab.charAt(0).toUpperCase() + tab.slice(1)} tab loading failed`, 'warning');
+                        // Remove from loaded tabs so it can be retried
+                        loadedTabs.delete(tab);
+                    }
+                }
+            });
+            
+        } catch (error) {
+            console.error('❌ Tab switching failed:', error);
+            toast('Tab switching error', 'error');
+        }
     };
 });
 
-// Keep-alive functionality to prevent session expiration
+// Enhanced Keep-alive functionality to prevent session expiration and login loops
 let keepAliveInterval = null;
+let sessionValidationAttempts = 0;
+const MAX_SESSION_VALIDATION_ATTEMPTS = 3;
 
 function startKeepAlive() {
     // Only start keep-alive if not already running
     if (keepAliveInterval) return;
+    
+    console.log('🔄 Starting session keep-alive');
     
     // Ping every 5 minutes to keep session alive
     keepAliveInterval = setInterval(async () => {
@@ -10803,32 +11213,43 @@ function startKeepAlive() {
             const response = await fetch('/api/ping', {
                 method: 'GET',
                 headers: {
-                    'Cache-Control': 'no-cache'
-                }
+                    'Cache-Control': 'no-cache',
+                    'Content-Type': 'application/json'
+                },
+                credentials: 'same-origin'
             });
             
-            if (response.status === 401) {
-                // Session expired, show login
-                showLogin();
-                stopKeepAlive();
-            } else if (response.ok) {
-                const data = await response.json();
-                console.log(`Keep-alive: ${data.status} (${data.timestamp})`);
+            if (response.ok) {
+                console.log('✅ Session keep-alive successful');
+                sessionValidationAttempts = 0; // Reset counter on success
+            } else if (response.status === 401) {
+                sessionValidationAttempts++;
+                console.warn(`⚠️ Session expired (attempt ${sessionValidationAttempts}/${MAX_SESSION_VALIDATION_ATTEMPTS})`);
+                
+                if (sessionValidationAttempts >= MAX_SESSION_VALIDATION_ATTEMPTS) {
+                    console.error('❌ Multiple session validation failures - redirecting to login');
+                    stopKeepAlive();
+                    showLogin();
+                    toast('Session expired - please log in again', 'warning');
+                }
+            } else {
+                console.warn('⚠️ Keep-alive ping failed:', response.status);
             }
         } catch (error) {
-            console.warn('Keep-alive failed:', error);
+            console.warn('❌ Keep-alive network error:', error);
             // Don't stop keep-alive on network errors - might be temporary
         }
     }, 5 * 60 * 1000); // 5 minutes
     
-    console.log('Keep-alive started (5 minute intervals)');
+    console.log('✅ Enhanced session keep-alive started (5 minute intervals)');
 }
 
 function stopKeepAlive() {
     if (keepAliveInterval) {
         clearInterval(keepAliveInterval);
         keepAliveInterval = null;
-        console.log('Keep-alive stopped');
+        sessionValidationAttempts = 0; // Reset attempts counter
+        console.log('🛑 Enhanced session keep-alive stopped');
     }
 }
 
