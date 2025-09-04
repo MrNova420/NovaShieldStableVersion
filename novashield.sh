@@ -2439,9 +2439,6 @@ def mirror_terminal(handler):
             else:
                 ws_send(client, f"\r\n❌ All terminal options failed. Please contact administrator.\r\n")
                 return
-        except Exception:
-            security_log(f"TERMINAL_CRITICAL_ERROR user={user} cannot_send_websocket_message")
-            return
         
     last_activity = time.time()
     last_ping = time.time()
@@ -2572,7 +2569,7 @@ def mirror_terminal(handler):
                                         except Exception as e:
                                             security_log(f"TERMINAL_RESIZE_ERROR user={user} pid={pid} error={str(e)}")
                                         continue  # Don't write JSON to PTY
-                            except (UnicodeDecodeError, json.JSONDecodeError, ValueError):
+                                        except (UnicodeDecodeError, json.JSONDecodeError, ValueError):
                                 # Not JSON, treat as regular terminal input
                                 pass
                         
@@ -2828,7 +2825,7 @@ def save_user_memory(username, memory):
         py_alert('INFO', f'Auto-synced memory for user {username} (save #{memory["user_profile"].get("total_saves", 1)})')
         return True
         
-    except Exception as e:
+                    except Exception as e:
         py_alert('ERROR', f'Critical error saving memory for user {username}: {str(e)}')
         return False
 
@@ -3427,7 +3424,7 @@ def verify_storage_and_memory_systems():
                 verification_results["storage_health"] = "save_load_failed"
                 verification_results["issues"].append("Memory save/load test failed")
                 
-        except Exception as e:
+                        except Exception as e:
             verification_results["storage_health"] = "error"
             verification_results["issues"].append(f"Memory test error: {str(e)}")
         
@@ -4731,7 +4728,7 @@ class Handler(SimpleHTTPRequestHandler):
                 }
                 self._set_headers(200); self.wfile.write(json.dumps(info).encode('utf-8')); return
 
-                        if parsed.path == '/api/config':
+            if parsed.path == '/api/config':
                 if not require_auth(self): return
                 sess = get_session(self) or {}
                 try:
@@ -4753,36 +4750,36 @@ class Handler(SimpleHTTPRequestHandler):
                 username = sess.get('user', 'public') if sess else 'public'
             
                 try:
-                # Load user's encrypted memory
-                user_memory = load_user_memory(username)
-                self._set_headers(200)
-                self.wfile.write(json.dumps({
-                    'ok': True,
-                    'memory': user_memory.get('memory', {}),
-                    'preferences': user_memory.get('preferences', {}),
-                    'history': user_memory.get('history', [])
-                }).encode('utf-8'))
-            except Exception as e:
-                self._set_headers(200)
-                self.wfile.write(json.dumps({
-                    'ok': True,
-                    'memory': {},
-                    'preferences': {},
-                    'history': []
-                }).encode('utf-8'))
-            return
+                    # Load user's encrypted memory
+                    user_memory = load_user_memory(username)
+                    self._set_headers(200)
+                    self.wfile.write(json.dumps({
+                        'ok': True,
+                        'memory': user_memory.get('memory', {}),
+                        'preferences': user_memory.get('preferences', {}),
+                        'history': user_memory.get('history', [])
+                    }).encode('utf-8'))
+                except Exception as e:
+                    self._set_headers(200)
+                    self.wfile.write(json.dumps({
+                        'ok': True,
+                        'memory': {},
+                        'preferences': {},
+                        'history': []
+                    }).encode('utf-8'))
+                return
 
         # Users and sessions management - GET handler
             if parsed.path == '/api/users':
                 if not require_auth(self): return
                 try:
-                db = users_db()
-                current_time = int(time.time())
-                users_list = []
-                
-                # Get all usernames from _userdb
-                userdb = db.get('_userdb', {})
-                active_sessions = {}
+                    db = users_db()
+                    current_time = int(time.time())
+                    users_list = []
+                    
+                    # Get all usernames from _userdb
+                    userdb = db.get('_userdb', {})
+                    active_sessions = {}
                 
                 # Count active sessions per user
                 for token, session_data in db.items():
@@ -4831,7 +4828,7 @@ class Handler(SimpleHTTPRequestHandler):
                 lines = []
                 try:
                 with open(p,'r',encoding='utf-8') as f: lines=f.read().splitlines()[-200:]
-            except Exception: pass
+                except Exception: pass
             self._set_headers(200); self.wfile.write(json.dumps({'name': name, 'lines': lines}).encode('utf-8')); return
 
             if parsed.path == '/api/fs':
@@ -4842,11 +4839,11 @@ class Handler(SimpleHTTPRequestHandler):
                 if not d.startswith(NS_HOME): self._set_headers(403); self.wfile.write(b'{"error":"forbidden"}'); return
                 out=[]
                 try:
-                for entry in os.scandir(d):
-                    if entry.name.startswith('.'): continue
-                    if os.path.abspath(d).startswith(NS_KEYS) and entry.is_file(): continue
-                    out.append({'name':entry.name,'is_dir':entry.is_dir(),'size':(entry.stat().st_size if entry.is_file() else 0)})
-            except Exception: pass
+                    for entry in os.scandir(d):
+                        if entry.name.startswith('.'): continue
+                        if os.path.abspath(d).startswith(NS_KEYS) and entry.is_file(): continue
+                        out.append({'name':entry.name,'is_dir':entry.is_dir(),'size':(entry.stat().st_size if entry.is_file() else 0)})
+                except Exception: pass
             self._set_headers(200); self.wfile.write(json.dumps({'dir':d,'entries':out}).encode('utf-8')); return
 
             if parsed.path == '/api/fs_read':
@@ -4857,10 +4854,10 @@ class Handler(SimpleHTTPRequestHandler):
                 if not os.path.exists(full) or not os.path.isfile(full):
                 self._set_headers(404); self.wfile.write(b'{"error":"not found"}'); return
                 try:
-                size = os.path.getsize(full)
-                content = open(full,'rb').read(500_000).decode('utf-8','ignore')
-                self._set_headers(200); self.wfile.write(json.dumps({'ok':True,'path':full,'size':size,'content':content}).encode('utf-8')); return
-            except Exception as e:
+                    size = os.path.getsize(full)
+                    content = open(full,'rb').read(500_000).decode('utf-8','ignore')
+                    self._set_headers(200); self.wfile.write(json.dumps({'ok':True,'path':full,'size':size,'content':content}).encode('utf-8')); return
+                except Exception as e:
                 self._set_headers(500); self.wfile.write(json.dumps({'ok':False,'error':str(e)}).encode('utf-8')); return
 
             if parsed.path == '/site':
@@ -5030,8 +5027,8 @@ class Handler(SimpleHTTPRequestHandler):
             if parsed.path == '/api/chat':
                 if not require_auth(self): return
                 try: 
-                data = json.loads(body or '{}')
-            except Exception: 
+                    data = json.loads(body or '{}')
+                except Exception:
                 py_alert('WARN', f'Chat API invalid JSON from {self.client_address[0]}')
                 self._set_headers(400); self.wfile.write(json.dumps({'ok':False,'error':'invalid json'}).encode('utf-8')); return
                 
@@ -5121,25 +5118,25 @@ class Handler(SimpleHTTPRequestHandler):
             
             # Save user's encrypted memory
                 try:
-                data = json.loads(body or '{}')
+                    data = json.loads(body or '{}')
                 
                 # Load existing memory or start with default
-                user_memory = load_user_memory(username)
+                    user_memory = load_user_memory(username)
                 
                 # Update user's memory with new data
-                user_memory['memory'] = data.get('memory', {})
-                user_memory['preferences'] = data.get('preferences', {})
+                    user_memory['memory'] = data.get('memory', {})
+                    user_memory['preferences'] = data.get('preferences', {})
                 # Use 'conversations' instead of 'history' for consistency with ai_reply
-                user_memory['history'] = data.get('history', [])
-                user_memory['last_updated'] = time.time()
-                user_memory['last_seen'] = time.strftime('%Y-%m-%d %H:%M:%S')
+                    user_memory['history'] = data.get('history', [])
+                    user_memory['last_updated'] = time.time()
+                    user_memory['last_seen'] = time.strftime('%Y-%m-%d %H:%M:%S')
                 
                 # Save encrypted memory
-                save_user_memory(username, user_memory)
+                    save_user_memory(username, user_memory)
                 
-                self._set_headers(200)
-                self.wfile.write(json.dumps({'ok': True}).encode('utf-8'))
-            except Exception as e:
+                    self._set_headers(200)
+                    self.wfile.write(json.dumps({'ok': True}).encode('utf-8'))
+                except Exception as e:
                 py_alert('ERROR', f'Failed to save memory for {username}: {str(e)}')
                 self._set_headers(500)
                 self.wfile.write(json.dumps({'ok': False, 'error': str(e)}).encode('utf-8'))
@@ -5149,13 +5146,13 @@ class Handler(SimpleHTTPRequestHandler):
             if parsed.path == '/api/tools/scan':
                 if not require_auth(self): return
                 try:
-                tools_info = scan_system_tools()
-                self._set_headers(200)
-                self.wfile.write(json.dumps({
+                    tools_info = scan_system_tools()
+                    self._set_headers(200)
+                    self.wfile.write(json.dumps({
                     'ok': True,
                     'tools': tools_info
-                }).encode('utf-8'))
-            except Exception as e:
+                    }).encode('utf-8'))
+                except Exception as e:
                 self._set_headers(500)
                 self.wfile.write(json.dumps({'ok': False, 'error': str(e)}).encode('utf-8'))
             return
@@ -5163,13 +5160,13 @@ class Handler(SimpleHTTPRequestHandler):
             if parsed.path == '/api/tools/install':
                 if not require_auth(self): return
                 try:
-                output = install_missing_tools()
-                self._set_headers(200)
-                self.wfile.write(json.dumps({
+                    output = install_missing_tools()
+                    self._set_headers(200)
+                    self.wfile.write(json.dumps({
                     'ok': True,
                     'output': output
-                }).encode('utf-8'))
-            except Exception as e:
+                    }).encode('utf-8'))
+                except Exception as e:
                 self._set_headers(500)
                 self.wfile.write(json.dumps({'ok': False, 'error': str(e)}).encode('utf-8'))
             return
@@ -5177,15 +5174,15 @@ class Handler(SimpleHTTPRequestHandler):
             if parsed.path == '/api/tools/execute':
                 if not require_auth(self): return
                 try:
-                data = json.loads(body or '{}')
-                tool_name = data.get('tool', '')
-                custom_command = data.get('command', '')
-                tool_args = data.get('args', '')  # New: support for tool arguments
+                    data = json.loads(body or '{}')
+                    tool_name = data.get('tool', '')
+                    custom_command = data.get('command', '')
+                    tool_args = data.get('args', '')  # New: support for tool arguments
                 
                 # Get user session for verification
-                sess = get_session(self)
-                username = sess.get('user', 'unknown') if sess else 'unknown'
-                user_ip = self.client_address[0]
+                    sess = get_session(self)
+                    username = sess.get('user', 'unknown') if sess else 'unknown'
+                    user_ip = self.client_address[0]
                 
                 if not tool_name:
                     self._set_headers(400)
@@ -5625,11 +5622,11 @@ class Handler(SimpleHTTPRequestHandler):
                 }).encode('utf-8'))
                 return
                 
-            except json.JSONDecodeError:
+                    except json.JSONDecodeError:
                 self._set_headers(400)
                 self.wfile.write(json.dumps({'error': 'Invalid JSON in request'}).encode('utf-8'))
                 return
-            except Exception as e:
+                    except Exception as e:
                 security_log(f"CONFIG_SAVE_ERROR user={sess.get('user', 'unknown')} ip={get_client_ip(self)} error={str(e)}")
                 self._set_headers(500)
                 self.wfile.write(json.dumps({'error': f'Failed to save configuration: {str(e)}'}).encode('utf-8'))
@@ -5832,12 +5829,12 @@ if __name__ == '__main__':
                     time.sleep(1)
                     continue
                     
-            except Exception as e:
+                except Exception as e:
                 print(f"Bind failed on {h}:{port}: {e}", file=sys.stderr)
                 time.sleep(0.5)
                 continue
                 
-    except Exception as e:
+                except Exception as e:
         # Top-level exception handler - log and exit cleanly
         error_msg = f"Critical server error: {str(e)}"
         print(error_msg, file=sys.stderr)
