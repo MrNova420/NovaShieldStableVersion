@@ -411,15 +411,15 @@ terminal:
   command_allowlist: []
 
 monitors:
-  cpu:         { enabled: true,  interval_sec: 3, warn_load: 2.00, crit_load: 4.00 }
-  memory:      { enabled: true,  interval_sec: 3, warn_pct: 85,  crit_pct: 93 }
-  disk:        { enabled: true,  interval_sec: 10, warn_pct: 85, crit_pct: 95, mount: "/" }
-  network:     { enabled: true,  interval_sec: 5, iface: "", ping_host: "1.1.1.1", loss_warn: 20, external_checks: true, public_ip_services: ["icanhazip.com", "ifconfig.me", "api.ipify.org"] }
+  cpu:         { enabled: true,  interval_sec: 10, warn_load: 2.00, crit_load: 4.00 }
+  memory:      { enabled: true,  interval_sec: 10, warn_pct: 85,  crit_pct: 93 }
+  disk:        { enabled: true,  interval_sec: 60, warn_pct: 85, crit_pct: 95, mount: "/" }
+  network:     { enabled: true,  interval_sec: 60, iface: "", ping_host: "1.1.1.1", loss_warn: 20, external_checks: true, public_ip_services: ["icanhazip.com", "ifconfig.me", "api.ipify.org"] }
   integrity:   { enabled: true,  interval_sec: 60, watch_paths: ["/system/bin","/system/xbin","/usr/bin"] }
-  process:     { enabled: true,  interval_sec: 10, suspicious: ["nc","nmap","hydra","netcat","telnet"] }
+  process:     { enabled: true,  interval_sec: 30, suspicious: ["nc","nmap","hydra","netcat","telnet"] }
   userlogins:  { enabled: true,  interval_sec: 30 }
   services:    { enabled: false, interval_sec: 20, targets: ["cron","ssh","sshd"] }
-  logs:        { enabled: true,  interval_sec: 15, files: ["/var/log/auth.log","/var/log/syslog"], patterns:["error","failed","denied","segfault"] }
+  logs:        { enabled: true,  interval_sec: 60, files: ["/var/log/auth.log","/var/log/syslog"], patterns:["error","failed","denied","segfault"] }
   scheduler:   { enabled: true,  interval_sec: 30 }
 
 logging:
@@ -968,7 +968,7 @@ ns_internal_ip(){
 _monitor_cpu(){
   set +e; set +o pipefail
   local interval warn crit
-  interval=$(ensure_int "$(yaml_get "cpu" "interval_sec" "3")" 3)
+  interval=$(ensure_int "$(yaml_get "cpu" "interval_sec" "10")" 10)
   warn=$(yaml_get "cpu" "warn_load" "2.00")
   crit=$(yaml_get "cpu" "crit_load" "4.00")
   [ -z "$warn" ] && warn=2.00; [ -z "$crit" ] && crit=4.00
@@ -985,7 +985,7 @@ _monitor_cpu(){
 _monitor_mem(){
   set +e; set +o pipefail
   local interval warn crit
-  interval=$(ensure_int "$(yaml_get "memory" "interval_sec" "3")" 3)
+  interval=$(ensure_int "$(yaml_get "memory" "interval_sec" "10")" 10)
   warn=$(ensure_int "$(yaml_get "memory" "warn_pct" "85")" 85)
   crit=$(ensure_int "$(yaml_get "memory" "crit_pct" "95")" 95)
   while true; do
@@ -1030,7 +1030,7 @@ _monitor_disk(){
 _monitor_net(){
   set +e; set +o pipefail
   local interval iface pingh warnloss external_checks
-  interval=$(ensure_int "$(yaml_get "network" "interval_sec" "5")" 5)
+  interval=$(ensure_int "$(yaml_get "network" "interval_sec" "60")" 60)
   iface=$(yaml_get "network" "iface" "")
   pingh=$(yaml_get "network" "ping_host" "1.1.1.1")
   warnloss=$(ensure_int "$(yaml_get "network" "loss_warn" "20")" 20)
@@ -1246,7 +1246,7 @@ _monitor_services(){
 
 _monitor_logs(){
   set +e; set +o pipefail
-  local interval; interval=$(awk -F': ' '/logs:/,/}/ { if($1 ~ /interval_sec/) print $2 }' "$NS_CONF" | tr -d ' '); interval=$(ensure_int "${interval:-}" 15)
+  local interval; interval=$(awk -F': ' '/logs:/,/}/ { if($1 ~ /interval_sec/) print $2 }' "$NS_CONF" | tr -d ' '); interval=$(ensure_int "${interval:-}" 60)
   local files patterns; files=$(awk -F'[][]' '/logs:/,/\}/ { if($0 ~ /files:/) print $2 }' "$NS_CONF" | tr -d '"' | tr ',' ' ')
   patterns=$(awk -F'[][]' '/logs:/,/\}/ { if($0 ~ /patterns:/) print $2 }' "$NS_CONF" | tr -d '"' | tr ',' '|')
   [ -z "$patterns" ] && patterns="error|failed|denied|segfault"
@@ -1300,10 +1300,11 @@ _supervisor(){
           fi
         fi
       done
+      # Always restart web server for stability (critical component)
       if [ -f "${NS_PID}/web.pid" ]; then
         local wpid; wpid=$(safe_read_pid "${NS_PID}/web.pid")
         if [ "$wpid" -eq 0 ] || ! kill -0 "$wpid" 2>/dev/null; then
-          alert ERROR "Web server crashed. Restarting."
+          alert ERROR "Web server crashed. Restarting automatically."
           start_web || true
         fi
       fi
@@ -1317,10 +1318,12 @@ _supervisor(){
           fi
         fi
       done
+      # Always restart web server even when auto-restart is disabled (critical for dashboard access)
       if [ -f "${NS_PID}/web.pid" ]; then
         local wpid; wpid=$(safe_read_pid "${NS_PID}/web.pid")
         if [ "$wpid" -eq 0 ] || ! kill -0 "$wpid" 2>/dev/null; then
-          alert WARN "Web server crashed. Auto-restart disabled - manual restart required."
+          alert WARN "Web server crashed. Restarting automatically (critical component)."
+          start_web || true
         fi
       fi
     fi
@@ -5625,25 +5628,61 @@ def tls_params():
     return os.path.join(NS_HOME,crt), os.path.join(NS_HOME,key)
 
 if __name__ == '__main__':
+    import logging
+    
+    # Set up comprehensive error logging
+    logging.basicConfig(
+        filename=os.path.join(NS_LOGS, 'server.error.log'),
+        level=logging.ERROR,
+        format='%(asctime)s [ERROR] %(message)s'
+    )
+    
+    # Ensure logs directory exists
+    Path(NS_LOGS).mkdir(parents=True, exist_ok=True)
+    
     host, port = pick_host_port()
     os.chdir(NS_WWW)
     crt_key = tls_params()
-    for h in (host, '127.0.0.1', '0.0.0.0'):
-        try:
-            httpd = HTTPServer((h, port), Handler)
-            if crt_key:
-                ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-                ctx.load_cert_chain(crt_key[0], crt_key[1])
-                httpd.socket = ctx.wrap_socket(httpd.socket, server_side=True)
-                scheme='https'
-            else:
-                scheme='http'
-            print(f"NovaShield Web Server on {scheme}://{h}:{port}")
-            httpd.serve_forever()
-        except Exception as e:
-            print(f"Bind failed on {h}:{port}: {e}", file=sys.stderr)
-            time.sleep(0.5)
-            continue
+    
+    # Comprehensive exception handler to keep server alive
+    try:
+        for h in (host, '127.0.0.1', '0.0.0.0'):
+            try:
+                httpd = HTTPServer((h, port), Handler)
+                if crt_key:
+                    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+                    ctx.load_cert_chain(crt_key[0], crt_key[1])
+                    httpd.socket = ctx.wrap_socket(httpd.socket, server_side=True)
+                    scheme='https'
+                else:
+                    scheme='http'
+                print(f"NovaShield Web Server on {scheme}://{h}:{port}")
+                
+                # Main server loop with exception handling
+                try:
+                    httpd.serve_forever()
+                except KeyboardInterrupt:
+                    print("\nShutting down server...")
+                    break
+                except Exception as e:
+                    error_msg = f"Server error during serve_forever: {str(e)}"
+                    print(error_msg, file=sys.stderr)
+                    logging.error(error_msg + f"\nTraceback: {__import__('traceback').format_exc()}")
+                    # Continue running - don't exit on server errors
+                    time.sleep(1)
+                    continue
+                    
+            except Exception as e:
+                print(f"Bind failed on {h}:{port}: {e}", file=sys.stderr)
+                time.sleep(0.5)
+                continue
+                
+    except Exception as e:
+        # Top-level exception handler - log and exit cleanly
+        error_msg = f"Critical server error: {str(e)}"
+        print(error_msg, file=sys.stderr)
+        logging.error(error_msg + f"\nTraceback: {__import__('traceback').format_exc()}")
+        sys.exit(1)
 PY
 }
 
