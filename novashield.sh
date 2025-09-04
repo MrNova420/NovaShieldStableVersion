@@ -11227,6 +11227,9 @@ async function initializeNovaShield() {
   try {
     console.log('🚀 Initializing NovaShield enhanced features...');
     
+    // Initialize tab switching first
+    initializeTabSwitching();
+    
     // Load Jarvis memory immediately
     await loadJarvisMemory();
     
@@ -11254,24 +11257,6 @@ async function initializeNovaShield() {
 }
 
 function setupEnhancedEventListeners() {
-  // Enhanced tab switching with auto-save
-  const tabs = $$('.tabs button');
-  tabs.forEach(tab => {
-    const originalClick = tab.onclick;
-    tab.onclick = async function(e) {
-      // Trigger auto-save on tab change
-      if (jarvisMemory) {
-        jarvisMemory.preferences.last_active_tab = this.textContent.toLowerCase();
-        await autoSaveAfterInteraction('tab_change');
-      }
-      
-      // Call original handler if it exists
-      if (originalClick) {
-        return originalClick.call(this, e);
-      }
-    };
-  });
-  
   // Enhanced form interactions
   const inputs = $$('input, textarea, select');
   inputs.forEach(input => {
@@ -11304,6 +11289,14 @@ if (document.readyState === 'loading') {
 } else {
   initializeNovaShield();
 }
+
+// Initialize tab switching functionality
+function initializeTabSwitching() {
+  if (!tabs || tabs.length === 0) {
+    console.warn('❌ Tabs not found for initialization');
+    return;
+  }
+  
 tabs.forEach(b => {
     b.onclick = async () => {
         try {
@@ -11445,11 +11438,32 @@ tabs.forEach(b => {
             toast('Tab switching error', 'error');
         }
     };
-});
+  });
+  
+  console.log('✅ Tab switching initialized');
+}
+
+// Standalone showTab function for programmatic tab switching
+function showTab(tabName) {
+  try {
+    // Find the tab button and trigger click
+    const tabButton = $(`button[data-tab="${tabName}"]`);
+    if (tabButton) {
+      tabButton.click();
+      console.log(`✅ Switched to ${tabName} tab`);
+    } else {
+      console.error(`❌ Tab not found: ${tabName}`);
+      toast(`Tab ${tabName} not available`, 'error');
+    }
+  } catch (error) {
+    console.error(`❌ Failed to show tab ${tabName}:`, error);
+    toast(`Failed to switch to ${tabName} tab`, 'error');
+  }
+}
 
 // Enhanced Keep-alive functionality to prevent session expiration and login loops
 let keepAliveInterval = null;
-let sessionValidationAttempts = 0;
+// sessionValidationAttempts is already declared earlier, use existing variable
 const MAX_SESSION_VALIDATION_ATTEMPTS = 3;
 
 function startKeepAlive() {
