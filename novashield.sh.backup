@@ -672,7 +672,7 @@ def yaml_get(path, default=None):
       else: return default
     return cur
   except Exception:
-          return default
+      return default
 
 def send_email(subject, body):
   if not str(yaml_get('notifications.email.enabled','false')).lower()=='true': return
@@ -700,7 +700,7 @@ def send_email(subject, body):
         server.login(user, pwd)
         server.sendmail(user, tos, msg.as_string())
   except Exception:
-          pass
+      pass
 
 def send_telegram(body):
   if not str(yaml_get('notifications.telegram.enabled','false')).lower()=='true': return
@@ -1305,7 +1305,7 @@ try:
     data = json.load(sys.stdin)
     print(data.get('$service', {}).get('$current_hour', 0))
 except:
-        print(0)
+    print(0)
 " 2>/dev/null || echo 0)
       
       if [ "$current_count" -ge 5 ]; then
@@ -1324,7 +1324,7 @@ try:
     data['$service']['$current_hour'] = $new_count
     json.dump(data, sys.stdout)
 except:
-        print('{}')
+    print('{}')
 " > "$restart_state" 2>/dev/null || true
       
       # Add exponential backoff based on restart count
@@ -1588,7 +1588,7 @@ def py_alert(level, msg):
         with open(alerts_path, 'a', encoding='utf-8') as f:
             f.write(f"{timestamp} [{level}] {msg}\n")
     except Exception:
-            pass
+        pass
 
 def security_log(msg):
     """Enhanced security logging for all security-related events"""
@@ -1599,7 +1599,7 @@ def security_log(msg):
         with open(security_path, 'a', encoding='utf-8') as f:
             f.write(f"{timestamp} [SECURITY] {msg}\n")
     except Exception:
-            pass
+        pass
 
 def security_verification_required(command_parts, user):
     """Check if a command requires additional security verification"""
@@ -1678,7 +1678,7 @@ def perform_security_verification(user, command, verification_method='session'):
         return True, "Verification granted"
         
     except Exception as e:
-            security_log(f"SECURITY_VERIFICATION_ERROR user={user} command={command} error={str(e)}")
+        security_log(f"SECURITY_VERIFICATION_ERROR user={user} command={command} error={str(e)}")
         return False, f"Verification failed: {str(e)}"
 
 def command_security_check(command_parts, user, ip):
@@ -1796,7 +1796,7 @@ def read_uptime():
         else:
             return f"{minutes}m"
     except Exception:
-            return "unknown"
+        return "unknown"
 
 def write_json(path, obj):
     Path(os.path.dirname(path)).mkdir(parents=True, exist_ok=True)
@@ -1851,7 +1851,7 @@ def yaml_tree():
             return obj
         return normalize(root)
     except Exception:
-            return {}
+        return {}
 
 CFG = None
 def cfg_reload():
@@ -1911,13 +1911,13 @@ def enc_json_to_file(obj, out_path_enc):
             
             return result.returncode == 0
     except Exception:
-            return False
+        return False
     finally:
         # Clean up lock file
         try:
             os.remove(lock_path)
         except:
-                pass
+            pass
 
 def dec_json_from_file(in_path_enc):
     """Decrypt a JSON file using AES-256-CBC with file locking"""
@@ -1952,13 +1952,13 @@ def dec_json_from_file(in_path_enc):
                 os.unlink(tmp_path)
                 return None
     except Exception:
-            return None
+        return None
     finally:
         # Clean up lock file
         try:
             os.remove(lock_path)
         except:
-                pass
+            pass
 
 def _coerce_bool(v, default=False):
     if isinstance(v, bool): return v
@@ -2029,7 +2029,7 @@ def totp_now(secret_b32, t=None):
         pad = '=' * ((8 - (len(secret_b32) % 8)) % 8)
         key = base64.b32decode((secret_b32.upper() + pad).encode())
     except Exception:
-            return None
+        return None
     if t is None: t = int(time.time())
     steps = int(t/30)
     msg = steps.to_bytes(8,'big')
@@ -2127,7 +2127,7 @@ def cleanup_expired_sessions():
             set_users_db(db)
             py_alert('INFO', f'Cleaned up {len(expired_tokens)} expired sessions')
     except Exception as e:
-            py_alert('WARN', f'Failed to cleanup expired sessions: {str(e)}')
+        py_alert('WARN', f'Failed to cleanup expired sessions: {str(e)}')
 
 def require_auth(handler):
     client_ip = get_client_ip(handler)
@@ -2267,7 +2267,7 @@ def last_lines(path, n=100):
                 step=min(block,size); size-=step; f.seek(size); buf=f.read(step); data=buf+data; n-=buf.count(b'\n')
             return data.decode('utf-8','ignore').splitlines()[-n:]
     except Exception:
-            return []
+        return []
 
 # Old ai_reply function removed - using enhanced version below
 
@@ -2311,7 +2311,7 @@ def spawn_pty(shell=None, cols=120, rows=32):
     try:
         pid, fd = pty.fork()
     except Exception as e:
-            raise Exception(f"PTY fork failed: {str(e)}")
+        raise Exception(f"PTY fork failed: {str(e)}")
     
     if pid == 0:
         # Child process
@@ -2355,7 +2355,7 @@ def spawn_pty(shell=None, cols=120, rows=32):
             os.execv(shell, [shell, '-l'])
             
         except Exception as e:
-                error_msg = f'Failed to start shell: {str(e)}\n'
+            error_msg = f'Failed to start shell: {str(e)}\n'
             try:
                 os.write(1, error_msg.encode())
             except: pass
@@ -2367,7 +2367,7 @@ def spawn_pty(shell=None, cols=120, rows=32):
         winsz = struct.pack("HHHH", rows, cols, 0, 0)
         fcntl.ioctl(fd, tty.TIOCSWINSZ, winsz)
     except Exception as e:
-            # Log but don't fail - window size setting is not critical
+        # Log but don't fail - window size setting is not critical
         try:
             security_log(f"PTY_WINSZ_ERROR pid={pid} error={str(e)}")
         except: pass
@@ -2376,7 +2376,7 @@ def spawn_pty(shell=None, cols=120, rows=32):
     try:
         fcntl.fcntl(fd, fcntl.F_SETFL, os.O_NONBLOCK)
     except Exception:
-            # Not critical if this fails
+        # Not critical if this fails
         pass
     
     return pid, fd
@@ -2406,7 +2406,7 @@ def mirror_terminal(handler):
     try:
         ws_send(client, f"\r\n🔗 NovaShield Terminal - Connecting as {user}...\r\n")
     except Exception:
-            security_log(f"TERMINAL_WEBSOCKET_ERROR user={user} stage=initial_send")
+        security_log(f"TERMINAL_WEBSOCKET_ERROR user={user} stage=initial_send")
         return
     
     # Create a real PTY with enhanced error handling and cross-platform support
@@ -2419,7 +2419,7 @@ def mirror_terminal(handler):
         ws_send(client, f"\r\n✅ Terminal connected (PID: {pid})\r\n")
         
     except Exception as e:
-            error_msg = f"Failed to spawn PTY: {str(e)}"
+        error_msg = f"Failed to spawn PTY: {str(e)}"
         security_log(f"PTY_ERROR user={user} error={error_msg}")
         try:
             ws_send(client, f"\r\n❌ Terminal Error: {error_msg}\r\n")
@@ -2435,12 +2435,12 @@ def mirror_terminal(handler):
                         ws_send(client, f"\r\n✅ Terminal connected with fallback shell: {fallback_shell} (PID: {pid})\r\n")
                         break
                     except Exception:
-                            continue
+                        continue
             else:
                 ws_send(client, f"\r\n❌ All terminal options failed. Please contact administrator.\r\n")
                 return
         except Exception:
-                security_log(f"TERMINAL_CRITICAL_ERROR user={user} cannot_send_websocket_message")
+            security_log(f"TERMINAL_CRITICAL_ERROR user={user} cannot_send_websocket_message")
             return
 
     # If we get here, we have a working terminal
@@ -2456,7 +2456,7 @@ def mirror_terminal(handler):
         tty.setraw(fd, termios.TCSANOW)
         security_log(f"TERMINAL_RAW_MODE user={user} pid={pid}")
     except Exception as e:
-            security_log(f"TERMINAL_RAW_ERROR user={user} pid={pid} error={str(e)}")
+        security_log(f"TERMINAL_RAW_ERROR user={user} pid={pid} error={str(e)}")
         # Continue without raw mode if it fails
         pass
     
@@ -2476,14 +2476,14 @@ def mirror_terminal(handler):
                             # Send as binary data for better terminal compatibility
                             ws_send(client, data, opcode=2)
                         except OSError as e:
-                                security_log(f"TERMINAL_READ_ERROR user={user} pid={pid} error={str(e)}")
+                            security_log(f"TERMINAL_READ_ERROR user={user} pid={pid} error={str(e)}")
                             break
                         except Exception as e:
-                                security_log(f"TERMINAL_SEND_ERROR user={user} pid={pid} error={str(e)}")
+                            security_log(f"TERMINAL_SEND_ERROR user={user} pid={pid} error={str(e)}")
                             connection_stable = False
                             break
                 except Exception as e:
-                        security_log(f"TERMINAL_SELECT_ERROR user={user} pid={pid} error={str(e)}")
+                    security_log(f"TERMINAL_SELECT_ERROR user={user} pid={pid} error={str(e)}")
                     break
         finally:
             # Cleanup resources
@@ -2515,7 +2515,7 @@ def mirror_terminal(handler):
                         last_ping = current_time
                         security_log(f"TERMINAL_PING_SENT user={user} pid={pid}")
                     except Exception as e:
-                            security_log(f"TERMINAL_PING_SEND_ERROR user={user} pid={pid} error={str(e)}")
+                        security_log(f"TERMINAL_PING_SEND_ERROR user={user} pid={pid} error={str(e)}")
                         break
                 
                 if time.time() - last_activity > idle_timeout:
@@ -2528,7 +2528,7 @@ def mirror_terminal(handler):
                 try:
                     opcode, data = ws_recv(client)
                 except Exception as e:
-                        security_log(f"TERMINAL_RECV_ERROR user={user} pid={pid} error={str(e)}")
+                    security_log(f"TERMINAL_RECV_ERROR user={user} pid={pid} error={str(e)}")
                     break
                     
                 if opcode is None: 
@@ -2547,7 +2547,7 @@ def mirror_terminal(handler):
                         ws_send(client, data, opcode=10)
                         security_log(f"TERMINAL_PING_PONG user={user} pid={pid}")
                     except Exception as e:
-                            security_log(f"TERMINAL_PONG_ERROR user={user} pid={pid} error={str(e)}")
+                        security_log(f"TERMINAL_PONG_ERROR user={user} pid={pid} error={str(e)}")
                     continue
                 
                 if opcode == 10:  # Pong frame
@@ -2571,10 +2571,10 @@ def mirror_terminal(handler):
                                             fcntl.ioctl(fd, tty.TIOCSWINSZ, winsz)
                                             security_log(f"TERMINAL_RESIZE user={user} pid={pid} cols={cols} rows={rows}")
                                         except Exception as e:
-                                                security_log(f"TERMINAL_RESIZE_ERROR user={user} pid={pid} error={str(e)}")
+                                            security_log(f"TERMINAL_RESIZE_ERROR user={user} pid={pid} error={str(e)}")
                                         continue  # Don't write JSON to PTY
                             except (UnicodeDecodeError, json.JSONDecodeError, ValueError):
-                                    # Not JSON, treat as regular terminal input
+                                # Not JSON, treat as regular terminal input
                                 pass
                         
                         # Write input to PTY with error handling
@@ -2583,19 +2583,19 @@ def mirror_terminal(handler):
                                 data = data.encode('utf-8')
                             os.write(fd, data)
                         except Exception as e:
-                                security_log(f"TERMINAL_WRITE_ERROR user={user} pid={pid} error={str(e)}")
+                            security_log(f"TERMINAL_WRITE_ERROR user={user} pid={pid} error={str(e)}")
                             break
                             
                     except Exception as e:
-                            security_log(f"TERMINAL_FRAME_ERROR user={user} pid={pid} opcode={opcode} error={str(e)}")
+                        security_log(f"TERMINAL_FRAME_ERROR user={user} pid={pid} opcode={opcode} error={str(e)}")
                         break
                         
             except Exception as e:
-                    security_log(f"TERMINAL_LOOP_ERROR user={user} pid={pid} error={str(e)}")
+                security_log(f"TERMINAL_LOOP_ERROR user={user} pid={pid} error={str(e)}")
                 break
                 
     except Exception as e:
-            security_log(f"TERMINAL_MAIN_ERROR user={user} pid={pid} error={str(e)}")
+        security_log(f"TERMINAL_MAIN_ERROR user={user} pid={pid} error={str(e)}")
     finally:
         connection_stable = False
         try: 
@@ -2675,7 +2675,7 @@ def file_lock_context(file_path):
                 fcntl.flock(self.file.fileno(), fcntl.LOCK_EX)
                 return self.file
             except Exception as e:
-                    if self.file:
+                if self.file:
                     self.file.close()
                 raise e
                 
@@ -2685,7 +2685,7 @@ def file_lock_context(file_path):
                     fcntl.flock(self.file.fileno(), fcntl.LOCK_UN)
                     self.file.close()
                 except Exception:
-                        pass
+                    pass
     
     return FileLock(file_path)
 
@@ -2696,7 +2696,7 @@ def auto_save_user_memory(username, memory):
         memory["preferences"]["last_auto_save"] = time.strftime('%Y-%m-%d %H:%M:%S')
         save_user_memory(username, memory)
     except Exception as e:
-            py_alert('WARN', f'Auto-save failed for user {username}: {str(e)}')
+        py_alert('WARN', f'Auto-save failed for user {username}: {str(e)}')
 
 def load_user_memory(username):
     """Load per-user encrypted memory from shared jarvis_memory.enc file with enhanced auto-loading."""
@@ -2766,7 +2766,7 @@ def load_user_memory(username):
         return default_user_memory
         
     except Exception as e:
-            py_alert('ERROR', f'Failed to load user memory for {username}: {str(e)}')
+        py_alert('ERROR', f'Failed to load user memory for {username}: {str(e)}')
         # Return defaults without saving to avoid corruption
         return default_user_memory
 
@@ -2807,7 +2807,7 @@ def save_user_memory(username, memory):
                     import shutil
                     shutil.copy2(enc_path, backup_path)
                 except Exception:
-                        pass  # Backup failure shouldn't stop save
+                    pass  # Backup failure shouldn't stop save
             
             # Save encrypted with enhanced error handling
             success = enc_json_to_file(all_memory, enc_path)
@@ -2820,7 +2820,7 @@ def save_user_memory(username, memory):
                         shutil.copy2(backup_path, enc_path)
                         py_alert('WARN', f'Restored memory from backup for user {username}')
                     except Exception:
-                            pass
+                        pass
                 
                 py_alert('ERROR', f'Failed to encrypt Jarvis memory for user {username}')
                 return False
@@ -2830,7 +2830,7 @@ def save_user_memory(username, memory):
         return True
 
     except Exception as e:
-            py_alert('ERROR', f'Critical error saving memory for user {username}: {str(e)}')
+        py_alert('ERROR', f'Critical error saving memory for user {username}: {str(e)}')
         return False
 
 def analyze_conversation_context(user_memory, current_prompt):
@@ -3082,7 +3082,7 @@ def ai_reply(prompt, username, user_ip):
             save_ai_response(username, reply, user_memory, memory_size)
             return reply
         except Exception as e:
-                reply = f"Sorry {username}, I encountered an error during security analysis: {str(e)}. My security monitoring is still active. You can check the Security tab manually."
+            reply = f"Sorry {username}, I encountered an error during security analysis: {str(e)}. My security monitoring is still active. You can check the Security tab manually."
             return get_personalized_jarvis_response(username, reply)
     
     # System info intent
@@ -3092,7 +3092,7 @@ def ai_reply(prompt, username, user_ip):
             summary_lines = info_result.split('\n')[:15]  # First 15 lines for summary
             return f"System information gathered! Here's a summary:\n\n" + '\n'.join(summary_lines) + f"\n\n{username}, I've compiled a comprehensive system report. Check the Tools tab for the complete details!"
         except Exception as e:
-                return f"Sorry {username}, I couldn't generate the system report: {str(e)}. You can try the system-info tool in the Tools tab."
+            return f"Sorry {username}, I couldn't generate the system report: {str(e)}. You can try the system-info tool in the Tools tab."
     
     # Log analysis intent
     elif any(term in prompt_low for term in ['analyze logs', 'log analysis', 'check logs', 'log report']):
@@ -3101,7 +3101,7 @@ def ai_reply(prompt, username, user_ip):
             summary_lines = [l for l in log_result.split('\n')[:20] if l.strip()]
             return f"Log analysis complete! Summary:\n\n" + '\n'.join(summary_lines) + f"\n\n{username}, I've analyzed your system logs. Check the Tools tab for detailed analysis!"
         except Exception as e:
-                return f"Sorry {username}, I couldn't analyze the logs: {str(e)}. You can try the log-analyzer tool manually."
+            return f"Sorry {username}, I couldn't analyze the logs: {str(e)}. You can try the log-analyzer tool manually."
     
     # Install tools intent
     elif any(term in prompt_low for term in ['install tools', 'install missing', 'setup tools', 'get tools']):
@@ -3122,7 +3122,7 @@ def ai_reply(prompt, username, user_ip):
             
             return f"Performance check complete, {username}! Top CPU processes: " + ', '.join(processes) + ". I can run detailed system monitoring tools like htop, iotop, or vmstat for deeper analysis in the Tools tab."
         except Exception:
-                return f"I can help optimize your system performance, {username}. Try running htop, vmstat, or iostat from the Tools tab to identify bottlenecks."
+            return f"I can help optimize your system performance, {username}. Try running htop, vmstat, or iostat from the Tools tab to identify bottlenecks."
     
     # Network diagnostics intent
     elif any(term in prompt_low for term in ['network', 'connectivity', 'internet', 'ping', 'connection']):
@@ -3134,7 +3134,7 @@ def ai_reply(prompt, username, user_ip):
             else:
                 return f"Network connectivity issues detected, {username}. I recommend running network diagnostic tools like ping, traceroute, or netstat from the Tools tab to troubleshoot."
         except Exception:
-                return f"I can help diagnose network issues, {username}. Use the network tools in the Tools tab: ping, netstat, ss, nmap, or traceroute."
+            return f"I can help diagnose network issues, {username}. Use the network tools in the Tools tab: ping, netstat, ss, nmap, or traceroute."
     
     # Learning and memory intent
     elif any(term in prompt_low for term in ['remember', 'memory', 'forget', 'learn']):
@@ -3169,7 +3169,7 @@ def ai_reply(prompt, username, user_ip):
             save_ai_response(username, reply, user_memory, memory_size)
             return reply
         except Exception as e:
-                reply = f"Security monitoring active, {username}. I maintain continuous surveillance but encountered a data retrieval issue: {str(e)}. All security protections remain operational."
+            reply = f"Security monitoring active, {username}. I maintain continuous surveillance but encountered a data retrieval issue: {str(e)}. All security protections remain operational."
             return get_personalized_jarvis_response(username, reply)
     
     # Advanced features intent
@@ -3218,7 +3218,7 @@ def ai_reply(prompt, username, user_ip):
             output = execute_tool('security-scan')
             return f"Security scan completed, {username}! Here's a summary:\n\n{output[:400]}{'...' if len(output) > 400 else ''}\n\nFull results are in the Tools tab. I can also run specific tools like nmap or netstat if needed."
         except Exception:
-                return f"I'll perform a security scan, {username}. Switch to the Tools tab and run the Security Scan tool for comprehensive analysis."
+            return f"I'll perform a security scan, {username}. Switch to the Tools tab and run the Security Scan tool for comprehensive analysis."
     
     # System information intent - ENHANCED
     elif any(term in prompt_low for term in ['system info', 'system report', 'full status', 'detailed status']):
@@ -3226,7 +3226,7 @@ def ai_reply(prompt, username, user_ip):
             output = execute_tool('system-info')
             return f"System report generated, {username}:\n\n{output[:400]}{'...' if len(output) > 400 else ''}\n\nComplete report available in the Tools tab."
         except Exception:
-                return f"Generating detailed system report, {username}. Check the Tools tab for comprehensive system information and diagnostics."
+            return f"Generating detailed system report, {username}. Check the Tools tab for comprehensive system information and diagnostics."
     
     # Fallback responses based on personality
     reply = ""
@@ -3303,7 +3303,7 @@ def save_ai_response(username, reply, user_memory, memory_size):
         # Save the updated memory
         save_user_memory(username, user_memory)
     except Exception as e:
-            py_alert('WARN', f'Failed to save AI response for {username}: {str(e)}')
+        py_alert('WARN', f'Failed to save AI response for {username}: {str(e)}')
 
 
 
@@ -3342,7 +3342,7 @@ def get_personalized_jarvis_response(username, base_response):
         return base_response
         
     except Exception:
-            return base_response
+        return base_response
 
 def verify_storage_and_memory_systems():
     """Comprehensive verification of storage and memory systems"""
@@ -3391,7 +3391,7 @@ def verify_storage_and_memory_systems():
                     verification_results["memory_encryption"] = "key_too_short"
                     verification_results["issues"].append("Encryption key is too short")
             except Exception as e:
-                    verification_results["memory_encryption"] = "key_read_error"
+                verification_results["memory_encryption"] = "key_read_error"
                 verification_results["issues"].append(f"Cannot read encryption key: {str(e)}")
         else:
             verification_results["memory_encryption"] = "no_key"
@@ -3423,13 +3423,13 @@ def verify_storage_and_memory_systems():
                         try:
                             os.remove(test_file)
                         except Exception:
-                                pass
+                            pass
             else:
                 verification_results["storage_health"] = "save_load_failed"
                 verification_results["issues"].append("Memory save/load test failed")
                 
         except Exception as e:
-                verification_results["storage_health"] = "error"
+            verification_results["storage_health"] = "error"
             verification_results["issues"].append(f"Memory test error: {str(e)}")
         
         # Check backup and recovery capabilities
@@ -3447,7 +3447,7 @@ def verify_storage_and_memory_systems():
                 verification_results["issues"].append("Cannot create backup files")
                 
         except Exception as e:
-                verification_results["backup_systems"] = "error"
+            verification_results["backup_systems"] = "error"
             verification_results["issues"].append(f"Backup test error: {str(e)}")
         
         # Generate recommendations
@@ -3470,7 +3470,7 @@ def verify_storage_and_memory_systems():
             verification_results["overall_status"] = "needs_attention"
             
     except Exception as e:
-            verification_results["overall_status"] = "verification_failed"
+        verification_results["overall_status"] = "verification_failed"
         verification_results["issues"].append(f"Verification process error: {str(e)}")
     
     return verification_results
@@ -3540,7 +3540,7 @@ def generate_comprehensive_security_report():
             report.append(f"Memory Usage: {mem_data.get('used_pct', 'N/A')}%")
             report.append(f"Disk Usage: {disk_data.get('use_pct', 'N/A')}%")
         except Exception:
-                report.append("Performance metrics unavailable")
+            report.append("Performance metrics unavailable")
         
         report.append("")
         
@@ -3559,13 +3559,13 @@ def generate_comprehensive_security_report():
             report.append(f"Learning Mode: Active")
             report.append(f"Personality: {get_jarvis_personality().title()}")
         except Exception:
-                report.append("Jarvis status check failed")
+            report.append("Jarvis status check failed")
         
         report.append("")
         report.append("=== END REPORT ===")
         
     except Exception as e:
-            report.append(f"Report generation error: {str(e)}")
+        report.append(f"Report generation error: {str(e)}")
     
     return "\n".join(report)
 
@@ -3614,7 +3614,7 @@ def jarvis_security_integration():
                         elif any(keyword in line for keyword in ['ALERT', 'WARNING', 'CRITICAL']):
                             security_data['security_alerts'].append(line.strip())
                     except Exception:
-                            continue  # Skip malformed log lines
+                        continue  # Skip malformed log lines
         
         # Read audit logs for additional security events
         audit_log_path = NS_AUDIT
@@ -3642,7 +3642,7 @@ def jarvis_security_integration():
                     recent_fails = ssh_fails.stdout.strip().split('\n')[-10:]  # Last 10
                     security_data['brute_force_detections'].extend(recent_fails)
         except Exception:
-                pass
+            pass
         
         # Check for suspicious processes
         try:
@@ -3656,10 +3656,10 @@ def jarvis_security_integration():
                         suspicious_processes.append(line.strip())
                         security_data['system_threats'].append(f"Suspicious process detected: {line.strip()}")
         except Exception:
-                pass
+            pass
         
     except Exception as e:
-            security_data['system_threats'].append(f"Error in security integration: {str(e)}")
+        security_data['system_threats'].append(f"Error in security integration: {str(e)}")
     
     return security_data
 
@@ -3831,7 +3831,7 @@ def enhanced_jarvis_learning(username, prompt, reply_context):
         py_alert('INFO', f'Enhanced learning completed for {username} (session #{patterns["learning_sessions"]})')
         
     except Exception as e:
-            py_alert('ERROR', f'Enhanced Jarvis learning error for {username}: {str(e)}')
+        py_alert('ERROR', f'Enhanced Jarvis learning error for {username}: {str(e)}')
 
 def calculate_learning_quality(patterns):
     """Calculate a quality score for the learning patterns."""
@@ -3899,7 +3899,7 @@ def save_command_result(tool_name, command, output, username):
         security_log(f"RESULT_SAVED user={username} tool={tool_name} category=auto_classified")
         
     except Exception as e:
-            security_log(f"RESULT_SAVE_ERROR user={username} tool={tool_name} error={str(e)}")
+        security_log(f"RESULT_SAVE_ERROR user={username} tool={tool_name} error={str(e)}")
 
 
 
@@ -4020,7 +4020,7 @@ def scan_system_tools():
             else:
                 tool_info['path'] = None
         except Exception:
-                tool_info['available'] = False
+            tool_info['available'] = False
             tool_info['path'] = None
     
     return tools
@@ -4049,7 +4049,7 @@ def install_missing_tools():
                 install_cmd = cmd
                 break
         except Exception:
-                continue
+            continue
     
     if not pkg_manager:
         return "No supported package manager found (apt, yum, dnf, pacman, pkg)"
@@ -4116,9 +4116,9 @@ def install_missing_tools():
                 output.append(f"✗ Failed to install {tool}: {result.stderr.decode()[:100]}")
                 
         except subprocess.TimeoutExpired:
-                output.append(f"✗ Timeout installing {tool}")
+            output.append(f"✗ Timeout installing {tool}")
         except Exception as e:
-                output.append(f"✗ Error installing {tool}: {str(e)}")
+            output.append(f"✗ Error installing {tool}: {str(e)}")
     
     output.append(f"\nInstallation summary: {installed_count} tools installed")
     return "\n".join(output)
@@ -4190,11 +4190,11 @@ def execute_tool_with_args(tool_name, args):
         return output or f"{tool_name} executed successfully (no output)"
         
     except subprocess.TimeoutExpired:
-            return f"Error: {tool_name} execution timed out"
+        return f"Error: {tool_name} execution timed out"
     except subprocess.CalledProcessError as e:
-            return f"Error: {tool_name} failed with exit code {e.returncode}"
+        return f"Error: {tool_name} failed with exit code {e.returncode}"
     except Exception as e:
-            return f"Error executing {tool_name}: {str(e)}"
+        return f"Error executing {tool_name}: {str(e)}"
 
 def execute_tool(tool_name):
     """Execute a system tool and return its output."""
@@ -4254,11 +4254,11 @@ def execute_tool(tool_name):
         return output
         
     except subprocess.TimeoutExpired:
-            return f"Tool execution timed out: {tool_name}"
+        return f"Tool execution timed out: {tool_name}"
     except FileNotFoundError:
-            return f"Tool not found: {tool_name}. Try installing it first."
+        return f"Tool not found: {tool_name}. Try installing it first."
     except Exception as e:
-            return f"Error executing {tool_name}: {str(e)}"
+        return f"Error executing {tool_name}: {str(e)}"
 
 def generate_system_info_report():
     """Generate a comprehensive system information report."""
@@ -4280,7 +4280,7 @@ def generate_system_info_report():
         output.append(f"Processor: {platform.processor()}")
         output.append(f"Python: {platform.python_version()}")
     except Exception as e:
-            output.append(f"Error getting basic info: {e}")
+        output.append(f"Error getting basic info: {e}")
     
     output.append("")
     
@@ -4292,7 +4292,7 @@ def generate_system_info_report():
                 if line.startswith(('MemTotal:', 'MemFree:', 'MemAvailable:', 'Buffers:', 'Cached:')):
                     output.append(line.strip())
     except Exception as e:
-            output.append(f"Error reading memory info: {e}")
+        output.append(f"Error reading memory info: {e}")
     
     output.append("")
     
@@ -4302,7 +4302,7 @@ def generate_system_info_report():
         result = subprocess.run(['df', '-h'], capture_output=True, text=True, timeout=10)
         output.append(result.stdout)
     except Exception as e:
-            output.append(f"Error getting disk usage: {e}")
+        output.append(f"Error getting disk usage: {e}")
     
     # Network interfaces
     output.append("--- Network Interfaces ---")
@@ -4310,11 +4310,11 @@ def generate_system_info_report():
         result = subprocess.run(['ip', 'addr'], capture_output=True, text=True, timeout=10)
         output.append(result.stdout)
     except Exception:
-            try:
+        try:
             result = subprocess.run(['ifconfig'], capture_output=True, text=True, timeout=10)
             output.append(result.stdout)
         except Exception as e:
-                output.append(f"Error getting network info: {e}")
+            output.append(f"Error getting network info: {e}")
     
     # Running processes
     output.append("--- Top Processes ---")
@@ -4323,7 +4323,7 @@ def generate_system_info_report():
         lines = result.stdout.split('\n')
         output.extend(lines[:11])  # Header + top 10 processes
     except Exception as e:
-            output.append(f"Error getting process info: {e}")
+        output.append(f"Error getting process info: {e}")
     
     return "\n".join(output)
 
@@ -4353,7 +4353,7 @@ def perform_basic_security_scan():
             else:
                 output.append("No issues found")
         except Exception as e:
-                output.append(f"Error: {e}")
+            output.append(f"Error: {e}")
         output.append("")
     
     # Check file permissions
@@ -4364,7 +4364,7 @@ def perform_basic_security_scan():
             result = subprocess.run(['ls', '-la', file_path], capture_output=True, text=True, timeout=5)
             output.append(result.stdout.strip())
         except Exception:
-                output.append(f"{file_path}: Not accessible")
+            output.append(f"{file_path}: Not accessible")
     
     output.append("")
     output.append(f"Scan completed: {time.strftime('%Y-%m-%d %H:%M:%S')}")
@@ -4411,7 +4411,7 @@ def analyze_system_logs():
                             output.append(f"  {line}")
                 
             except Exception as e:
-                    output.append(f"Error analyzing {log_path}: {e}")
+                output.append(f"Error analyzing {log_path}: {e}")
             output.append("")
         else:
             output.append(f"--- {description} ---")
@@ -4435,7 +4435,7 @@ def analyze_system_logs():
                 else:
                     output.append(f"✓ Normal disk usage: {usage_pct}%")
     except Exception:
-            output.append("Could not check disk usage")
+        output.append("Could not check disk usage")
     
     output.append("")
     output.append(f"Analysis completed: {time.strftime('%Y-%m-%d %H:%M:%S')}")
@@ -4505,10 +4505,10 @@ def execute_custom_command(command):
             output.append("❌ Command failed with non-zero exit code")
             
     except subprocess.TimeoutExpired:
-            output.append("⏱️  ERROR: Command timed out after 30 seconds")
+        output.append("⏱️  ERROR: Command timed out after 30 seconds")
         output.append("Use the terminal tab for long-running commands")
     except Exception as e:
-            output.append(f"❌ ERROR: {str(e)}")
+        output.append(f"❌ ERROR: {str(e)}")
         security_log(f"COMMAND_EXCEPTION command={command} error={str(e)}")
     
     output.append("")
@@ -4745,7 +4745,7 @@ class Handler(SimpleHTTPRequestHandler):
                     }
                     self._set_headers(200); self.wfile.write(json.dumps(config_data).encode('utf-8')); return
                 except Exception as e:
-                        self._set_headers(500); self.wfile.write(json.dumps({'error': str(e)}).encode('utf-8')); return
+                    self._set_headers(500); self.wfile.write(json.dumps({'error': str(e)}).encode('utf-8')); return
 
         # Jarvis AI memory management - GET handler
             if parsed.path == '/api/jarvis/memory':
@@ -4764,7 +4764,7 @@ class Handler(SimpleHTTPRequestHandler):
                         'history': user_memory.get('history', [])
                     }).encode('utf-8'))
                 except Exception as e:
-                        self._set_headers(200)
+                    self._set_headers(200)
                     self.wfile.write(json.dumps({
                         'ok': True,
                         'memory': {},
@@ -4819,7 +4819,7 @@ class Handler(SimpleHTTPRequestHandler):
                     return
                     
                 except Exception as e:
-                        security_log(f"USERS_API_ERROR error={str(e)}")
+                    security_log(f"USERS_API_ERROR error={str(e)}")
                     self._set_headers(500)
                     self.wfile.write(json.dumps({'error': str(e)}).encode('utf-8'))
                     return
@@ -4862,7 +4862,7 @@ class Handler(SimpleHTTPRequestHandler):
                     content = open(full,'rb').read(500_000).decode('utf-8','ignore')
                     self._set_headers(200); self.wfile.write(json.dumps({'ok':True,'path':full,'size':size,'content':content}).encode('utf-8')); return
                 except Exception as e:
-                        self._set_headers(500); self.wfile.write(json.dumps({'ok':False,'error':str(e)}).encode('utf-8')); return
+                    self._set_headers(500); self.wfile.write(json.dumps({'ok':False,'error':str(e)}).encode('utf-8')); return
 
             if parsed.path == '/site':
                 index = os.path.join(SITE_DIR,'index.html')
@@ -4879,7 +4879,7 @@ class Handler(SimpleHTTPRequestHandler):
                 self._set_headers(404); self.wfile.write(b'{"error":"not found"}')
         
         except Exception as e:
-                # Comprehensive exception handler for do_GET - prevents server crashes
+            # Comprehensive exception handler for do_GET - prevents server crashes
             try:
                 error_msg = f"GET request handler error: {str(e)}"
                 server_error_log = os.path.join(NS_LOGS, 'server.error.log')
@@ -4892,7 +4892,7 @@ class Handler(SimpleHTTPRequestHandler):
                 self.end_headers()
                 self.wfile.write(json.dumps({'error': 'Internal server error'}).encode('utf-8'))
             except Exception:
-                    # Last resort - minimal error handling
+                # Last resort - minimal error handling
                 pass
 
     def do_POST(self):
@@ -5033,7 +5033,7 @@ class Handler(SimpleHTTPRequestHandler):
                                         with open(log_file, 'w', encoding='utf-8') as f:
                                             f.writelines(lines[-100:])
                                 except Exception as e:
-                                        print(f"Error clearing {log_file}: {e}")
+                                    print(f"Error clearing {log_file}: {e}")
                     audit(f'CONTROL {action} ip={self.client_address[0]}')
                     self._set_headers(200); self.wfile.write(json.dumps({'ok':True}).encode('utf-8')); return
                 except Exception: pass
@@ -5044,7 +5044,7 @@ class Handler(SimpleHTTPRequestHandler):
                 try: 
                     data = json.loads(body or '{}')
                 except Exception:
-                        py_alert('WARN', f'Chat API invalid JSON from {self.client_address[0]}')
+                    py_alert('WARN', f'Chat API invalid JSON from {self.client_address[0]}')
                     self._set_headers(400); self.wfile.write(json.dumps({'ok':False,'error':'invalid json'}).encode('utf-8')); return
                 
             prompt = data.get('prompt','')
@@ -5122,7 +5122,7 @@ class Handler(SimpleHTTPRequestHandler):
                     
                 self._set_headers(200); self.wfile.write(json.dumps(response_data).encode('utf-8')); return
             except Exception as e:
-                    py_alert('ERROR', f'Chat AI error for {user_ip}: {str(e)}')
+                py_alert('ERROR', f'Chat AI error for {user_ip}: {str(e)}')
                 self._set_headers(500); self.wfile.write(json.dumps({'ok':False,'error':'ai error'}).encode('utf-8')); return
         
         # Enhanced Jarvis AI memory management
@@ -5152,7 +5152,7 @@ class Handler(SimpleHTTPRequestHandler):
                     self._set_headers(200)
                     self.wfile.write(json.dumps({'ok': True}).encode('utf-8'))
                 except Exception as e:
-                        py_alert('ERROR', f'Failed to save memory for {username}: {str(e)}')
+                    py_alert('ERROR', f'Failed to save memory for {username}: {str(e)}')
                     self._set_headers(500)
                     self.wfile.write(json.dumps({'ok': False, 'error': str(e)}).encode('utf-8'))
             return
@@ -5168,7 +5168,7 @@ class Handler(SimpleHTTPRequestHandler):
                     'tools': tools_info
                     }).encode('utf-8'))
                 except Exception as e:
-                    self._set_headers(500)
+                self._set_headers(500)
                 self.wfile.write(json.dumps({'ok': False, 'error': str(e)}).encode('utf-8'))
             return
         
@@ -5182,7 +5182,7 @@ class Handler(SimpleHTTPRequestHandler):
                     'output': output
                     }).encode('utf-8'))
                 except Exception as e:
-                    self._set_headers(500)
+                self._set_headers(500)
                 self.wfile.write(json.dumps({'ok': False, 'error': str(e)}).encode('utf-8'))
             return
         
@@ -5266,7 +5266,7 @@ class Handler(SimpleHTTPRequestHandler):
                     'output': output
                 }).encode('utf-8'))
             except Exception as e:
-                    security_log(f"COMMAND_ERROR user={username} ip={user_ip} error={str(e)}")
+                security_log(f"COMMAND_ERROR user={username} ip={user_ip} error={str(e)}")
                 self._set_headers(500)
                 self.wfile.write(json.dumps({'ok': False, 'error': str(e)}).encode('utf-8'))
             return
@@ -5341,7 +5341,7 @@ class Handler(SimpleHTTPRequestHandler):
                 audit(f'FS RM {full} ip={self.client_address[0]}')
                 self._set_headers(200); self.wfile.write(b'{"ok":true}')
             except Exception as e:
-                    self._set_headers(500); self.wfile.write(json.dumps({'ok':False,'error':str(e)}).encode('utf-8'))
+                self._set_headers(500); self.wfile.write(json.dumps({'ok':False,'error':str(e)}).encode('utf-8'))
             return
 
             if parsed.path == '/api/security':
@@ -5401,7 +5401,7 @@ class Handler(SimpleHTTPRequestHandler):
                                         log_entry['level'] = 'error'
                                         auth_logs.append(log_entry)
                     except Exception as e:
-                            print(f"Error reading session log: {e}")
+                        print(f"Error reading session log: {e}")
                 
                 # Count active sessions with expiry check
                 try:
@@ -5415,7 +5415,7 @@ class Handler(SimpleHTTPRequestHandler):
                                 active_count += 1
                     stats['active_sessions'] = active_count
                 except Exception as e:
-                        print(f"Error counting active sessions: {e}")
+                    print(f"Error counting active sessions: {e}")
                     stats['active_sessions'] = 0
                 
                 # Parse security log for dedicated security events
@@ -5463,7 +5463,7 @@ class Handler(SimpleHTTPRequestHandler):
                                     security_logs.append(log_entry)
                                     stats['security_count'] += 1
                     except Exception as e:
-                            print(f"Error reading security log: {e}")
+                        print(f"Error reading security log: {e}")
                 
                 # Parse audit log for detailed system events
                 if os.path.exists(audit_path):
@@ -5499,7 +5499,7 @@ class Handler(SimpleHTTPRequestHandler):
                                     stats['audit_count'] += 1
                                     stats['last_audit'] = timestamp
                     except Exception as e:
-                            print(f"Error reading audit log: {e}")
+                        print(f"Error reading audit log: {e}")
                 
                 # Parse alerts for security events
                 if os.path.exists(alerts_path):
@@ -5530,7 +5530,7 @@ class Handler(SimpleHTTPRequestHandler):
                                         security_logs.append(log_entry)
                                         stats['security_count'] += 1
                     except Exception as e:
-                            print(f"Error reading alerts log: {e}")
+                        print(f"Error reading alerts log: {e}")
                 
                 # Check integrity monitoring
                 integrity_state_path = os.path.join(NS_CTRL, 'integrity.state')
@@ -5549,7 +5549,7 @@ class Handler(SimpleHTTPRequestHandler):
                                 'level': 'warning'
                             })
                     except Exception as e:
-                            print(f"Error reading integrity state: {e}")
+                        print(f"Error reading integrity state: {e}")
                 else:
                     # Fallback to integrity.json
                     integrity_json = read_json(os.path.join(NS_LOGS, 'integrity.json'), {})
@@ -5572,7 +5572,7 @@ class Handler(SimpleHTTPRequestHandler):
                 return
                 
             except Exception as e:
-                    print(f"Security API error: {e}")
+                print(f"Security API error: {e}")
                 self._set_headers(500); 
                 self.wfile.write(json.dumps({'error': str(e)}).encode('utf-8'))
                 return
@@ -5628,7 +5628,7 @@ class Handler(SimpleHTTPRequestHandler):
                         shutil.copy2(CONFIG, backup_path)
                         security_log(f"CONFIG_BACKUP created={backup_path} user={sess.get('user', 'unknown')} ip={get_client_ip(self)}")
                     except Exception as e:
-                            # Log but don't fail the save operation
+                        # Log but don't fail the save operation
                         security_log(f"CONFIG_BACKUP_FAILED error={str(e)} user={sess.get('user', 'unknown')}")
                 
                 # Write new configuration
@@ -5648,11 +5648,11 @@ class Handler(SimpleHTTPRequestHandler):
                 return
                 
                     except json.JSONDecodeError:
-                    self._set_headers(400)
+                self._set_headers(400)
                 self.wfile.write(json.dumps({'error': 'Invalid JSON in request'}).encode('utf-8'))
                 return
                     except Exception as e:
-                    security_log(f"CONFIG_SAVE_ERROR user={sess.get('user', 'unknown')} ip={get_client_ip(self)} error={str(e)}")
+                security_log(f"CONFIG_SAVE_ERROR user={sess.get('user', 'unknown')} ip={get_client_ip(self)} error={str(e)}")
                 self._set_headers(500)
                 self.wfile.write(json.dumps({'error': f'Failed to save configuration: {str(e)}'}).encode('utf-8'))
                 return
@@ -5762,11 +5762,11 @@ class Handler(SimpleHTTPRequestHandler):
                 return
                 
                 except json.JSONDecodeError:
-                    self._set_headers(400)
+                self._set_headers(400)
                 self.wfile.write(json.dumps({'error': 'Invalid JSON in request'}).encode('utf-8'))
                 return
             except Exception as e:
-                    security_log(f"SECURITY_ACTION_ERROR action={action} user={sess.get('user', 'unknown')} ip={get_client_ip(self)} error={str(e)}")
+                security_log(f"SECURITY_ACTION_ERROR action={action} user={sess.get('user', 'unknown')} ip={get_client_ip(self)} error={str(e)}")
                 self._set_headers(500)
                 self.wfile.write(json.dumps({'error': f'Security action failed: {str(e)}'}).encode('utf-8'))
                 return
@@ -5774,7 +5774,7 @@ class Handler(SimpleHTTPRequestHandler):
         self._set_headers(400); self.wfile.write(b'{"ok":false}')
         
         except Exception as e:
-                # Comprehensive exception handler for do_POST - prevents server crashes
+            # Comprehensive exception handler for do_POST - prevents server crashes
             try:
                 error_msg = f"POST request handler error: {str(e)}"
                 server_error_log = os.path.join(NS_LOGS, 'server.error.log')
@@ -5787,7 +5787,7 @@ class Handler(SimpleHTTPRequestHandler):
                 self.end_headers()
                 self.wfile.write(json.dumps({'error': 'Internal server error'}).encode('utf-8'))
             except Exception:
-                    # Last resort - minimal error handling
+                # Last resort - minimal error handling
                 pass
 
 def pick_host_port():
@@ -5799,7 +5799,7 @@ def pick_host_port():
     try:
         socket.getaddrinfo(host, port)
     except Exception:
-            host = '127.0.0.1'
+        host = '127.0.0.1'
     return host, port
 
 def tls_params():
@@ -5844,10 +5844,10 @@ if __name__ == '__main__':
                 try:
                     httpd.serve_forever()
                 except KeyboardInterrupt:
-                        print("\nShutting down server...")
+                    print("\nShutting down server...")
                     break
                 except Exception as e:
-                        error_msg = f"Server error during serve_forever: {str(e)}"
+                    error_msg = f"Server error during serve_forever: {str(e)}"
                     print(error_msg, file=sys.stderr)
                     logging.error(error_msg + f"\nTraceback: {__import__('traceback').format_exc()}")
                     # Continue running - don't exit on server errors
@@ -5855,12 +5855,12 @@ if __name__ == '__main__':
                     continue
                     
             except Exception as e:
-                    print(f"Bind failed on {h}:{port}: {e}", file=sys.stderr)
+                print(f"Bind failed on {h}:{port}: {e}", file=sys.stderr)
                 time.sleep(0.5)
                 continue
                 
     except Exception as e:
-            # Top-level exception handler - log and exit cleanly
+        # Top-level exception handler - log and exit cleanly
         error_msg = f"Critical server error: {str(e)}"
         print(error_msg, file=sys.stderr)
         logging.error(error_msg + f"\nTraceback: {__import__('traceback').format_exc()}")
