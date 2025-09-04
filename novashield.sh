@@ -5474,125 +5474,125 @@ class Handler(SimpleHTTPRequestHandler):
                     if os.path.exists(audit_path):
                         try:
                             with open(audit_path, 'r', encoding='utf-8') as f:
-                            lines = f.readlines()[-50:]  # Last 50 lines
-                            for line in lines:
-                                line = line.strip()
-                                if not line: continue
-                                
-                                parts = line.split(' ', 2)
-                                if len(parts) >= 3:
-                                    timestamp = f"{parts[0]} {parts[1]}"
-                                    message = parts[2]
+                                lines = f.readlines()[-50:]  # Last 50 lines
+                                for line in lines:
+                                    line = line.strip()
+                                    if not line: continue
                                     
-                                    log_entry = {
-                                        'timestamp': timestamp,
-                                        'message': message,
-                                        'level': 'info'
-                                    }
+                                    parts = line.split(' ', 2)
+                                    if len(parts) >= 3:
+                                        timestamp = f"{parts[0]} {parts[1]}"
+                                        message = parts[2]
+                                        
+                                        log_entry = {
+                                            'timestamp': timestamp,
+                                            'message': message,
+                                            'level': 'info'
+                                        }
+                                        
+                                        if 'LOGIN OK' in message or 'LOGIN SUCCESS' in message:
+                                            stats['auth_success'] += 1
+                                            log_entry['level'] = 'success'
+                                            auth_logs.append(log_entry)
+                                        elif 'LOGIN FAIL' in message:
+                                            stats['auth_fail'] += 1
+                                            log_entry['level'] = 'error'
+                                            auth_logs.append(log_entry)
+                                        elif any(kw in message for kw in ['MONITOR', 'CONTROL', 'FS']):
+                                            audit_logs.append(log_entry)
+                                        
+                                        stats['audit_count'] += 1
+                                        stats['last_audit'] = timestamp
+                        except Exception as e:
+                            print(f"Error reading audit log: {e}")
+                    
+                    # Parse alerts for security events
+                    if os.path.exists(alerts_path):
+                        try:
+                            with open(alerts_path, 'r', encoding='utf-8') as f:
+                                lines = f.readlines()[-50:]
+                                for line in lines:
+                                    line = line.strip()
+                                    if not line: continue
                                     
-                                    if 'LOGIN OK' in message or 'LOGIN SUCCESS' in message:
-                                        stats['auth_success'] += 1
-                                        log_entry['level'] = 'success'
-                                        auth_logs.append(log_entry)
-                                    elif 'LOGIN FAIL' in message:
-                                        stats['auth_fail'] += 1
-                                        log_entry['level'] = 'error'
-                                        auth_logs.append(log_entry)
-                                    elif any(kw in message for kw in ['MONITOR', 'CONTROL', 'FS']):
-                                        audit_logs.append(log_entry)
-                                    
-                                    stats['audit_count'] += 1
-                                    stats['last_audit'] = timestamp
-                    except Exception as e:
-                        print(f"Error reading audit log: {e}")
-                
-                # Parse alerts for security events
-                if os.path.exists(alerts_path):
-                    try:
-                        with open(alerts_path, 'r', encoding='utf-8') as f:
-                            lines = f.readlines()[-50:]
-                            for line in lines:
-                                line = line.strip()
-                                if not line: continue
-                                
-                                parts = line.split(' ', 3)
-                                if len(parts) >= 4:
-                                    timestamp = f"{parts[0]} {parts[1]}"
-                                    level = parts[2].strip('[]').lower()
-                                    message = parts[3]
-                                    
-                                    log_entry = {
-                                        'timestamp': timestamp,
-                                        'message': message,
-                                        'level': level
-                                    }
-                                    
-                                    if level in ['crit', 'error']:
-                                        stats['threat_count'] += 1
-                                    
-                                    # Add to security logs if it's a security-related alert
-                                    if any(kw in message.lower() for kw in ['network', 'integrity', 'suspicious', 'attack', 'breach']):
-                                        security_logs.append(log_entry)
-                                        stats['security_count'] += 1
-                    except Exception as e:
-                        print(f"Error reading alerts log: {e}")
-                
-                # Check integrity monitoring
-                integrity_state_path = os.path.join(NS_CTRL, 'integrity.state')
-                if os.path.exists(integrity_state_path):
-                    try:
-                        integrity_data = read_json(integrity_state_path, {})
-                        stats['integrity_files'] = integrity_data.get('files', 0)
-                        stats['integrity_changes'] = integrity_data.get('changes_detected', 0)
-                        
-                        # Add recent integrity events to logs
-                        recent_changes = integrity_data.get('recent_changes', [])
-                        for change in recent_changes[-20:]:  # Last 20 changes
-                            integrity_logs.append({
-                                'timestamp': change.get('timestamp', 'Unknown'),
-                                'message': f"File change detected: {change.get('file', 'unknown')} ({change.get('type', 'modified')})",
-                                'level': 'warning'
-                            })
-                    except Exception as e:
-                        print(f"Error reading integrity state: {e}")
-                else:
-                    # Fallback to integrity.json
-                    integrity_json = read_json(os.path.join(NS_LOGS, 'integrity.json'), {})
-                    stats['integrity_files'] = integrity_json.get('files', 0)
-                    stats['integrity_changes'] = integrity_json.get('changes', 0)
-                
-                response = {
-                    'ok': True,
-                    'stats': stats,
-                    'logs': {
-                        'auth': auth_logs[-20:],  # Last 20 auth events
-                        'audit': audit_logs[-20:],  # Last 20 audit events  
-                        'security': security_logs[-20:],  # Last 20 security events
-                        'integrity': integrity_logs[-20:]  # Last 20 integrity events
+                                    parts = line.split(' ', 3)
+                                    if len(parts) >= 4:
+                                        timestamp = f"{parts[0]} {parts[1]}"
+                                        level = parts[2].strip('[]').lower()
+                                        message = parts[3]
+                                        
+                                        log_entry = {
+                                            'timestamp': timestamp,
+                                            'message': message,
+                                            'level': level
+                                        }
+                                        
+                                        if level in ['crit', 'error']:
+                                            stats['threat_count'] += 1
+                                        
+                                        # Add to security logs if it's a security-related alert
+                                        if any(kw in message.lower() for kw in ['network', 'integrity', 'suspicious', 'attack', 'breach']):
+                                            security_logs.append(log_entry)
+                                            stats['security_count'] += 1
+                        except Exception as e:
+                            print(f"Error reading alerts log: {e}")
+                    
+                    # Check integrity monitoring
+                    integrity_state_path = os.path.join(NS_CTRL, 'integrity.state')
+                    if os.path.exists(integrity_state_path):
+                        try:
+                            integrity_data = read_json(integrity_state_path, {})
+                            stats['integrity_files'] = integrity_data.get('files', 0)
+                            stats['integrity_changes'] = integrity_data.get('changes_detected', 0)
+                            
+                            # Add recent integrity events to logs
+                            recent_changes = integrity_data.get('recent_changes', [])
+                            for change in recent_changes[-20:]:  # Last 20 changes
+                                integrity_logs.append({
+                                    'timestamp': change.get('timestamp', 'Unknown'),
+                                    'message': f"File change detected: {change.get('file', 'unknown')} ({change.get('type', 'modified')})",
+                                    'level': 'warning'
+                                })
+                        except Exception as e:
+                            print(f"Error reading integrity state: {e}")
+                    else:
+                        # Fallback to integrity.json
+                        integrity_json = read_json(os.path.join(NS_LOGS, 'integrity.json'), {})
+                        stats['integrity_files'] = integrity_json.get('files', 0)
+                        stats['integrity_changes'] = integrity_json.get('changes', 0)
+                    
+                    response = {
+                        'ok': True,
+                        'stats': stats,
+                        'logs': {
+                            'auth': auth_logs[-20:],  # Last 20 auth events
+                            'audit': audit_logs[-20:],  # Last 20 audit events  
+                            'security': security_logs[-20:],  # Last 20 security events
+                            'integrity': integrity_logs[-20:]  # Last 20 integrity events
+                        }
                     }
-                }
+                    
+                    self._set_headers(200); 
+                    self.wfile.write(json.dumps(response).encode('utf-8'))
+                    return
                 
-                self._set_headers(200); 
-                self.wfile.write(json.dumps(response).encode('utf-8'))
-                return
-                
-            except Exception as e:
-                print(f"Security API error: {e}")
-                self._set_headers(500); 
-                self.wfile.write(json.dumps({'error': str(e)}).encode('utf-8'))
-                return
+                except Exception as e:
+                    print(f"Security API error: {e}")
+                    self._set_headers(500); 
+                    self.wfile.write(json.dumps({'error': str(e)}).encode('utf-8'))
+                    return
 
             if parsed.path == '/api/config/save':
                 if not require_auth(self): return
                 sess = get_session(self) or {}
-            
-            # Check CSRF if required
+                
+                # Check CSRF if required
                 if csrf_required():
-                client_csrf = self.headers.get('X-CSRF','')
-                if client_csrf != sess.get('csrf',''):
-                    self._set_headers(403)
-                    self.wfile.write(json.dumps({'error': 'CSRF token mismatch'}).encode('utf-8'))
-                    return
+                    client_csrf = self.headers.get('X-CSRF','')
+                    if client_csrf != sess.get('csrf',''):
+                        self._set_headers(403)
+                        self.wfile.write(json.dumps({'error': 'CSRF token mismatch'}).encode('utf-8'))
+                        return
             
                 try:
                 # Read POST data
