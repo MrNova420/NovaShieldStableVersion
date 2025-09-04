@@ -5595,99 +5595,99 @@ class Handler(SimpleHTTPRequestHandler):
                         return
             
                 try:
-                # Read POST data
-                content_length = int(self.headers.get('Content-Length', 0))
-                if content_length == 0:
-                    self._set_headers(400)
-                    self.wfile.write(json.dumps({'error': 'No configuration data provided'}).encode('utf-8'))
+                    # Read POST data
+                    content_length = int(self.headers.get('Content-Length', 0))
+                    if content_length == 0:
+                        self._set_headers(400)
+                        self.wfile.write(json.dumps({'error': 'No configuration data provided'}).encode('utf-8'))
+                        return
+                    
+                    post_data = self.rfile.read(content_length).decode('utf-8')
+                    data = json.loads(post_data)
+                    new_config = data.get('config', '')
+                    
+                    if not new_config.strip():
+                        self._set_headers(400)
+                        self.wfile.write(json.dumps({'error': 'Configuration cannot be empty'}).encode('utf-8'))
+                        return
+                    
+                    # Basic YAML validation (check for obvious syntax errors)
+                    config_lines = new_config.split('\n')
+                    for i, line in enumerate(config_lines, 1):
+                        stripped = line.strip()
+                        if stripped and not stripped.startswith('#'):
+                            # Basic checks for valid YAML structure
+                            if ':' not in stripped and not stripped.startswith('-'):
+                                if not stripped.replace(' ', '').replace('\t', ''):
+                                    continue  # Skip empty lines
+                                self._set_headers(400)
+                                self.wfile.write(json.dumps({'error': f'Invalid YAML syntax on line {i}: missing colon'}).encode('utf-8'))
+                                return
+                    
+                    # Create backup of current config
+                    if os.path.exists(CONFIG):
+                        backup_timestamp = time.strftime('%Y%m%d_%H%M%S')
+                        backup_path = f"{CONFIG}.bak.{backup_timestamp}"
+                        try:
+                            import shutil
+                            shutil.copy2(CONFIG, backup_path)
+                            security_log(f"CONFIG_BACKUP created={backup_path} user={sess.get('user', 'unknown')} ip={get_client_ip(self)}")
+                        except Exception as e:
+                            # Log but don't fail the save operation
+                            security_log(f"CONFIG_BACKUP_FAILED error={str(e)} user={sess.get('user', 'unknown')}")
+                    
+                    # Write new configuration
+                    with open(CONFIG, 'w', encoding='utf-8') as f:
+                        f.write(new_config)
+                    
+                    # Log the configuration change
+                    audit(f"CONFIG_SAVED user={sess.get('user', 'unknown')} ip={get_client_ip(self)} size={len(new_config)}")
+                    security_log(f"CONFIG_MODIFIED user={sess.get('user', 'unknown')} ip={get_client_ip(self)}")
+                    
+                    self._set_headers(200)
+                    self.wfile.write(json.dumps({
+                        'success': True, 
+                        'message': 'Configuration saved successfully',
+                        'backup_created': backup_path if 'backup_path' in locals() else None
+                    }).encode('utf-8'))
                     return
-                
-                post_data = self.rfile.read(content_length).decode('utf-8')
-                data = json.loads(post_data)
-                new_config = data.get('config', '')
-                
-                if not new_config.strip():
+                    
+                except json.JSONDecodeError:
                     self._set_headers(400)
-                    self.wfile.write(json.dumps({'error': 'Configuration cannot be empty'}).encode('utf-8'))
+                    self.wfile.write(json.dumps({'error': 'Invalid JSON in request'}).encode('utf-8'))
                     return
-                
-                # Basic YAML validation (check for obvious syntax errors)
-                config_lines = new_config.split('\n')
-                for i, line in enumerate(config_lines, 1):
-                    stripped = line.strip()
-                    if stripped and not stripped.startswith('#'):
-                        # Basic checks for valid YAML structure
-                        if ':' not in stripped and not stripped.startswith('-'):
-                            if not stripped.replace(' ', '').replace('\t', ''):
-                                continue  # Skip empty lines
-                            self._set_headers(400)
-                            self.wfile.write(json.dumps({'error': f'Invalid YAML syntax on line {i}: missing colon'}).encode('utf-8'))
-                            return
-                
-                # Create backup of current config
-                if os.path.exists(CONFIG):
-                    backup_timestamp = time.strftime('%Y%m%d_%H%M%S')
-                    backup_path = f"{CONFIG}.bak.{backup_timestamp}"
-                    try:
-                        import shutil
-                        shutil.copy2(CONFIG, backup_path)
-                        security_log(f"CONFIG_BACKUP created={backup_path} user={sess.get('user', 'unknown')} ip={get_client_ip(self)}")
-                    except Exception as e:
-                        # Log but don't fail the save operation
-                        security_log(f"CONFIG_BACKUP_FAILED error={str(e)} user={sess.get('user', 'unknown')}")
-                
-                # Write new configuration
-                with open(CONFIG, 'w', encoding='utf-8') as f:
-                    f.write(new_config)
-                
-                # Log the configuration change
-                audit(f"CONFIG_SAVED user={sess.get('user', 'unknown')} ip={get_client_ip(self)} size={len(new_config)}")
-                security_log(f"CONFIG_MODIFIED user={sess.get('user', 'unknown')} ip={get_client_ip(self)}")
-                
-                self._set_headers(200)
-                self.wfile.write(json.dumps({
-                    'success': True, 
-                    'message': 'Configuration saved successfully',
-                    'backup_created': backup_path if 'backup_path' in locals() else None
-                }).encode('utf-8'))
-                return
-                
-                    except json.JSONDecodeError:
-                self._set_headers(400)
-                self.wfile.write(json.dumps({'error': 'Invalid JSON in request'}).encode('utf-8'))
-                return
-                    except Exception as e:
-                security_log(f"CONFIG_SAVE_ERROR user={sess.get('user', 'unknown')} ip={get_client_ip(self)} error={str(e)}")
-                self._set_headers(500)
-                self.wfile.write(json.dumps({'error': f'Failed to save configuration: {str(e)}'}).encode('utf-8'))
-                return
+                except Exception as e:
+                    security_log(f"CONFIG_SAVE_ERROR user={sess.get('user', 'unknown')} ip={get_client_ip(self)} error={str(e)}")
+                    self._set_headers(500)
+                    self.wfile.write(json.dumps({'error': f'Failed to save configuration: {str(e)}'}).encode('utf-8'))
+                    return
 
             if parsed.path == '/api/security/action':
                 if not require_auth(self): return
                 sess = get_session(self) or {}
-            
-            # Check CSRF if required
+                
+                # Check CSRF if required
                 if csrf_required():
-                client_csrf = self.headers.get('X-CSRF','')
-                if client_csrf != sess.get('csrf',''):
-                    self._set_headers(403)
-                    self.wfile.write(json.dumps({'error': 'CSRF token mismatch'}).encode('utf-8'))
-                    return
-            
+                    client_csrf = self.headers.get('X-CSRF','')
+                    if client_csrf != sess.get('csrf',''):
+                        self._set_headers(403)
+                        self.wfile.write(json.dumps({'error': 'CSRF token mismatch'}).encode('utf-8'))
+                        return
+                
                 try:
-                # Read POST data
-                content_length = int(self.headers.get('Content-Length', 0))
-                if content_length == 0:
-                    self._set_headers(400)
-                    self.wfile.write(json.dumps({'error': 'No action data provided'}).encode('utf-8'))
-                    return
-                
-                post_data = self.rfile.read(content_length).decode('utf-8')
-                data = json.loads(post_data)
-                action = data.get('action', '')
-                ip_address = data.get('ip', '')
-                
-                if not action:
+                    # Read POST data
+                    content_length = int(self.headers.get('Content-Length', 0))
+                    if content_length == 0:
+                        self._set_headers(400)
+                        self.wfile.write(json.dumps({'error': 'No action data provided'}).encode('utf-8'))
+                        return
+                    
+                    post_data = self.rfile.read(content_length).decode('utf-8')
+                    data = json.loads(post_data)
+                    action = data.get('action', '')
+                    ip_address = data.get('ip', '')
+                    
+                    if not action:
                     self._set_headers(400)
                     self.wfile.write(json.dumps({'error': 'No action specified'}).encode('utf-8'))
                     return
