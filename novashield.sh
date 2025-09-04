@@ -5289,11 +5289,12 @@ class Handler(SimpleHTTPRequestHandler):
             self._set_headers(200); self.wfile.write(json.dumps({'ok':True,'page':f'/site/{slug}.html'}).encode('utf-8')); return
 
         # File manager actions
-                    try:
-                        data=json.loads(body or '{}')
-            if parsed.path == /api/fs_write':
+            if parsed.path == '/api/fs_write':
+                if not require_auth(self): return
+                try:
+                    data = json.loads(body or '{}')
                 except Exception:
-                    data={}
+                    data = {}
             path=data.get('path',''); content=data.get('content','')
             full=os.path.abspath(path)
             if (not full.startswith(NS_HOME)) or full.startswith(NS_KEYS):
@@ -5302,11 +5303,12 @@ class Handler(SimpleHTTPRequestHandler):
             except Exception as e: self._set_headers(500); self.wfile.write(json.dumps({'ok':False,'error':str(e)}).encode('utf-8'))
             return
 
-                    try:
-                        data=json.loads(body or '{}')
-            if parsed.path == /api/fs_mkdir':
+            if parsed.path == '/api/fs_mkdir':
+                if not require_auth(self): return
+                try:
+                    data = json.loads(body or '{}')
                 except Exception:
-                    data={}
+                    data = {}
             path=data.get('path','')
             full=os.path.abspath(path)
             if (not full.startswith(NS_HOME)) or full.startswith(NS_KEYS):
@@ -5315,11 +5317,12 @@ class Handler(SimpleHTTPRequestHandler):
             except Exception as e: self._set_headers(500); self.wfile.write(json.dumps({'ok':False,'error':str(e)}).encode('utf-8'))
             return
 
-                    try:
-                        data=json.loads(body or '{}')
-            if parsed.path == /api/fs_mv':
+            if parsed.path == '/api/fs_mv':
+                if not require_auth(self): return
+                try:
+                    data = json.loads(body or '{}')
                 except Exception:
-                    data={}
+                    data = {}
             src=data.get('src',''); dst=data.get('dst','')
             srcf=os.path.abspath(src); dstf=os.path.abspath(dst)
             if (not srcf.startswith(NS_HOME)) or (not dstf.startswith(NS_HOME)) or srcf.startswith(NS_KEYS) or dstf.startswith(NS_KEYS):
@@ -5328,11 +5331,12 @@ class Handler(SimpleHTTPRequestHandler):
             except Exception as e: self._set_headers(500); self.wfile.write(json.dumps({'ok':False,'error':str(e)}).encode('utf-8'))
             return
 
-                    try:
-                        data=json.loads(body or '{}')
-            if parsed.path == /api/fs_rm':
+            if parsed.path == '/api/fs_rm':
+                if not require_auth(self): return
+                try:
+                    data = json.loads(body or '{}')
                 except Exception:
-                    data={}
+                    data = {}
             path=data.get('path',''); full=os.path.abspath(path)
             if (not full.startswith(NS_HOME)) or full.startswith(NS_KEYS):
                 self._set_headers(403); self.wfile.write(b'{"error":"forbidden"}'); return
@@ -5347,77 +5351,77 @@ class Handler(SimpleHTTPRequestHandler):
 
             if parsed.path == '/api/security':
                 if not require_auth(self): return
-            # Comprehensive security dashboard data - moved from duplicate do_POST
+                # Comprehensive security dashboard data - moved from duplicate do_POST
                 try:
-                # Read and parse log files
-                auth_logs = []
-                audit_logs = []
-                security_logs = []
-                integrity_logs = []
-                
-                # Parse session log for detailed authentication events
-                session_path = os.path.join(NS_HOME, 'session.log')
-                alerts_path = os.path.join(NS_LOGS, 'alerts.log')
-                security_path = os.path.join(NS_LOGS, 'security.log')
-                audit_path = os.path.join(NS_LOGS, 'audit.log')
-                
-                stats = {
-                    'auth_success': 0,
-                    'auth_fail': 0,
-                    'active_sessions': 0,
-                    'audit_count': 0,
-                    'security_count': 0,
-                    'threat_count': 0,
-                    'integrity_files': 0,
-                    'integrity_changes': 0,
-                    'last_audit': 'Never'
-                }
-                
-                # Parse session log for detailed authentication events
-                if os.path.exists(session_path):
+                    # Read and parse log files
+                    auth_logs = []
+                    audit_logs = []
+                    security_logs = []
+                    integrity_logs = []
+                    
+                    # Parse session log for detailed authentication events
+                    session_path = os.path.join(NS_HOME, 'session.log')
+                    alerts_path = os.path.join(NS_LOGS, 'alerts.log')
+                    security_path = os.path.join(NS_LOGS, 'security.log')
+                    audit_path = os.path.join(NS_LOGS, 'audit.log')
+                    
+                    stats = {
+                        'auth_success': 0,
+                        'auth_fail': 0,
+                        'active_sessions': 0,
+                        'audit_count': 0,
+                        'security_count': 0,
+                        'threat_count': 0,
+                        'integrity_files': 0,
+                        'integrity_changes': 0,
+                        'last_audit': 'Never'
+                    }
+                    
+                    # Parse session log for detailed authentication events
+                    if os.path.exists(session_path):
+                        try:
+                            with open(session_path, 'r', encoding='utf-8') as f:
+                                lines = f.readlines()[-50:]  # Last 50 lines
+                                for line in lines:
+                                    line = line.strip()
+                                    if not line: continue
+                                    
+                                    parts = line.split(' ', 2)
+                                    if len(parts) >= 3:
+                                        timestamp = f"{parts[0]} {parts[1]}"
+                                        message = parts[2]
+                                        
+                                        log_entry = {
+                                            'timestamp': timestamp,
+                                            'message': message,
+                                            'level': 'info'
+                                        }
+                                        
+                                        if 'SUCCESSFUL_LOGIN' in message:
+                                            stats['auth_success'] += 1
+                                            log_entry['level'] = 'success'
+                                            auth_logs.append(log_entry)
+                                        elif 'FAILED_LOGIN' in message:
+                                            stats['auth_fail'] += 1
+                                            log_entry['level'] = 'error'
+                                            auth_logs.append(log_entry)
+                        except Exception as e:
+                            print(f"Error reading session log: {e}")
+                    
+                    # Count active sessions with expiry check
                     try:
-                        with open(session_path, 'r', encoding='utf-8') as f:
-                            lines = f.readlines()[-50:]  # Last 50 lines
-                            for line in lines:
-                                line = line.strip()
-                                if not line: continue
-                                
-                                parts = line.split(' ', 2)
-                                if len(parts) >= 3:
-                                    timestamp = f"{parts[0]} {parts[1]}"
-                                    message = parts[2]
-                                    
-                                    log_entry = {
-                                        'timestamp': timestamp,
-                                        'message': message,
-                                        'level': 'info'
-                                    }
-                                    
-                                    if 'SUCCESSFUL_LOGIN' in message:
-                                        stats['auth_success'] += 1
-                                        log_entry['level'] = 'success'
-                                        auth_logs.append(log_entry)
-                                    elif 'FAILED_LOGIN' in message:
-                                        stats['auth_fail'] += 1
-                                        log_entry['level'] = 'error'
-                                        auth_logs.append(log_entry)
+                        sessions_db = read_json(SESSIONS, {})
+                        current_time = int(time.time())
+                        active_count = 0
+                        for session_id, session_data in sessions_db.items():
+                            if isinstance(session_data, dict):
+                                session_expiry = session_data.get('expires', 0)
+                                if session_expiry > current_time:
+                                    active_count += 1
+                        stats['active_sessions'] = active_count
                     except Exception as e:
-                        print(f"Error reading session log: {e}")
-                
-                # Count active sessions with expiry check
-                try:
-                    sessions_db = read_json(SESSIONS, {})
-                    current_time = int(time.time())
-                    active_count = 0
-                    for session_id, session_data in sessions_db.items():
-                        if isinstance(session_data, dict):
-                            session_expiry = session_data.get('expires', 0)
-                            if session_expiry > current_time:
-                                active_count += 1
-                    stats['active_sessions'] = active_count
-                except Exception as e:
-                    print(f"Error counting active sessions: {e}")
-                    stats['active_sessions'] = 0
+                        print(f"Error counting active sessions: {e}")
+                        stats['active_sessions'] = 0
                 
                 # Parse security log for dedicated security events
                 if os.path.exists(security_path):
