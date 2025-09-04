@@ -1379,9 +1379,51 @@ except:
       local wpid; wpid=$(safe_read_pid "${NS_PID}/web.pid")
       if [ "$wpid" -eq 0 ] || ! kill -0 "$wpid" 2>/dev/null; then
         if check_restart_limit "web"; then
-          alert ERROR "Web server crashed. Restarting automatically (critical component, within rate limits)."
-          start_web || true
+          # Enhanced logging for web server restarts
+          local crash_time=$(date '+%Y-%m-%d %H:%M:%S')
+          local crash_reason="Process not running"
+          
+          # Check if it was a crash or clean shutdown
+          if [ -f "${NS_HOME}/web.log" ]; then
+            local last_log=$(tail -1 "${NS_HOME}/web.log" 2>/dev/null || echo "")
+            if echo "$last_log" | grep -qi "error\|exception\|crash\|traceback"; then
+              crash_reason="Application error detected"
+            fi
+          fi
+          
+          # Log detailed restart information
+          {
+            echo "=== Web Server Restart Event ==="
+            echo "Timestamp: $crash_time"
+            echo "Previous PID: $wpid"
+            echo "Reason: $crash_reason"
+            echo "Restart attempt by supervisor"
+            echo "Rate limiting: Active (5/hour max)"
+          } >> "${NS_LOGS}/supervisor.log"
+          
+          alert ERROR "Web server crashed ($crash_reason). Restarting automatically (critical component, within rate limits)."
+          
+          # Attempt restart with enhanced error handling
+          if start_web; then
+            local new_pid; new_pid=$(safe_read_pid "${NS_PID}/web.pid")
+            ns_ok "Web server successfully restarted (new PID: $new_pid)"
+            alert INFO "Web server restart successful (PID: $new_pid)"
+          else
+            ns_err "Web server restart failed. Manual intervention required."
+            alert CRIT "Web server restart failed after crash. Check logs and restart manually."
+          fi
+        else
+          alert CRIT "Web server crashed but restart rate limit exceeded. Manual intervention required."
+          ns_err "Web server requires manual restart (rate limit exceeded)"
         fi
+      fi
+    elif [ ! -f "${NS_PID}/web.pid" ] && is_web_auto_start_enabled; then
+      # Web server should be running but PID file is missing
+      ns_warn "Web server PID file missing but service should be running. Starting web server..."
+      if start_web; then
+        alert INFO "Web server auto-started due to missing PID file"
+      else
+        alert WARN "Failed to auto-start missing web server"
       fi
     fi
     
@@ -12253,8 +12295,48 @@ start_web(){
     # Give server a moment to start and verify it's running
     sleep 2
     if ! kill -0 "$pid" 2>/dev/null; then
-      ns_err "Web server failed to start. Check ${NS_HOME}/web.log for errors"
-      cat "${NS_HOME}/web.log" | tail -10 >&2
+      ns_err "Web server failed to start. Analyzing error details..."
+      
+      # Enhanced error logging and analysis
+      local web_log="${NS_HOME}/web.log"
+      local error_log="${NS_HOME}/server_startup.error"
+      
+      # Create detailed error report
+      {
+        echo "=== NovaShield Webserver Startup Failure Report ==="
+        echo "Timestamp: $(date)"
+        echo "Attempted PID: $pid"
+        echo "Server Path: ${NS_WWW}/server.py"
+        echo "Python Version: $(python3 --version 2>&1 || echo 'Python3 not found')"
+        echo ""
+        echo "=== Server Log (Last 20 lines) ==="
+        tail -20 "$web_log" 2>/dev/null || echo "No web.log found"
+        echo ""
+        echo "=== Python Syntax Check ==="
+        python3 -m py_compile "${NS_WWW}/server.py" 2>&1 || echo "Syntax check failed"
+        echo ""
+        echo "=== File Permissions ==="
+        ls -la "${NS_WWW}/server.py" 2>/dev/null || echo "Server file not found"
+        echo ""
+        echo "=== Available Handlers ==="
+        grep -n "if parsed.path ==" "${NS_WWW}/server.py" 2>/dev/null | head -10 || echo "No handlers found"
+        echo "=== End Report ==="
+      } > "$error_log"
+      
+      # Display critical error info to user
+      ns_err "Critical webserver startup errors detected:"
+      if [ -f "$web_log" ]; then
+        echo "--- Last 10 lines of web.log ---" >&2
+        tail -10 "$web_log" >&2
+      fi
+      
+      # Check for common syntax errors
+      if grep -q "SyntaxError\|IndentationError" "$web_log" 2>/dev/null; then
+        ns_err "Python syntax/indentation error detected in generated server.py"
+        ns_err "This indicates a code generation issue in the novashield.sh script"
+      fi
+      
+      ns_err "Full error analysis saved to: $error_log"
       return 1
     fi
     
