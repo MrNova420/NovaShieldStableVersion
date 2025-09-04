@@ -5289,9 +5289,11 @@ class Handler(SimpleHTTPRequestHandler):
             self._set_headers(200); self.wfile.write(json.dumps({'ok':True,'page':f'/site/{slug}.html'}).encode('utf-8')); return
 
         # File manager actions
-                try: data=json.loads(body or '{}')
-            if parsed.path == '/api/fs_write':
-            except Exception: data={}
+                    try:
+                        data=json.loads(body or '{}')
+            if parsed.path == /api/fs_write':
+                except Exception:
+                    data={}
             path=data.get('path',''); content=data.get('content','')
             full=os.path.abspath(path)
             if (not full.startswith(NS_HOME)) or full.startswith(NS_KEYS):
@@ -5300,9 +5302,11 @@ class Handler(SimpleHTTPRequestHandler):
             except Exception as e: self._set_headers(500); self.wfile.write(json.dumps({'ok':False,'error':str(e)}).encode('utf-8'))
             return
 
-                try: data=json.loads(body or '{}')
-            if parsed.path == '/api/fs_mkdir':
-            except Exception: data={}
+                    try:
+                        data=json.loads(body or '{}')
+            if parsed.path == /api/fs_mkdir':
+                except Exception:
+                    data={}
             path=data.get('path','')
             full=os.path.abspath(path)
             if (not full.startswith(NS_HOME)) or full.startswith(NS_KEYS):
@@ -5311,9 +5315,11 @@ class Handler(SimpleHTTPRequestHandler):
             except Exception as e: self._set_headers(500); self.wfile.write(json.dumps({'ok':False,'error':str(e)}).encode('utf-8'))
             return
 
-                try: data=json.loads(body or '{}')
-            if parsed.path == '/api/fs_mv':
-            except Exception: data={}
+                    try:
+                        data=json.loads(body or '{}')
+            if parsed.path == /api/fs_mv':
+                except Exception:
+                    data={}
             src=data.get('src',''); dst=data.get('dst','')
             srcf=os.path.abspath(src); dstf=os.path.abspath(dst)
             if (not srcf.startswith(NS_HOME)) or (not dstf.startswith(NS_HOME)) or srcf.startswith(NS_KEYS) or dstf.startswith(NS_KEYS):
@@ -5322,9 +5328,11 @@ class Handler(SimpleHTTPRequestHandler):
             except Exception as e: self._set_headers(500); self.wfile.write(json.dumps({'ok':False,'error':str(e)}).encode('utf-8'))
             return
 
-                try: data=json.loads(body or '{}')
-            if parsed.path == '/api/fs_rm':
-            except Exception: data={}
+                    try:
+                        data=json.loads(body or '{}')
+            if parsed.path == /api/fs_rm':
+                except Exception:
+                    data={}
             path=data.get('path',''); full=os.path.abspath(path)
             if (not full.startswith(NS_HOME)) or full.startswith(NS_KEYS):
                 self._set_headers(403); self.wfile.write(b'{"error":"forbidden"}'); return
