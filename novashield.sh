@@ -2439,7 +2439,11 @@ def mirror_terminal(handler):
             else:
                 ws_send(client, f"\r\n❌ All terminal options failed. Please contact administrator.\r\n")
                 return
-        
+        except Exception:
+            security_log(f"TERMINAL_CRITICAL_ERROR user={user} cannot_send_websocket_message")
+            return
+
+    # If we get here, we have a working terminal
     last_activity = time.time()
     last_ping = time.time()
     ping_interval = 30  # Send ping every 30 seconds
@@ -2569,7 +2573,7 @@ def mirror_terminal(handler):
                                         except Exception as e:
                                             security_log(f"TERMINAL_RESIZE_ERROR user={user} pid={pid} error={str(e)}")
                                         continue  # Don't write JSON to PTY
-                                        except (UnicodeDecodeError, json.JSONDecodeError, ValueError):
+                            except (UnicodeDecodeError, json.JSONDecodeError, ValueError):
                                 # Not JSON, treat as regular terminal input
                                 pass
                         
@@ -2824,8 +2828,8 @@ def save_user_memory(username, memory):
         # Log successful auto-sync
         py_alert('INFO', f'Auto-synced memory for user {username} (save #{memory["user_profile"].get("total_saves", 1)})')
         return True
-        
-                    except Exception as e:
+
+    except Exception as e:
         py_alert('ERROR', f'Critical error saving memory for user {username}: {str(e)}')
         return False
 
@@ -3424,7 +3428,7 @@ def verify_storage_and_memory_systems():
                 verification_results["storage_health"] = "save_load_failed"
                 verification_results["issues"].append("Memory save/load test failed")
                 
-                        except Exception as e:
+        except Exception as e:
             verification_results["storage_health"] = "error"
             verification_results["issues"].append(f"Memory test error: {str(e)}")
         
