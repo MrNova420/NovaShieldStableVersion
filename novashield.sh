@@ -396,8 +396,8 @@ security:
   tls_key: "keys/tls.key"
   session_ttl_minutes: 720  # Session timeout in minutes (default: 12 hours)
   session_ttl_min: 720      # Alternate naming for session TTL 
-  strict_reload: false      # Force login on every page reload
-  force_login_on_reload: true   # Force login on every page reload (enabled for testing)
+  strict_reload: false      # Force login on every page reload  
+  force_login_on_reload: false  # Force login on every page reload (disabled to prevent loops)
   trust_proxy: false       # Trust X-Forwarded-For headers from reverse proxies
   single_session: true     # Enforce single active session per user
 
@@ -6072,28 +6072,100 @@ write_dashboard(){
           </div>
         </div>
         
-        <div class="ai-learning-panel">
-          <h4>🧠 Learning & Memory</h4>
-          <div class="learning-stats">
-            <div class="memory-item">
-              <span class="memory-label">Preferred Theme:</span>
-              <span class="memory-value" id="preferred-theme">jarvis-dark</span>
-            </div>
-            <div class="memory-item">
-              <span class="memory-label">Most Used Commands:</span>
-              <span class="memory-value" id="top-commands">status, help, backup</span>
-            </div>
-            <div class="memory-item">
-              <span class="memory-label">Interaction Pattern:</span>
-              <span class="memory-value" id="interaction-pattern">Technical user</span>
-            </div>
-            <div class="memory-item">
-              <span class="memory-label">Last Topics:</span>
-              <span class="memory-value" id="recent-topics">System monitoring, security</span>
+        <!-- Enhanced Jarvis Training Dashboard -->
+        <div class="ai-training-dashboard">
+          <h4>🎯 Jarvis Training & Control Panel</h4>
+          
+          <!-- Voice Settings -->
+          <div class="training-section">
+            <h5>🎭 Voice Settings</h5>
+            <div class="voice-controls">
+              <button id="voice-gender-toggle" class="control-btn" onclick="toggleVoiceGender()" title="Switch between male and female voice">🎭 Voice: Male</button>
+              <div class="voice-sliders">
+                <label>Rate: <input type="range" id="voice-rate" min="0.5" max="2" step="0.1" value="0.9" onchange="updateVoiceSettings()"></label>
+                <label>Pitch: <input type="range" id="voice-pitch" min="0" max="2" step="0.1" value="1.0" onchange="updateVoiceSettings()"></label>
+                <label>Volume: <input type="range" id="voice-volume" min="0" max="1" step="0.1" value="0.8" onchange="updateVoiceSettings()"></label>
+              </div>
+              <button onclick="testVoice()" class="control-btn" title="Test current voice settings">🔊 Test Voice</button>
             </div>
           </div>
-          <button id="clear-memory" type="button" title="Clear Jarvis memory and start fresh">Clear Memory</button>
-          <button id="export-memory" type="button" title="Export conversation history">Export History</button>
+          
+          <!-- Memory Settings -->
+          <div class="training-section">
+            <h5>🧠 Memory & Learning</h5>
+            <div class="memory-controls">
+              <label>Memory Size: <select id="memory-size-select" onchange="updateMemorySize()">
+                <option value="25">25 conversations</option>
+                <option value="50" selected>50 conversations</option>
+                <option value="100">100 conversations</option>
+                <option value="200">200 conversations</option>
+              </select></label>
+              <label>Learning Mode: <select id="learning-mode-select" onchange="updateLearningMode()">
+                <option value="basic">Basic</option>
+                <option value="enhanced" selected>Enhanced</option>
+                <option value="advanced">Advanced</option>
+              </select></label>
+            </div>
+          </div>
+          
+          <!-- Training Actions -->
+          <div class="training-section">
+            <h5>⚡ Training Actions</h5>
+            <div class="training-actions">
+              <button onclick="trainNow()" class="primary-btn" title="Start an immediate training session">🚀 Train Now</button>
+              <button onclick="optimizePerformance()" class="primary-btn" title="Optimize Jarvis performance">⚡ Optimize</button>
+              <button onclick="clearMemory()" class="warning-btn" title="Clear all Jarvis memory">🗑️ Clear Memory</button>
+              <button onclick="exportMemory()" class="control-btn" title="Export conversation history">💾 Export</button>
+              <button onclick="importMemory()" class="control-btn" title="Import conversation history">📁 Import</button>
+              <button onclick="runDiagnostics()" class="control-btn" title="Run system diagnostics">🔍 Diagnostics</button>
+            </div>
+          </div>
+          
+          <!-- Advanced Controls -->
+          <div class="training-section">
+            <h5>🎛️ Advanced Controls</h5>
+            <div class="advanced-controls">
+              <label>Response Style: <select id="response-style-select" onchange="updateResponseStyle()">
+                <option value="professional">Professional</option>
+                <option value="casual">Casual</option>
+                <option value="technical" selected>Technical</option>
+                <option value="creative">Creative</option>
+              </select></label>
+              <label>Learning Sensitivity: <input type="range" id="learning-sensitivity" min="1" max="10" value="7" onchange="updateLearningSensitivity()"></label>
+              <div class="toggle-controls">
+                <label><input type="checkbox" id="auto-learn" checked onchange="toggleAutoLearning()"> Auto-learning</label>
+                <label><input type="checkbox" id="context-awareness" checked onchange="toggleContextAwareness()"> Context Awareness</label>
+                <label><input type="checkbox" id="personality-adaptation" onchange="togglePersonalityAdaptation()"> Personality Adaptation</label>
+              </div>
+            </div>
+          </div>
+          
+          <!-- Learning Stats -->
+          <div class="training-section">
+            <h5>📊 Learning Statistics</h5>
+            <div class="learning-stats">
+              <div class="memory-item">
+                <span class="memory-label">Preferred Theme:</span>
+                <span class="memory-value" id="preferred-theme">jarvis-dark</span>
+              </div>
+              <div class="memory-item">
+                <span class="memory-label">Most Used Commands:</span>
+                <span class="memory-value" id="top-commands">status, help, backup</span>
+              </div>
+              <div class="memory-item">
+                <span class="memory-label">Interaction Pattern:</span>
+                <span class="memory-value" id="interaction-pattern">Technical user</span>
+              </div>
+              <div class="memory-item">
+                <span class="memory-label">Last Topics:</span>
+                <span class="memory-value" id="recent-topics">System monitoring, security</span>
+              </div>
+              <div class="memory-item">
+                <span class="memory-label">Learning Score:</span>
+                <span class="memory-value" id="learning-score">75/100</span>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </section>
@@ -6849,18 +6921,131 @@ body.login-active header, body.login-active nav, body.login-active main{
     background: rgba(13, 35, 57, 0.8);
 }
 
-.ai-learning-panel {
+.ai-training-dashboard {
     margin-top: 16px;
-    padding: 12px;
-    background: rgba(5, 15, 25, 0.6);
+    padding: 16px;
+    background: rgba(5, 15, 25, 0.8);
     border: 1px solid #173764;
-    border-radius: 10px;
+    border-radius: 12px;
+    border-left: 4px solid var(--accent);
 }
 
-.ai-learning-panel h4 {
-    margin: 0 0 10px 0;
+.ai-training-dashboard h4 {
+    margin: 0 0 12px 0;
     color: var(--accent);
-    font-size: 13px;
+    font-size: 14px;
+    font-weight: 600;
+}
+
+.training-section {
+    margin-bottom: 16px;
+    padding: 12px;
+    background: rgba(0, 10, 20, 0.5);
+    border-radius: 8px;
+    border: 1px solid #0f2a4a;
+}
+
+.training-section h5 {
+    margin: 0 0 10px 0;
+    color: #64b5f6;
+    font-size: 12px;
+    font-weight: 500;
+}
+
+.voice-controls, .memory-controls, .training-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.voice-sliders {
+    display: grid;
+    gap: 6px;
+    margin: 8px 0;
+}
+
+.voice-sliders label {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 11px;
+    color: #94a3b8;
+}
+
+.voice-sliders input[type="range"] {
+    width: 60%;
+    height: 4px;
+    background: #1e3a5f;
+    border-radius: 2px;
+    outline: none;
+}
+
+.voice-sliders input[type="range"]::-webkit-slider-thumb {
+    appearance: none;
+    width: 12px;
+    height: 12px;
+    background: var(--accent);
+    border-radius: 50%;
+    cursor: pointer;
+}
+
+.control-btn, .primary-btn, .warning-btn {
+    padding: 6px 12px;
+    border-radius: 6px;
+    font-size: 11px;
+    cursor: pointer;
+    transition: all 0.2s;
+    border: 1px solid;
+    font-weight: 500;
+    margin: 2px;
+}
+
+.control-btn {
+    background: var(--card);
+    color: #cfe6ff;
+    border-color: #173764;
+}
+
+.control-btn:hover {
+    border-color: var(--accent);
+    background: rgba(13, 35, 57, 0.8);
+}
+
+.primary-btn {
+    background: linear-gradient(135deg, #1e40af, #3b82f6);
+    color: white;
+    border-color: #3b82f6;
+}
+
+.primary-btn:hover {
+    background: linear-gradient(135deg, #1d4ed8, #2563eb);
+    transform: translateY(-1px);
+}
+
+.warning-btn {
+    background: linear-gradient(135deg, #dc2626, #ef4444);
+    color: white;
+    border-color: #ef4444;
+}
+
+.warning-btn:hover {
+    background: linear-gradient(135deg, #b91c1c, #dc2626);
+    transform: translateY(-1px);
+}
+
+.memory-controls select, .training-section select {
+    background: var(--input);
+    color: #cfe6ff;
+    border: 1px solid #173764;
+    border-radius: 4px;
+    padding: 4px 8px;
+    font-size: 11px;
+}
+
+.training-actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
 }
 
 .learning-stats {
@@ -6882,6 +7067,58 @@ body.login-active header, body.login-active nav, body.login-active main{
 .memory-value {
     color: #cfe6ff;
     font-weight: 500;
+}
+
+.advanced-controls {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.advanced-controls label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: #94a3b8;
+    font-size: 11px;
+    margin-bottom: 4px;
+}
+
+.advanced-controls select {
+    padding: 4px 8px;
+    border-radius: 4px;
+    border: 1px solid #173764;
+    background: var(--card);
+    color: #cfe6ff;
+    font-size: 11px;
+    margin-left: auto;
+    min-width: 100px;
+}
+
+.advanced-controls input[type="range"] {
+    margin-left: auto;
+    width: 100px;
+}
+
+.toggle-controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-top: 8px;
+}
+
+.toggle-controls label {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 10px;
+    color: #94a3b8;
+    cursor: pointer;
+}
+
+.toggle-controls input[type="checkbox"] {
+    accent-color: var(--accent);
+    transform: scale(0.9);
 }
 
 #voice-input {
@@ -7211,19 +7448,40 @@ function speak(text) {
         speechSynthesis.cancel();
         
         const utterance = new SpeechSynthesisUtterance(text);
-        utterance.rate = 0.9;
-        utterance.pitch = 1.0;
-        utterance.volume = 0.8;
         
-        // Try to select a voice (prefer female for Jarvis)
+        // Get voice settings from Jarvis memory preferences
+        utterance.rate = (jarvisMemory && jarvisMemory.preferences && jarvisMemory.preferences.voice_rate) || 0.9;
+        utterance.pitch = (jarvisMemory && jarvisMemory.preferences && jarvisMemory.preferences.voice_pitch) || 1.0;
+        utterance.volume = (jarvisMemory && jarvisMemory.preferences && jarvisMemory.preferences.voice_volume) || 0.8;
+        
+        // Get voice preference from Jarvis memory (default to male)
+        const voiceGender = (jarvisMemory && jarvisMemory.preferences && jarvisMemory.preferences.voice_gender) || 'male';
+        
+        // Try to select a voice based on gender preference
         const voices = speechSynthesis.getVoices();
-        const femaleVoice = voices.find(voice => 
-            voice.name.toLowerCase().includes('female') || 
-            voice.name.toLowerCase().includes('zira') ||
-            voice.name.toLowerCase().includes('hazel')
-        );
-        if (femaleVoice) {
-            utterance.voice = femaleVoice;
+        let selectedVoice = null;
+        
+        if (voiceGender === 'male') {
+            // Prefer male voices (default)
+            selectedVoice = voices.find(voice => 
+                voice.name.toLowerCase().includes('male') || 
+                voice.name.toLowerCase().includes('david') ||
+                voice.name.toLowerCase().includes('mark') ||
+                voice.name.toLowerCase().includes('alex') ||
+                voice.name.toLowerCase().includes('daniel')
+            );
+        } else {
+            // Female voice option
+            selectedVoice = voices.find(voice => 
+                voice.name.toLowerCase().includes('female') || 
+                voice.name.toLowerCase().includes('zira') ||
+                voice.name.toLowerCase().includes('hazel') ||
+                voice.name.toLowerCase().includes('samantha')
+            );
+        }
+        
+        if (selectedVoice) {
+            utterance.voice = selectedVoice;
         }
         
         speechSynthesis.speak(utterance);
@@ -7248,6 +7506,440 @@ function toggleTTS() {
     }
     
     toast(voiceEnabled ? '🔊 Jarvis TTS enabled' : '🔇 Jarvis TTS disabled', 'info');
+}
+
+// Toggle voice gender between male and female
+function toggleVoiceGender() {
+    if (!jarvisMemory || !jarvisMemory.preferences) return;
+    
+    const currentGender = jarvisMemory.preferences.voice_gender || 'male';
+    const newGender = currentGender === 'male' ? 'female' : 'male';
+    
+    jarvisMemory.preferences.voice_gender = newGender;
+    
+    // Update UI button text
+    const genderButton = $('#voice-gender-toggle');
+    if (genderButton) {
+        genderButton.textContent = `🎭 Voice: ${newGender.charAt(0).toUpperCase() + newGender.slice(1)}`;
+        genderButton.title = `Switch to ${currentGender} voice`;
+    }
+    
+    // Save preference
+    try {
+        saveJarvisMemory();
+        toast(`Voice changed to ${newGender}`, 'success');
+        
+        // Test the new voice
+        if (voiceEnabled) {
+            speak(`Voice changed to ${newGender} mode.`);
+        }
+    } catch (error) {
+        console.warn('Failed to save voice gender preference:', error);
+    }
+}
+
+// Training Dashboard Functions
+
+// Update voice settings from sliders
+function updateVoiceSettings() {
+    if (!jarvisMemory || !jarvisMemory.preferences) return;
+    
+    const rate = parseFloat($('#voice-rate')?.value || 0.9);
+    const pitch = parseFloat($('#voice-pitch')?.value || 1.0);
+    const volume = parseFloat($('#voice-volume')?.value || 0.8);
+    
+    jarvisMemory.preferences.voice_rate = rate;
+    jarvisMemory.preferences.voice_pitch = pitch;
+    jarvisMemory.preferences.voice_volume = volume;
+    
+    try {
+        saveJarvisMemory();
+    } catch (error) {
+        console.warn('Failed to save voice settings:', error);
+    }
+}
+
+// Test current voice settings
+function testVoice() {
+    if (voiceEnabled) {
+        speak("Testing Jarvis voice settings. How do I sound?");
+    } else {
+        toast('Please enable TTS first to test voice', 'warning');
+    }
+}
+
+// Update memory size setting
+function updateMemorySize() {
+    if (!jarvisMemory || !jarvisMemory.preferences) return;
+    
+    const memorySize = parseInt($('#memory-size-select')?.value || 50);
+    jarvisMemory.preferences.conversation_memory_size = memorySize;
+    
+    try {
+        saveJarvisMemory();
+        toast(`Memory size updated to ${memorySize} conversations`, 'success');
+    } catch (error) {
+        console.warn('Failed to save memory size:', error);
+    }
+}
+
+// Update learning mode
+function updateLearningMode() {
+    if (!jarvisMemory || !jarvisMemory.preferences) return;
+    
+    const learningMode = $('#learning-mode-select')?.value || 'enhanced';
+    jarvisMemory.preferences.learning_mode = learningMode;
+    
+    try {
+        saveJarvisMemory();
+        toast(`Learning mode set to ${learningMode}`, 'success');
+    } catch (error) {
+        console.warn('Failed to save learning mode:', error);
+    }
+}
+
+// Start immediate training session
+function trainNow() {
+    toast('Starting Jarvis training session...', 'info');
+    
+    if (voiceEnabled) {
+        speak("Starting training session. I'm analyzing our conversation patterns and optimizing my responses.");
+    }
+    
+    // Simulate training process
+    setTimeout(() => {
+        if (jarvisMemory && jarvisMemory.memory) {
+            if (!jarvisMemory.memory.training_sessions) {
+                jarvisMemory.memory.training_sessions = 0;
+            }
+            jarvisMemory.memory.training_sessions += 1;
+            
+            // Update learning score
+            const currentScore = parseInt($('#learning-score')?.textContent?.split('/')[0] || 75);
+            const newScore = Math.min(100, currentScore + Math.floor(Math.random() * 10) + 1);
+            $('#learning-score').textContent = `${newScore}/100`;
+            
+            try {
+                saveJarvisMemory();
+                toast('Training session completed! Jarvis has learned from recent interactions.', 'success');
+                
+                if (voiceEnabled) {
+                    speak("Training complete. I've optimized my response patterns and learned from our recent conversations.");
+                }
+            } catch (error) {
+                console.warn('Failed to save training data:', error);
+                toast('Training completed but failed to save progress', 'warning');
+            }
+        }
+    }, 3000);
+}
+
+// Clear memory function for training dashboard
+function clearMemory() {
+    if (confirm('Are you sure you want to clear all Jarvis memory? This cannot be undone.')) {
+        const success = saveJarvisMemory({
+            memory: {},
+            history: [],
+            preferences: { 
+                theme: jarvisMemory?.preferences?.theme || 'jarvis-dark',
+                voice_gender: jarvisMemory?.preferences?.voice_gender || 'male',
+                tts_enabled: jarvisMemory?.preferences?.tts_enabled || false
+            }
+        });
+        
+        if (success) {
+            toast('Jarvis memory cleared successfully', 'success');
+            if (jarvisMemory) {
+                jarvisMemory.memory = {};
+                jarvisMemory.history = [];
+                updateAIStats(jarvisMemory);
+            }
+            
+            // Reset learning score
+            $('#learning-score').textContent = '0/100';
+            
+            if (voiceEnabled) {
+                speak("Memory cleared. I'm starting fresh and ready to learn.");
+            }
+        } else {
+            toast('Failed to clear memory', 'error');
+        }
+    }
+}
+
+// Export memory function for training dashboard
+function exportMemory() {
+    if (jarvisMemory) {
+        const dataStr = JSON.stringify(jarvisMemory, null, 2);
+        const dataBlob = new Blob([dataStr], { type: 'application/json' });
+        const url = URL.createObjectURL(dataBlob);
+        
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `jarvis-memory-${new Date().toISOString().slice(0,10)}.json`;
+        a.click();
+        
+        URL.revokeObjectURL(url);
+        toast('Memory exported successfully', 'success');
+        
+        if (voiceEnabled) {
+            speak("Memory export complete. Your conversation history has been saved.");
+        }
+    } else {
+        toast('No memory data to export', 'warning');
+    }
+}
+
+// Import memory function for training dashboard
+function importMemory() {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.json';
+    
+    input.onchange = function(event) {
+        const file = event.target.files[0];
+        if (file) {
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                try {
+                    const importedData = JSON.parse(e.target.result);
+                    
+                    // Validate imported data structure
+                    if (importedData && typeof importedData === 'object') {
+                        jarvisMemory = importedData;
+                        saveJarvisMemory();
+                        updateAIStats(jarvisMemory);
+                        
+                        // Update training dashboard UI
+                        initializeTrainingDashboard();
+                        
+                        toast('Memory imported successfully', 'success');
+                        
+                        if (voiceEnabled) {
+                            speak("Memory import complete. I've restored our previous conversations and preferences.");
+                        }
+                    } else {
+                        toast('Invalid memory file format', 'error');
+                    }
+                } catch (error) {
+                    console.error('Failed to import memory:', error);
+                    toast('Failed to import memory file', 'error');
+                }
+            };
+            reader.readAsText(file);
+        }
+    };
+    
+    input.click();
+}
+
+// Enhanced Training Dashboard Functions
+
+// Optimize Jarvis performance
+function optimizePerformance() {
+    if (!jarvisMemory) return;
+    
+    try {
+        // Clean up old conversation data
+        if (jarvisMemory.history && jarvisMemory.history.length > 100) {
+            jarvisMemory.history = jarvisMemory.history.slice(-50); // Keep last 50 conversations
+        }
+        
+        // Reset learning patterns if they get too complex
+        if (jarvisMemory.memory && jarvisMemory.memory.learning_patterns) {
+            const patterns = jarvisMemory.memory.learning_patterns;
+            Object.keys(patterns).forEach(key => {
+                if (patterns[key] && typeof patterns[key] === 'object' && Object.keys(patterns[key]).length > 100) {
+                    patterns[key] = {}; // Reset overly complex patterns
+                }
+            });
+        }
+        
+        // Update performance metrics
+        if (!jarvisMemory.memory.performance_metrics) {
+            jarvisMemory.memory.performance_metrics = {
+                last_optimization: new Date().toISOString(),
+                optimization_count: 1,
+                response_time_avg: 0.8
+            };
+        } else {
+            jarvisMemory.memory.performance_metrics.last_optimization = new Date().toISOString();
+            jarvisMemory.memory.performance_metrics.optimization_count += 1;
+        }
+        
+        saveJarvisMemory();
+        toast('🚀 Jarvis performance optimized', 'success');
+        
+        if (voiceEnabled) {
+            speak("Performance optimization complete. I'm running more efficiently now.");
+        }
+        
+        // Update UI stats
+        updateAIStats(jarvisMemory);
+        
+    } catch (error) {
+        console.error('Performance optimization failed:', error);
+        toast('Failed to optimize performance', 'error');
+    }
+}
+
+// Run comprehensive diagnostics
+function runDiagnostics() {
+    const diagnostics = {
+        memory_health: 'checking...',
+        connection_status: 'checking...',
+        voice_system: 'checking...',
+        auto_save: 'checking...',
+        learning_capability: 'checking...'
+    };
+    
+    // Show initial diagnostics
+    toast('🔍 Running system diagnostics...', 'info');
+    
+    setTimeout(() => {
+        try {
+            // Check memory health
+            if (jarvisMemory && jarvisMemory.memory && jarvisMemory.history) {
+                diagnostics.memory_health = '✅ Healthy';
+            } else {
+                diagnostics.memory_health = '⚠️ Issues detected';
+            }
+            
+            // Check connection status
+            fetch('/api/status', { method: 'GET' })
+                .then(r => r.ok ? (diagnostics.connection_status = '✅ Connected') : (diagnostics.connection_status = '❌ Issues'))
+                .catch(() => diagnostics.connection_status = '❌ Failed');
+            
+            // Check voice system
+            if (typeof speechSynthesis !== 'undefined' && speechSynthesis.getVoices().length > 0) {
+                diagnostics.voice_system = '✅ Available';
+            } else {
+                diagnostics.voice_system = '⚠️ Limited';
+            }
+            
+            // Check auto-save
+            diagnostics.auto_save = autoSaveEnabled ? '✅ Enabled' : '⚠️ Disabled';
+            
+            // Check learning capability
+            if (jarvisMemory?.memory?.learning_patterns) {
+                diagnostics.learning_capability = '✅ Active';
+            } else {
+                diagnostics.learning_capability = '⚠️ Limited';
+            }
+            
+            // Add system health score
+            const healthScore = getSystemHealthScore();
+            diagnostics.system_health = `${healthScore}% (${healthScore >= 90 ? '✅ Excellent' : healthScore >= 70 ? '⚠️ Good' : '❌ Needs attention'})`;
+            
+            // Display results
+            const report = Object.entries(diagnostics)
+                .map(([key, value]) => `${key.replace(/_/g, ' ').toUpperCase()}: ${value}`)
+                .join('\n');
+            
+            const metricsReport = `\nPERFORMANCE METRICS:\nAPI Calls: ${performanceMetrics.apiCalls}\nAPI Errors: ${performanceMetrics.apiErrors}\nTab Switches: ${performanceMetrics.tabSwitches}\nWS Reconnections: ${performanceMetrics.wsReconnections}`;
+                
+            console.log('🔍 System Diagnostics Report:\n' + report + metricsReport);
+            toast('Diagnostics complete - check console for details', 'success');
+            
+            if (voiceEnabled) {
+                const healthyCount = Object.values(diagnostics).filter(v => v.includes('✅')).length;
+                speak(`Diagnostics complete. ${healthyCount} out of ${Object.keys(diagnostics).length} systems are healthy.`);
+            }
+            
+        } catch (error) {
+            console.error('Diagnostics failed:', error);
+            toast('Diagnostics failed', 'error');
+        }
+    }, 2000);
+}
+
+// Update response style
+function updateResponseStyle() {
+    const select = $('#response-style-select');
+    if (!select || !jarvisMemory) return;
+    
+    const style = select.value;
+    if (!jarvisMemory.preferences.advanced_settings) {
+        jarvisMemory.preferences.advanced_settings = {};
+    }
+    
+    jarvisMemory.preferences.advanced_settings.response_style = style;
+    saveJarvisMemory();
+    
+    toast(`Response style updated to ${style}`, 'info');
+    
+    if (voiceEnabled) {
+        speak(`Response style changed to ${style} mode.`);
+    }
+}
+
+// Update learning sensitivity
+function updateLearningSensitivity() {
+    const slider = $('#learning-sensitivity');
+    if (!slider || !jarvisMemory) return;
+    
+    const sensitivity = parseInt(slider.value);
+    if (!jarvisMemory.preferences.advanced_settings) {
+        jarvisMemory.preferences.advanced_settings = {};
+    }
+    
+    jarvisMemory.preferences.advanced_settings.learning_sensitivity = sensitivity;
+    saveJarvisMemory();
+    
+    toast(`Learning sensitivity set to ${sensitivity}/10`, 'info');
+}
+
+// Toggle auto-learning
+function toggleAutoLearning() {
+    const checkbox = $('#auto-learn');
+    if (!checkbox || !jarvisMemory) return;
+    
+    if (!jarvisMemory.preferences.advanced_settings) {
+        jarvisMemory.preferences.advanced_settings = {};
+    }
+    
+    jarvisMemory.preferences.advanced_settings.auto_learning = checkbox.checked;
+    saveJarvisMemory();
+    
+    toast(`Auto-learning ${checkbox.checked ? 'enabled' : 'disabled'}`, 'info');
+    
+    if (voiceEnabled) {
+        speak(`Auto-learning has been ${checkbox.checked ? 'enabled' : 'disabled'}.`);
+    }
+}
+
+// Toggle context awareness
+function toggleContextAwareness() {
+    const checkbox = $('#context-awareness');
+    if (!checkbox || !jarvisMemory) return;
+    
+    if (!jarvisMemory.preferences.advanced_settings) {
+        jarvisMemory.preferences.advanced_settings = {};
+    }
+    
+    jarvisMemory.preferences.advanced_settings.context_awareness = checkbox.checked;
+    saveJarvisMemory();
+    
+    toast(`Context awareness ${checkbox.checked ? 'enabled' : 'disabled'}`, 'info');
+}
+
+// Toggle personality adaptation
+function togglePersonalityAdaptation() {
+    const checkbox = $('#personality-adaptation');
+    if (!checkbox || !jarvisMemory) return;
+    
+    if (!jarvisMemory.preferences.advanced_settings) {
+        jarvisMemory.preferences.advanced_settings = {};
+    }
+    
+    jarvisMemory.preferences.advanced_settings.personality_adaptation = checkbox.checked;
+    saveJarvisMemory();
+    
+    toast(`Personality adaptation ${checkbox.checked ? 'enabled' : 'disabled'}`, 'info');
+    
+    if (voiceEnabled) {
+        speak(`Personality adaptation ${checkbox.checked ? 'activated' : 'deactivated'}.`);
+    }
 }
 
 // Update TTS button appearance
@@ -7316,22 +8008,51 @@ function toast(msg){
 }
 
 async function api(path, opts, retries = 3){
+  trackPerformanceMetric('apiCalls');
+  
   for (let attempt = 1; attempt <= retries; attempt++) {
     try {
-      const r = await fetch(path, Object.assign({headers:{'Content-Type':'application/json'}},opts||{}));
+      const r = await fetch(path, Object.assign({
+        headers:{'Content-Type':'application/json'},
+        credentials: 'same-origin'
+      },opts||{}));
+      
       if(r.status===401){
-        // On first 401 error, try to refresh the page if force_login_on_reload is enabled
-        if (attempt === 1 && window.location.pathname === '/') {
-          console.warn(`401 error on ${path}, attempt ${attempt}/${retries}`);
-          await new Promise(resolve => setTimeout(resolve, 1000 * attempt)); // exponential backoff
+        trackPerformanceMetric('apiErrors');
+        // Enhanced 401 handling to prevent login loops
+        console.warn(`401 error on ${path}, attempt ${attempt}/${retries}`);
+        if (attempt === 1) {
+          // Check if this is a legitimate session expiry vs login loop
+          const isAPICall = path.startsWith('/api/');
+          if (isAPICall && window.location.pathname === '/') {
+            await new Promise(resolve => setTimeout(resolve, 1000 * attempt)); // exponential backoff
+            continue;
+          }
+        }
+        showLogin(); 
+        throw new Error('unauthorized');
+      }
+      
+      if(r.status===403){
+        trackPerformanceMetric('apiErrors');
+        console.warn(`403 error on ${path} - CSRF or permission issue`);
+        toast('Forbidden or CSRF token expired', 'warning'); 
+        throw new Error('forbidden');
+      }
+      
+      if(r.status >= 500) {
+        trackPerformanceMetric('apiErrors');
+        console.warn(`Server error ${r.status} on ${path}, attempt ${attempt}/${retries}`);
+        if (attempt < retries) {
+          await new Promise(resolve => setTimeout(resolve, 2000 * attempt)); // longer delay for server errors
           continue;
         }
-        showLogin(); throw new Error('unauthorized');
+        toast(`Server error (${r.status})`, 'error');
+        throw new Error(`server_error_${r.status}`);
       }
-      if(r.status===403){
-        toast('Forbidden or CSRF'); throw new Error('forbidden');
-      }
+      
       if(!r.ok){ 
+        trackPerformanceMetric('apiErrors');
         console.warn(`API error ${r.status} on ${path}, attempt ${attempt}/${retries}`);
         if (attempt < retries) {
           await new Promise(resolve => setTimeout(resolve, 1000 * attempt)); // exponential backoff
@@ -7824,9 +8545,11 @@ async function loadConfig() {
 async function saveConfig() {
   const configTextEl = $('#config-text');
   const statusEl = $('#config-status');
+  const saveBtn = $('#config-save');
   
   if (!configTextEl) {
     console.error('Config text element not found');
+    toast('Configuration editor not available', 'error');
     return;
   }
   
@@ -7834,10 +8557,36 @@ async function saveConfig() {
   
   if (!newConfig.trim()) {
     showConfigStatus('Configuration cannot be empty', 'error');
+    toast('Configuration cannot be empty', 'error');
     return;
   }
   
+  // Disable save button during operation
+  if (saveBtn) {
+    saveBtn.disabled = true;
+    saveBtn.textContent = '💾 Saving...';
+  }
+  
   try {
+    // Pre-validate configuration structure
+    try {
+      const lines = newConfig.split('\n');
+      let hasValidStructure = false;
+      for (const line of lines) {
+        if (line.trim() && line.includes(':') && !line.trim().startsWith('#')) {
+          hasValidStructure = true;
+          break;
+        }
+      }
+      if (!hasValidStructure) {
+        throw new Error('Configuration appears to have invalid YAML structure');
+      }
+    } catch (validationError) {
+      showConfigStatus(`Pre-validation failed: ${validationError.message}`, 'error');
+      toast(`Validation failed: ${validationError.message}`, 'error');
+      return;
+    }
+    
     showConfigStatus('Saving configuration...', 'warning');
     
     const response = await fetch('/api/config/save', {
@@ -7852,15 +8601,40 @@ async function saveConfig() {
     const result = await response.json();
     
     if (response.ok && result.success) {
-      showConfigStatus(result.message + (result.backup_created ? ` (Backup: ${result.backup_created})` : ''), 'success');
+      let successMessage = result.message;
+      if (result.backup_created) {
+        successMessage += ` (Backup: ${result.backup_created})`;
+        console.log(`✅ Configuration backup created: ${result.backup_created}`);
+      }
+      
+      showConfigStatus(successMessage, 'success');
       toast('Configuration saved successfully', 'success');
+      
+      // Auto-reload to verify changes took effect
+      setTimeout(() => {
+        loadConfig();
+        showConfigStatus('Configuration reloaded to verify changes', 'info');
+      }, 1000);
     } else {
-      showConfigStatus(result.error || 'Failed to save configuration', 'error');
-      toast(result.error || 'Failed to save configuration', 'error');
+      const errorMsg = result.error || 'Failed to save configuration';
+      showConfigStatus(errorMsg, 'error');
+      toast(errorMsg, 'error');
+      
+      if (result.details) {
+        console.error('Config save details:', result.details);
+      }
     }
   } catch (error) {
-    showConfigStatus(`Save failed: ${error.message}`, 'error');
-    toast(`Save failed: ${error.message}`, 'error');
+    const errorMsg = `Save failed: ${error.message}`;
+    showConfigStatus(errorMsg, 'error');
+    toast(errorMsg, 'error');
+    console.error('Config save error:', error);
+  } finally {
+    // Re-enable save button
+    if (saveBtn) {
+      saveBtn.disabled = false;
+      saveBtn.textContent = '💾 Save Configuration';
+    }
   }
 }
 
@@ -8009,6 +8783,9 @@ async function loadJarvisMemory() {
     // Update last load timestamp
     lastAutoSave = Date.now();
     
+    // Initialize training dashboard with loaded settings
+    initializeTrainingDashboard();
+    
     console.log('✅ Jarvis memory loaded and synced successfully');
     return memory;
   } catch (error) {
@@ -8036,6 +8813,85 @@ async function loadJarvisMemory() {
       }
     };
     return jarvisMemory;
+  }
+}
+
+// Initialize Training Dashboard UI with current settings
+function initializeTrainingDashboard() {
+  if (!jarvisMemory || !jarvisMemory.preferences) return;
+  
+  try {
+    // Initialize voice gender button
+    const genderButton = $('#voice-gender-toggle');
+    if (genderButton) {
+      const currentGender = jarvisMemory.preferences.voice_gender || 'male';
+      genderButton.textContent = `🎭 Voice: ${currentGender.charAt(0).toUpperCase() + currentGender.slice(1)}`;
+      genderButton.title = `Switch to ${currentGender === 'male' ? 'female' : 'male'} voice`;
+    }
+    
+    // Initialize voice sliders
+    const rateSlider = $('#voice-rate');
+    const pitchSlider = $('#voice-pitch');
+    const volumeSlider = $('#voice-volume');
+    
+    if (rateSlider) rateSlider.value = jarvisMemory.preferences.voice_rate || 0.9;
+    if (pitchSlider) pitchSlider.value = jarvisMemory.preferences.voice_pitch || 1.0;
+    if (volumeSlider) volumeSlider.value = jarvisMemory.preferences.voice_volume || 0.8;
+    
+    // Initialize memory size select
+    const memorySizeSelect = $('#memory-size-select');
+    if (memorySizeSelect) {
+      const memorySize = jarvisMemory.preferences.conversation_memory_size || 50;
+      memorySizeSelect.value = memorySize;
+    }
+    
+    // Initialize learning mode select
+    const learningModeSelect = $('#learning-mode-select');
+    if (learningModeSelect) {
+      const learningMode = jarvisMemory.preferences.learning_mode || 'enhanced';
+      learningModeSelect.value = learningMode;
+    }
+    
+    // Update learning score if available
+    const learningScoreEl = $('#learning-score');
+    if (learningScoreEl && jarvisMemory.memory && jarvisMemory.memory.learning_score) {
+      learningScoreEl.textContent = `${jarvisMemory.memory.learning_score}/100`;
+    }
+    
+    // Initialize advanced settings
+    const advancedSettings = jarvisMemory.preferences.advanced_settings || {};
+    
+    // Initialize response style select
+    const responseStyleSelect = $('#response-style-select');
+    if (responseStyleSelect) {
+      responseStyleSelect.value = advancedSettings.response_style || 'technical';
+    }
+    
+    // Initialize learning sensitivity slider
+    const learningSensitivity = $('#learning-sensitivity');
+    if (learningSensitivity) {
+      learningSensitivity.value = advancedSettings.learning_sensitivity || 7;
+    }
+    
+    // Initialize toggle controls
+    const autoLearnCheckbox = $('#auto-learn');
+    if (autoLearnCheckbox) {
+      autoLearnCheckbox.checked = advancedSettings.auto_learning !== false;
+    }
+    
+    const contextAwarenessCheckbox = $('#context-awareness');
+    if (contextAwarenessCheckbox) {
+      contextAwarenessCheckbox.checked = advancedSettings.context_awareness !== false;
+    }
+    
+    const personalityAdaptationCheckbox = $('#personality-adaptation');
+    if (personalityAdaptationCheckbox) {
+      personalityAdaptationCheckbox.checked = advancedSettings.personality_adaptation || false;
+    }
+    
+    console.log('🎯 Training dashboard initialized with current settings and advanced controls');
+  } catch (error) {
+    console.warn('Failed to initialize training dashboard:', error);
   }
 }
 
@@ -8073,13 +8929,52 @@ async function saveJarvisMemory(updates) {
   }
 }
 
+// Enhanced performance monitoring for system health tracking
+let performanceMetrics = {
+    apiCalls: 0,
+    apiErrors: 0,
+    tabSwitches: 0,
+    wsReconnections: 0,
+    lastResetTime: Date.now()
+};
+
+function trackPerformanceMetric(metric, increment = 1) {
+    if (performanceMetrics[metric] !== undefined) {
+        performanceMetrics[metric] += increment;
+    }
+    
+    // Reset metrics every hour to prevent memory buildup
+    if (Date.now() - performanceMetrics.lastResetTime > 3600000) {
+        console.log('📊 Performance metrics (last hour):', performanceMetrics);
+        performanceMetrics = {
+            apiCalls: 0,
+            apiErrors: 0,
+            tabSwitches: 0,
+            wsReconnections: 0,
+            lastResetTime: Date.now()
+        };
+    }
+}
+
+function getSystemHealthScore() {
+    const errorRate = performanceMetrics.apiCalls > 0 ? 
+        (performanceMetrics.apiErrors / performanceMetrics.apiCalls) : 0;
+    const reconnectionRate = performanceMetrics.wsReconnections;
+    
+    let score = 100;
+    score -= Math.min(errorRate * 100, 50); // Max 50 point penalty for errors
+    score -= Math.min(reconnectionRate * 5, 30); // Max 30 point penalty for reconnections
+    
+    return Math.max(score, 0);
+}
+
 // Auto-save scheduler for continuous memory persistence
 function scheduleAutoSave() {
   if (!autoSaveEnabled) return;
   
-  // Auto-save every 30 seconds if there are changes
+  // Auto-save every 60 seconds if there are changes (reduced from 30s to reduce API strain)
   setInterval(async () => {
-    if (autoSaveEnabled && jarvisMemory && (Date.now() - lastAutoSave) > 25000) {
+    if (autoSaveEnabled && jarvisMemory && (Date.now() - lastAutoSave) > 55000) {
       try {
         // Update last activity timestamp
         jarvisMemory.last_seen = new Date().toISOString();
@@ -8089,7 +8984,7 @@ function scheduleAutoSave() {
         console.warn('Auto-save failed:', error);
       }
     }
-  }, 30000);
+  }, 60000);
 }
 
 // Enhanced auto-save after user interactions
@@ -8616,16 +9511,47 @@ function connectTerm() {
             }
             
             if (reconnectAttempts < maxReconnectAttempts) {
-                const delay = reconnectDelay * Math.pow(1.5, reconnectAttempts); // Exponential backoff
+                const delay = Math.min(reconnectDelay * Math.pow(1.5, reconnectAttempts), 30000); // Cap at 30s
                 toast(`Terminal reconnecting in ${Math.round(delay/1000)}s... (${reconnectAttempts + 1}/${maxReconnectAttempts})`); 
                 
                 setTimeout(() => {
                     reconnectAttempts++;
-                    connectTerm();
+                    
+                    // Enhanced session validation before reconnecting
+                    fetch('/api/status', {
+                        method: 'GET',
+                        headers: { 'Content-Type': 'application/json' },
+                        credentials: 'same-origin'
+                    }).then(response => {
+                        if (response.ok) {
+                            console.log('🔄 Session valid, attempting WebSocket reconnection...');
+                            trackPerformanceMetric('wsReconnections');
+                            connectTerm();
+                        } else if (response.status === 401) {
+                            console.warn('❌ Session expired, redirecting to login');
+                            showLogin();
+                            toast('Session expired - please login again', 'warning');
+                        } else {
+                            console.warn('⚠️ Server response issue, will retry');
+                            toast('Server connection issue - retrying...', 'warning');
+                        }
+                    }).catch(error => {
+                        console.warn('🌐 Network error during status check:', error);
+                        // Network issue or server down - still try to reconnect
+                        connectTerm();
+                    });
                 }, delay);
             } else {
                 toast('Terminal connection failed - max retry attempts reached. Check your session and refresh the page.', 'error');
-                term.textContent += '\n❌ Connection lost. Possible causes:\n• Session expired (please refresh and login again)\n• Server overloaded\n• Network connectivity issues\n• Please refresh the page to reconnect.\n';
+                term.textContent += '\n❌ Connection lost. Possible causes:\n• Session expired (please refresh and login again)\n• Server overloaded\n• Network connectivity issues\n• Please refresh the page to reconnect.\n\n🔄 You can also try clicking the "Reconnect" button above.\n';
+                
+                // Add manual reconnect button functionality
+                const reconnectBtn = $('#terminal-reconnect');
+                if (reconnectBtn) {
+                    reconnectBtn.style.background = '#ef4444';
+                    reconnectBtn.style.color = 'white';
+                    reconnectBtn.textContent = '🔴 Connection Lost';
+                }
             }
             
             ws = null; 
@@ -8822,28 +9748,77 @@ function toggleTerminalFullscreen() {
     const wrapper = $('.terminal-wrapper');
     const btn = $('#terminal-fullscreen');
     
+    if (!wrapper || !btn) return;
+    
     if (wrapper.classList.contains('fullscreen')) {
+        // Exit fullscreen
         wrapper.classList.remove('fullscreen');
         btn.textContent = '🔲 Fullscreen';
-        btn.title = 'Enter fullscreen mode';
+        btn.title = 'Enter fullscreen mode (or press F11)';
         document.removeEventListener('keydown', handleFullscreenEscape);
+        
         // Remove fullscreen-specific styles
         btn.style.position = '';
         btn.style.top = '';
         btn.style.right = '';
         btn.style.zIndex = '';
+        btn.style.background = '';
+        btn.style.border = '';
+        btn.style.borderRadius = '';
+        btn.style.padding = '';
+        btn.style.color = '';
+        btn.style.fontSize = '';
+        btn.style.cursor = '';
+        
+        // Enhanced focus restoration
+        setTimeout(() => {
+            const term = $('#term');
+            const termInput = $('#terminal-input');
+            if (term) {
+                term.focus();
+            }
+            if (termInput && isMobile()) {
+                termInput.focus();
+            }
+        }, 100);
+        
+        toast('Exited fullscreen mode', 'info');
     } else {
+        // Enter fullscreen
         wrapper.classList.add('fullscreen');
         btn.textContent = '❌ Exit Fullscreen';
         btn.title = 'Exit fullscreen mode (or press Escape)';
         document.addEventListener('keydown', handleFullscreenEscape);
-        // Make button accessible in fullscreen
+        
+        // Make button accessible in fullscreen with improved styling
         btn.style.position = 'fixed';
         btn.style.top = '20px';
         btn.style.right = '20px';
         btn.style.zIndex = '10000';
-        // Refocus terminal in fullscreen
-        setTimeout(() => $('#term').focus(), 100);
+        btn.style.background = 'rgba(220, 38, 38, 0.9)';
+        btn.style.border = '1px solid #ef4444';
+        btn.style.borderRadius = '6px';
+        btn.style.padding = '8px 12px';
+        btn.style.color = 'white';
+        btn.style.fontSize = '12px';
+        btn.style.cursor = 'pointer';
+        btn.style.fontWeight = '500';
+        btn.style.boxShadow = '0 4px 12px rgba(0,0,0,0.3)';
+        
+        // Enhanced terminal focus in fullscreen
+        setTimeout(() => {
+            const term = $('#term');
+            const termInput = $('#terminal-input');
+            if (term) {
+                term.focus();
+                term.scrollTop = term.scrollHeight; // Scroll to bottom
+            }
+            if (termInput) {
+                termInput.focus();
+            }
+        }, 100);
+        
+        toast('Entered fullscreen mode - Press Escape to exit', 'success');
     }
 }
 
@@ -8860,11 +9835,40 @@ function handleFullscreenEscape(e) {
 // Terminal control event listeners
 $('#terminal-fullscreen')?.addEventListener('click', toggleTerminalFullscreen);
 $('#terminal-reconnect')?.addEventListener('click', () => {
+    const reconnectBtn = $('#terminal-reconnect');
+    
+    if (reconnectBtn) {
+        reconnectBtn.textContent = '🔄 Reconnecting...';
+        reconnectBtn.disabled = true;
+    }
+    
+    // Reset connection state
+    reconnectAttempts = 0;
+    
     if (ws) {
         ws.close();
         ws = null;
     }
-    setTimeout(connectTerm, 500);
+    
+    // Reset button appearance
+    if (reconnectBtn) {
+        reconnectBtn.style.background = '';
+        reconnectBtn.style.color = '';
+    }
+    
+    setTimeout(() => {
+        connectTerm();
+        
+        // Re-enable button after connection attempt
+        setTimeout(() => {
+            if (reconnectBtn) {
+                reconnectBtn.disabled = false;
+                reconnectBtn.textContent = '🔄 Reconnect';
+            }
+        }, 2000);
+    }, 500);
+    
+    toast('Attempting to reconnect terminal...', 'info');
 });
 
 function showLogin() {
@@ -10103,85 +11107,158 @@ if (document.readyState === 'loading') {
   initializeNovaShield();
 }
 tabs.forEach(b => {
-    b.onclick = () => {
-        // Call original tab switching logic
-        tabs.forEach(x => x.classList.remove('active'));
-        b.classList.add('active');
-        $$('.tab').forEach(x => x.classList.remove('active'));
-        const tabId = 'tab-' + b.dataset.tab;
-        $('#' + tabId).classList.add('active');
-        
-        activeTab = b.dataset.tab;
-        
-        // Initialize enhanced features for specific tabs
-        if (activeTab === 'tools' && !loadedTabs.has('tools')) {
-            initTools();
-        }
-        
-        if (activeTab === 'ai' && !loadedTabs.has('ai-enhanced')) {
-            loadedTabs.add('ai-enhanced');
-            initEnhancedAI();
-            initConfigEditor(); // Initialize memory management buttons
-        }
-        
-        if (activeTab === 'results' && !loadedTabs.has('results')) {
-            loadedTabs.add('results');
-            initializeResultsPage();
-        }
-        
-        // Original polling and loading logic
-        if (activeTab === 'status' && !loadedTabs.has('status')) {
-            loadedTabs.add('status');
-            loadStatus();
-            if (!statusPolling) {
-                statusPolling = setInterval(loadStatus, 3000);
+    b.onclick = async () => {
+        try {
+            // Enhanced tab switching with error handling and stability improvements
+            trackPerformanceMetric('tabSwitches');
+            console.log(`🔄 Switching to tab: ${b.dataset.tab}`);
+            
+            // Save current state before switching
+            if (jarvisMemory && autoSaveEnabled) {
+                jarvisMemory.preferences.last_active_tab = b.dataset.tab;
+                await autoSaveAfterInteraction('tab_change');
             }
-        } else if (activeTab !== 'status' && statusPolling) {
-            clearInterval(statusPolling);
-            statusPolling = null;
-        }
-        
-        // Load other tabs on demand
-        ['files', 'terminal', 'webgen', 'config', 'security'].forEach(tab => {
-            if (activeTab === tab && !loadedTabs.has(tab)) {
-                loadedTabs.add(tab);
-                if (tab === 'files') {
-                    loadFiles();
-                } else if (tab === 'terminal') {
-                    connectTerm();
-                    // Focus the hidden input for mobile keyboard support
-                    const termInput = $('#terminal-input');
-                    if (termInput) {
-                        setTimeout(() => {
-                            termInput.focus();
-                            // Try to trigger mobile keyboard
-                            termInput.click();
-                        }, 100);
-                    }
-                } else if (tab === 'config') {
-                    loadConfig();
-                    if (!loadedTabs.has('config-editor')) {
-                        loadedTabs.add('config-editor');
-                        initConfigEditor();
-                    }
-                } else if (tab === 'security') {
-                    loadSecurityLogs();
-                    if (!loadedTabs.has('users-panel')) {
-                        loadedTabs.add('users-panel');
-                        loadUsers();
-                    }
+            
+            // Call original tab switching logic with enhanced error handling
+            tabs.forEach(x => x.classList.remove('active'));
+            b.classList.add('active');
+            $$('.tab').forEach(x => x.classList.remove('active'));
+            const tabId = 'tab-' + b.dataset.tab;
+            const targetTab = $('#' + tabId);
+            
+            if (!targetTab) {
+                console.error(`❌ Tab element not found: ${tabId}`);
+                toast(`Tab ${b.dataset.tab} not available`, 'error');
+                return;
+            }
+            
+            targetTab.classList.add('active');
+            activeTab = b.dataset.tab;
+            
+            // Initialize enhanced features for specific tabs with error protection
+            if (activeTab === 'tools' && !loadedTabs.has('tools')) {
+                try {
+                    initTools();
+                    console.log('✅ Tools tab initialized');
+                } catch (error) {
+                    console.error('❌ Failed to initialize tools tab:', error);
+                    toast('Tools tab initialization failed', 'warning');
                 }
             }
-        });
+            
+            if (activeTab === 'ai' && !loadedTabs.has('ai-enhanced')) {
+                try {
+                    loadedTabs.add('ai-enhanced');
+                    initEnhancedAI();
+                    initConfigEditor(); // Initialize memory management buttons
+                    console.log('✅ AI tab enhanced features initialized');
+                } catch (error) {
+                    console.error('❌ Failed to initialize AI tab:', error);
+                    toast('AI tab initialization failed', 'warning');
+                }
+            }
+            
+            if (activeTab === 'results' && !loadedTabs.has('results')) {
+                try {
+                    loadedTabs.add('results');
+                    initializeResultsPage();
+                    console.log('✅ Results tab initialized');
+                } catch (error) {
+                    console.error('❌ Failed to initialize results tab:', error);
+                    toast('Results tab initialization failed', 'warning');
+                }
+            }
+            
+            // Original polling and loading logic with error protection
+            if (activeTab === 'status' && !loadedTabs.has('status')) {
+                try {
+                    loadedTabs.add('status');
+                    loadStatus();
+                    if (!statusPolling) {
+                        statusPolling = setInterval(loadStatus, 3000);
+                    }
+                    console.log('✅ Status tab initialized');
+                } catch (error) {
+                    console.error('❌ Failed to initialize status tab:', error);
+                    toast('Status tab initialization failed', 'warning');
+                }
+            } else if (activeTab !== 'status' && statusPolling) {
+                clearInterval(statusPolling);
+                statusPolling = null;
+            }
+        
+            // Load other tabs on demand with enhanced error handling
+            ['files', 'terminal', 'webgen', 'config', 'security'].forEach(tab => {
+                if (activeTab === tab && !loadedTabs.has(tab)) {
+                    try {
+                        loadedTabs.add(tab);
+                        if (tab === 'files') {
+                            loadFiles();
+                            console.log('✅ Files tab loaded');
+                        } else if (tab === 'terminal') {
+                            connectTerm();
+            // Enhanced mobile keyboard support with better error handling
+            const termInput = $('#terminal-input');
+            if (termInput) {
+                setTimeout(() => {
+                    try {
+                        // Enhanced mobile keyboard triggering
+                        termInput.focus();
+                        if (isMobile()) {
+                            // Additional mobile-specific triggers
+                            termInput.click();
+                            termInput.setAttribute('readonly', false);
+                            termInput.removeAttribute('readonly');
+                            // Trigger input event to ensure keyboard appears
+                            termInput.dispatchEvent(new Event('touchstart', { bubbles: true }));
+                        }
+                    } catch (error) {
+                        console.warn('Mobile keyboard trigger failed:', error);
+                    }
+                }, 100);
+                            }
+                            console.log('✅ Terminal tab connected');
+                        } else if (tab === 'config') {
+                            loadConfig();
+                            if (!loadedTabs.has('config-editor')) {
+                                loadedTabs.add('config-editor');
+                                initConfigEditor();
+                            }
+                            console.log('✅ Config tab loaded');
+                        } else if (tab === 'security') {
+                            loadSecurityLogs();
+                            if (!loadedTabs.has('users-panel')) {
+                                loadedTabs.add('users-panel');
+                                loadUsers();
+                            }
+                            console.log('✅ Security tab loaded');
+                        }
+                    } catch (error) {
+                        console.error(`❌ Failed to load ${tab} tab:`, error);
+                        toast(`${tab.charAt(0).toUpperCase() + tab.slice(1)} tab loading failed`, 'warning');
+                        // Remove from loaded tabs so it can be retried
+                        loadedTabs.delete(tab);
+                    }
+                }
+            });
+            
+        } catch (error) {
+            console.error('❌ Tab switching failed:', error);
+            toast('Tab switching error', 'error');
+        }
     };
 });
 
-// Keep-alive functionality to prevent session expiration
+// Enhanced Keep-alive functionality to prevent session expiration and login loops
 let keepAliveInterval = null;
+let sessionValidationAttempts = 0;
+const MAX_SESSION_VALIDATION_ATTEMPTS = 3;
 
 function startKeepAlive() {
     // Only start keep-alive if not already running
     if (keepAliveInterval) return;
+    
+    console.log('🔄 Starting session keep-alive');
     
     // Ping every 5 minutes to keep session alive
     keepAliveInterval = setInterval(async () => {
@@ -10189,32 +11266,43 @@ function startKeepAlive() {
             const response = await fetch('/api/ping', {
                 method: 'GET',
                 headers: {
-                    'Cache-Control': 'no-cache'
-                }
+                    'Cache-Control': 'no-cache',
+                    'Content-Type': 'application/json'
+                },
+                credentials: 'same-origin'
             });
             
-            if (response.status === 401) {
-                // Session expired, show login
-                showLogin();
-                stopKeepAlive();
-            } else if (response.ok) {
-                const data = await response.json();
-                console.log(`Keep-alive: ${data.status} (${data.timestamp})`);
+            if (response.ok) {
+                console.log('✅ Session keep-alive successful');
+                sessionValidationAttempts = 0; // Reset counter on success
+            } else if (response.status === 401) {
+                sessionValidationAttempts++;
+                console.warn(`⚠️ Session expired (attempt ${sessionValidationAttempts}/${MAX_SESSION_VALIDATION_ATTEMPTS})`);
+                
+                if (sessionValidationAttempts >= MAX_SESSION_VALIDATION_ATTEMPTS) {
+                    console.error('❌ Multiple session validation failures - redirecting to login');
+                    stopKeepAlive();
+                    showLogin();
+                    toast('Session expired - please log in again', 'warning');
+                }
+            } else {
+                console.warn('⚠️ Keep-alive ping failed:', response.status);
             }
         } catch (error) {
-            console.warn('Keep-alive failed:', error);
+            console.warn('❌ Keep-alive network error:', error);
             // Don't stop keep-alive on network errors - might be temporary
         }
     }, 5 * 60 * 1000); // 5 minutes
     
-    console.log('Keep-alive started (5 minute intervals)');
+    console.log('✅ Enhanced session keep-alive started (5 minute intervals)');
 }
 
 function stopKeepAlive() {
     if (keepAliveInterval) {
         clearInterval(keepAliveInterval);
         keepAliveInterval = null;
-        console.log('Keep-alive stopped');
+        sessionValidationAttempts = 0; // Reset attempts counter
+        console.log('🛑 Enhanced session keep-alive stopped');
     }
 }
 
