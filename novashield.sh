@@ -8595,6 +8595,7 @@ async function saveConfig() {
     
     const response = await fetch('/api/config/save', {
       method: 'POST',
+      credentials: 'same-origin',
       headers: {
         'Content-Type': 'application/json',
         'X-CSRF': CSRF
@@ -8910,6 +8911,7 @@ async function saveJarvisMemory(updates) {
     
     const response = await fetch('/api/jarvis/memory', {
       method: 'POST',
+      credentials: 'same-origin',
       headers: {
         'Content-Type': 'application/json',
         'X-CSRF': CSRF
@@ -10222,6 +10224,7 @@ async function scanSystemTools() {
     try {
         const response = await fetch('/api/tools/scan', {
             method: 'POST',
+            credentials: 'same-origin',
             headers: { 'X-CSRF': CSRF, 'Content-Type': 'application/json' }
         });
         
@@ -10269,6 +10272,7 @@ async function installMissingTools() {
     try {
         const response = await fetch('/api/tools/install', {
             method: 'POST',
+            credentials: 'same-origin',
             headers: { 'X-CSRF': CSRF, 'Content-Type': 'application/json' }
         });
         
@@ -10297,6 +10301,7 @@ async function executeTool(toolName) {
     try {
         const response = await fetch('/api/tools/execute', {
             method: 'POST',
+            credentials: 'same-origin',
             headers: { 'X-CSRF': CSRF, 'Content-Type': 'application/json' },
             body: JSON.stringify({ tool: toolName })
         });
@@ -10385,6 +10390,7 @@ async function executeManualCommand() {
     try {
         const response = await fetch('/api/tools/execute', {
             method: 'POST',
+            credentials: 'same-origin',
             headers: { 'X-CSRF': CSRF, 'Content-Type': 'application/json' },
             body: JSON.stringify({ tool: 'custom', command: command })
         });
@@ -10680,6 +10686,7 @@ async function saveJarvisMemory() {
     try {
         await fetch('/api/jarvis/memory', {
             method: 'POST',
+            credentials: 'same-origin',
             headers: { 'X-CSRF': CSRF, 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 memory: jarvisMemory,
@@ -10862,6 +10869,7 @@ async function sendChat() {
             // Execute the tool via the Tools API
             const toolResponse = await fetch('/api/tools/execute', {
                 method: 'POST',
+                credentials: 'same-origin',
                 headers: { 'X-CSRF': CSRF, 'Content-Type': 'application/json' },
                 body: JSON.stringify({ 
                     tool: j.action.tool,
