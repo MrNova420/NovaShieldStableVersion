@@ -4423,11 +4423,11 @@ class Handler(SimpleHTTPRequestHandler):
             
             # If AUTH_STRICT is enabled and no valid session, clear session cookie
             if AUTH_STRICT and not sess:
-                self._set_headers(200, 'text/html; charset=utf-8', {'Set-Cookie': 'NSSESS=deleted; Path=/; HttpOnly; Max-Age=0; SameSite=Strict'})
+                self._set_headers(200, 'text/html; charset=utf-8', {'Set-Cookie': 'NSSESS=deleted; Path=/; HttpOnly; Max-Age=0; SameSite=Lax'})
             # If force_login_on_reload is enabled, clear session cookie on fresh page loads without session
             # This ensures login prompt appears on refresh while preserving API access after successful login
             elif force_login_on_reload and not sess and is_page_load:
-                self._set_headers(200, 'text/html; charset=utf-8', {'Set-Cookie': 'NSSESS=deleted; Path=/; HttpOnly; Max-Age=0; SameSite=Strict'})
+                self._set_headers(200, 'text/html; charset=utf-8', {'Set-Cookie': 'NSSESS=deleted; Path=/; HttpOnly; Max-Age=0; SameSite=Lax'})
             else:
                 self._set_headers(200, 'text/html; charset=utf-8')
             html = read_text(INDEX, '<h1>NovaShield</h1>')
@@ -4440,7 +4440,7 @@ class Handler(SimpleHTTPRequestHandler):
             user = sess.get('user', 'unknown') if sess else 'unknown'
             py_alert('INFO', f'LOGOUT user={user} ip={client_ip}')
             audit(f'LOGOUT user={user} ip={client_ip}')
-            self._set_headers(302, 'text/plain', {'Set-Cookie': 'NSSESS=deleted; Path=/; HttpOnly; Max-Age=0; SameSite=Strict', 'Location':'/'})
+            self._set_headers(302, 'text/plain', {'Set-Cookie': 'NSSESS=deleted; Path=/; HttpOnly; Max-Age=0; SameSite=Lax', 'Location':'/'})
             self.wfile.write(b'bye'); return
 
         if parsed.path.startswith('/static/'):
@@ -4760,7 +4760,7 @@ class Handler(SimpleHTTPRequestHandler):
                 login_ok(self)
                 py_alert('INFO', f'LOGIN OK user={user} ip={ip}')
                 audit(f'LOGIN OK user={user} ip={ip} user_agent={user_agent[:50]}')
-                self._set_headers(200, 'application/json', {'Set-Cookie': f'NSSESS={token}; Path=/; HttpOnly; SameSite=Strict'})
+                self._set_headers(200, 'application/json', {'Set-Cookie': f'NSSESS={token}; Path=/; HttpOnly; SameSite=Lax'})
                 self.wfile.write(json.dumps({'ok':True,'csrf':csrf}).encode('utf-8')); return
                 
             login_fail(self); 
@@ -5611,7 +5611,7 @@ write_dashboard(){
   </header>
 
   <nav class="tabs" aria-label="Main">
-    <button data-tab="ai" class="active" type="button">Jarvis</button>
+    <button data-tab="ai" class="active" type="button">🤖 Jarvis AI</button>
     <button data-tab="alerts" type="button">Alerts</button>
     <button data-tab="status" type="button">Status</button>
     <button data-tab="security" type="button">Security</button>
@@ -6031,8 +6031,8 @@ write_dashboard(){
 
     <section id="tab-ai" class="tab active" aria-labelledby="Jarvis">
       <div class="panel">
-        <h3>Jarvis AI Assistant <span class="ai-status" id="ai-status">🤖 Online</span></h3>
-        <p class="panel-description">Your intelligent AI assistant with advanced system knowledge, learning capabilities, and personality. Jarvis remembers your preferences, learns from interactions, and provides contextual assistance with NovaShield operations, security analysis, and system management.</p>
+        <h3>🤖 Jarvis AI Assistant <span class="ai-status" id="ai-status">Online & Ready</span></h3>
+        <p class="panel-description">Your intelligent AI assistant with advanced system knowledge, learning capabilities, and Iron Man-inspired personality. Jarvis remembers your preferences, learns from interactions, and provides contextual assistance with NovaShield operations, security analysis, and system management.</p>
         
         <div class="ai-stats">
           <div class="stat-item">
@@ -6078,15 +6078,16 @@ write_dashboard(){
           
           <!-- Voice Settings -->
           <div class="training-section">
-            <h5>🎭 Voice Settings</h5>
+            <h5>🎭 Jarvis Voice Settings</h5>
             <div class="voice-controls">
-              <button id="voice-gender-toggle" class="control-btn" onclick="toggleVoiceGender()" title="Switch between male and female voice">🎭 Voice: Male</button>
+              <button id="voice-gender-toggle" class="control-btn" onclick="toggleVoiceGender()" title="Switch between Jarvis (male) and female voice">🤖 Jarvis Voice (Male)</button>
               <div class="voice-sliders">
-                <label>Rate: <input type="range" id="voice-rate" min="0.5" max="2" step="0.1" value="0.9" onchange="updateVoiceSettings()"></label>
-                <label>Pitch: <input type="range" id="voice-pitch" min="0" max="2" step="0.1" value="1.0" onchange="updateVoiceSettings()"></label>
-                <label>Volume: <input type="range" id="voice-volume" min="0" max="1" step="0.1" value="0.8" onchange="updateVoiceSettings()"></label>
+                <label>Rate: <input type="range" id="voice-rate" min="0.5" max="2" step="0.1" value="0.85" onchange="updateVoiceSettings()" title="Speech speed (0.85 = Jarvis-optimized)"></label>
+                <label>Pitch: <input type="range" id="voice-pitch" min="0" max="2" step="0.1" value="0.8" onchange="updateVoiceSettings()" title="Voice pitch (0.8 = deeper, more authoritative)"></label>
+                <label>Volume: <input type="range" id="voice-volume" min="0" max="1" step="0.1" value="0.9" onchange="updateVoiceSettings()" title="Voice volume (0.9 = clear and audible)"></label>
               </div>
-              <button onclick="testVoice()" class="control-btn" title="Test current voice settings">🔊 Test Voice</button>
+              <button onclick="testVoice()" class="control-btn" title="Test current Jarvis voice settings">🤖 Test Jarvis Voice</button>
+              <button onclick="resetJarvisVoice()" class="control-btn" title="Reset to optimal Jarvis voice settings">⚙️ Reset to Jarvis Defaults</button>
             </div>
           </div>
           
@@ -7449,34 +7450,69 @@ function speak(text) {
         
         const utterance = new SpeechSynthesisUtterance(text);
         
-        // Get voice settings from Jarvis memory preferences
-        utterance.rate = (jarvisMemory && jarvisMemory.preferences && jarvisMemory.preferences.voice_rate) || 0.9;
-        utterance.pitch = (jarvisMemory && jarvisMemory.preferences && jarvisMemory.preferences.voice_pitch) || 1.0;
-        utterance.volume = (jarvisMemory && jarvisMemory.preferences && jarvisMemory.preferences.voice_volume) || 0.8;
+        // Get voice settings from Jarvis memory preferences with Jarvis-optimized defaults
+        utterance.rate = (jarvisMemory && jarvisMemory.preferences && jarvisMemory.preferences.voice_rate) || 0.85;  // Slightly slower for more authoritative tone
+        utterance.pitch = (jarvisMemory && jarvisMemory.preferences && jarvisMemory.preferences.voice_pitch) || 0.8;  // Lower pitch for Jarvis-like sound
+        utterance.volume = (jarvisMemory && jarvisMemory.preferences && jarvisMemory.preferences.voice_volume) || 0.9;  // Higher volume for clarity
         
         // Get voice preference from Jarvis memory (default to male)
         const voiceGender = (jarvisMemory && jarvisMemory.preferences && jarvisMemory.preferences.voice_gender) || 'male';
         
-        // Try to select a voice based on gender preference
+        // Enhanced voice selection with priority for Jarvis-like voices
         const voices = speechSynthesis.getVoices();
         let selectedVoice = null;
         
         if (voiceGender === 'male') {
-            // Prefer male voices (default)
-            selectedVoice = voices.find(voice => 
-                voice.name.toLowerCase().includes('male') || 
-                voice.name.toLowerCase().includes('david') ||
-                voice.name.toLowerCase().includes('mark') ||
-                voice.name.toLowerCase().includes('alex') ||
-                voice.name.toLowerCase().includes('daniel')
-            );
+            // Priority order for most Jarvis-like male voices
+            const jarvisVoicePriority = [
+                // British/English voices (most Jarvis-like)
+                'Microsoft Daniel - English (United Kingdom)',
+                'Google UK English Male',
+                'Alex',
+                'Daniel',
+                'Arthur',
+                'Microsoft James Online (Natural) - English (United Kingdom)',
+                'Microsoft Ryan Online (Natural) - English (United Kingdom)',
+                // American deep voices
+                'Microsoft David Desktop - English (United States)',
+                'Google US English Male',
+                'David',
+                'Mark',
+                'Tom',
+                // Generic male patterns
+                'male'
+            ];
+            
+            // Try to find the best Jarvis-like voice in priority order
+            for (const preferredVoice of jarvisVoicePriority) {
+                selectedVoice = voices.find(voice => 
+                    voice.name.toLowerCase().includes(preferredVoice.toLowerCase()) ||
+                    voice.name === preferredVoice
+                );
+                if (selectedVoice) break;
+            }
+            
+            // Fallback: any male voice with deeper characteristics
+            if (!selectedVoice) {
+                selectedVoice = voices.find(voice => 
+                    voice.name.toLowerCase().includes('male') || 
+                    voice.name.toLowerCase().includes('david') ||
+                    voice.name.toLowerCase().includes('daniel') ||
+                    voice.name.toLowerCase().includes('alex') ||
+                    voice.name.toLowerCase().includes('mark') ||
+                    voice.name.toLowerCase().includes('tom') ||
+                    voice.name.toLowerCase().includes('arthur')
+                );
+            }
         } else {
-            // Female voice option
+            // Enhanced female voice selection  
             selectedVoice = voices.find(voice => 
                 voice.name.toLowerCase().includes('female') || 
                 voice.name.toLowerCase().includes('zira') ||
                 voice.name.toLowerCase().includes('hazel') ||
-                voice.name.toLowerCase().includes('samantha')
+                voice.name.toLowerCase().includes('samantha') ||
+                voice.name.toLowerCase().includes('kate') ||
+                voice.name.toLowerCase().includes('susan')
             );
         }
         
@@ -7508,7 +7544,7 @@ function toggleTTS() {
     toast(voiceEnabled ? '🔊 Jarvis TTS enabled' : '🔇 Jarvis TTS disabled', 'info');
 }
 
-// Toggle voice gender between male and female
+// Toggle voice gender between male and female with enhanced Jarvis branding
 function toggleVoiceGender() {
     if (!jarvisMemory || !jarvisMemory.preferences) return;
     
@@ -7517,21 +7553,30 @@ function toggleVoiceGender() {
     
     jarvisMemory.preferences.voice_gender = newGender;
     
-    // Update UI button text
+    // Update UI button text with enhanced branding
     const genderButton = $('#voice-gender-toggle');
     if (genderButton) {
-        genderButton.textContent = `🎭 Voice: ${newGender.charAt(0).toUpperCase() + newGender.slice(1)}`;
-        genderButton.title = `Switch to ${currentGender} voice`;
+        if (newGender === 'male') {
+            genderButton.textContent = '🤖 Jarvis Voice (Male)';
+            genderButton.title = 'Switch to female voice assistant';
+        } else {
+            genderButton.textContent = '👩‍💼 Assistant Voice (Female)';
+            genderButton.title = 'Switch to Jarvis (male) voice';
+        }
     }
     
     // Save preference
     try {
         saveJarvisMemory();
-        toast(`Voice changed to ${newGender}`, 'success');
+        const voiceType = newGender === 'male' ? 'Jarvis mode' : 'female assistant mode';
+        toast(`Voice changed to ${voiceType}`, 'success');
         
-        // Test the new voice
+        // Test the new voice with appropriate message
         if (voiceEnabled) {
-            speak(`Voice changed to ${newGender} mode.`);
+            const testMessage = newGender === 'male' ? 
+                'Jarvis voice activated. How may I assist you?' : 
+                'Female assistant voice activated. How can I help?';
+            speak(testMessage);
         }
     } catch (error) {
         console.warn('Failed to save voice gender preference:', error);
@@ -7559,12 +7604,54 @@ function updateVoiceSettings() {
     }
 }
 
-// Test current voice settings
+// Test current voice settings with Jarvis-appropriate message
 function testVoice() {
     if (voiceEnabled) {
-        speak("Testing Jarvis voice settings. How do I sound?");
+        const voiceGender = (jarvisMemory && jarvisMemory.preferences && jarvisMemory.preferences.voice_gender) || 'male';
+        const testMessage = voiceGender === 'male' ? 
+            "Good day. Jarvis voice systems are functioning properly. How may I assist you today?" : 
+            "Voice assistant is ready. All systems are operational. How can I help you?";
+        speak(testMessage);
     } else {
         toast('Please enable TTS first to test voice', 'warning');
+    }
+}
+
+// Reset voice settings to optimal Jarvis defaults
+function resetJarvisVoice() {
+    if (!jarvisMemory || !jarvisMemory.preferences) return;
+    
+    // Set optimal Jarvis voice parameters
+    jarvisMemory.preferences.voice_rate = 0.85;   // Measured, authoritative pace
+    jarvisMemory.preferences.voice_pitch = 0.8;   // Lower pitch for authority
+    jarvisMemory.preferences.voice_volume = 0.9;  // Clear and audible
+    jarvisMemory.preferences.voice_gender = 'male'; // Default to Jarvis
+    
+    // Update UI sliders
+    const rateSlider = $('#voice-rate');
+    const pitchSlider = $('#voice-pitch');
+    const volumeSlider = $('#voice-volume');
+    const genderButton = $('#voice-gender-toggle');
+    
+    if (rateSlider) rateSlider.value = 0.85;
+    if (pitchSlider) pitchSlider.value = 0.8;
+    if (volumeSlider) volumeSlider.value = 0.9;
+    
+    if (genderButton) {
+        genderButton.textContent = '🤖 Jarvis Voice (Male)';
+        genderButton.title = 'Switch to female voice assistant';
+    }
+    
+    try {
+        saveJarvisMemory();
+        toast('Voice settings reset to optimal Jarvis defaults', 'success');
+        
+        // Test the reset voice
+        if (voiceEnabled) {
+            speak("Voice parameters reset to optimal Jarvis configuration. All systems ready.");
+        }
+    } catch (error) {
+        console.warn('Failed to reset voice settings:', error);
     }
 }
 
@@ -7806,7 +7893,11 @@ function runDiagnostics() {
             }
             
             // Check connection status
-            fetch('/api/status', { method: 'GET' })
+            fetch('/api/status', { 
+                method: 'GET',
+                credentials: 'same-origin',
+                headers: { 'Content-Type': 'application/json' }
+            })
                 .then(r => r.ok ? (diagnostics.connection_status = '✅ Connected') : (diagnostics.connection_status = '❌ Issues'))
                 .catch(() => diagnostics.connection_status = '❌ Failed');
             
@@ -7966,6 +8057,7 @@ let loadedTabs = new Set(['ai', 'alerts']); // Pre-load Jarvis and Alerts
 const tabs = $$('.tabs button');
 
 let CSRF = '';
+let sessionValidationAttempts = 0; // Track authentication validation attempts for better error handling
 
 $('#btn-refresh').onclick = () => location.reload();
 
@@ -8591,6 +8683,7 @@ async function saveConfig() {
     
     const response = await fetch('/api/config/save', {
       method: 'POST',
+      credentials: 'same-origin',
       headers: {
         'Content-Type': 'application/json',
         'X-CSRF': CSRF
@@ -8790,7 +8883,7 @@ async function loadJarvisMemory() {
     return memory;
   } catch (error) {
     console.warn('Failed to load Jarvis memory:', error);
-    // Return enhanced default memory structure
+    // Return enhanced default memory structure with optimal Jarvis voice settings
     jarvisMemory = {
       memory: {
         learning_patterns: {},
@@ -8803,7 +8896,13 @@ async function loadJarvisMemory() {
       preferences: { 
         theme: 'jarvis-dark',
         auto_save: true,
-        learning_mode: 'enhanced'
+        learning_mode: 'enhanced',
+        // Enhanced Jarvis voice settings
+        voice_gender: 'male',
+        voice_rate: 0.85,   // Optimal Jarvis pace
+        voice_pitch: 0.8,   // Lower pitch for authority
+        voice_volume: 0.9,  // Clear and audible
+        tts_enabled: true   // Voice enabled by default
       },
       history: [],
       last_seen: new Date().toISOString(),
@@ -8816,27 +8915,32 @@ async function loadJarvisMemory() {
   }
 }
 
-// Initialize Training Dashboard UI with current settings
+// Initialize Training Dashboard UI with enhanced Jarvis voice settings
 function initializeTrainingDashboard() {
   if (!jarvisMemory || !jarvisMemory.preferences) return;
   
   try {
-    // Initialize voice gender button
+    // Initialize enhanced voice gender button with Jarvis branding
     const genderButton = $('#voice-gender-toggle');
     if (genderButton) {
       const currentGender = jarvisMemory.preferences.voice_gender || 'male';
-      genderButton.textContent = `🎭 Voice: ${currentGender.charAt(0).toUpperCase() + currentGender.slice(1)}`;
-      genderButton.title = `Switch to ${currentGender === 'male' ? 'female' : 'male'} voice`;
+      if (currentGender === 'male') {
+        genderButton.textContent = '🤖 Jarvis Voice (Male)';
+        genderButton.title = 'Switch to female voice assistant';
+      } else {
+        genderButton.textContent = '👩‍💼 Assistant Voice (Female)';
+        genderButton.title = 'Switch to Jarvis (male) voice';
+      }
     }
     
-    // Initialize voice sliders
+    // Initialize voice sliders with Jarvis-optimized defaults
     const rateSlider = $('#voice-rate');
     const pitchSlider = $('#voice-pitch');
     const volumeSlider = $('#voice-volume');
     
-    if (rateSlider) rateSlider.value = jarvisMemory.preferences.voice_rate || 0.9;
-    if (pitchSlider) pitchSlider.value = jarvisMemory.preferences.voice_pitch || 1.0;
-    if (volumeSlider) volumeSlider.value = jarvisMemory.preferences.voice_volume || 0.8;
+    if (rateSlider) rateSlider.value = jarvisMemory.preferences.voice_rate || 0.85;  // Jarvis-optimized default
+    if (pitchSlider) pitchSlider.value = jarvisMemory.preferences.voice_pitch || 0.8;  // Lower pitch for authority
+    if (volumeSlider) volumeSlider.value = jarvisMemory.preferences.voice_volume || 0.9;  // Clear and audible
     
     // Initialize memory size select
     const memorySizeSelect = $('#memory-size-select');
@@ -8906,6 +9010,7 @@ async function saveJarvisMemory(updates) {
     
     const response = await fetch('/api/jarvis/memory', {
       method: 'POST',
+      credentials: 'same-origin',
       headers: {
         'Content-Type': 'application/json',
         'X-CSRF': CSRF
@@ -9884,14 +9989,21 @@ function hideLogin() {
 $('#li-btn').onclick = async () => {
     const user = $('#li-user').value.trim(), pass = $('#li-pass').value, otp = $('#li-otp').value.trim();
     const msgEl = $('#li-msg');
+    const loginBtn = $('#li-btn');
     
     if (!user || !pass) {
         msgEl.textContent = 'Please enter username and password';
+        msgEl.style.color = '#ff6b6b';
         return;
     }
     
     try {
-        msgEl.textContent = 'Authenticating...';
+        // Disable button and show loading state
+        loginBtn.disabled = true;
+        loginBtn.textContent = 'Authenticating...';
+        msgEl.textContent = 'Verifying credentials...';
+        msgEl.style.color = '#74b9ff';
+        
         const r = await fetch('/api/login', {
             method: 'POST', 
             headers: {'Content-Type': 'application/json'}, 
@@ -9901,42 +10013,119 @@ $('#li-btn').onclick = async () => {
         if (r.ok) { 
             const j = await r.json(); 
             CSRF = j.csrf || ''; 
+            
+            msgEl.textContent = '✅ Login successful! Loading dashboard...';
+            msgEl.style.color = '#00b894';
+            
+            // Reset session validation attempts on successful login
+            sessionValidationAttempts = 0;
+            
             hideLogin(); 
-            toast('Login successful'); 
+            toast('🤖 Welcome to NovaShield! Jarvis AI is ready to assist.', 'success'); 
             
             // Load Jarvis memory immediately after successful login
-            await loadJarvisMemory();
+            try {
+                await loadJarvisMemory();
+                console.log('✅ Jarvis memory loaded successfully');
+            } catch (error) {
+                console.warn('⚠️ Failed to load Jarvis memory:', error);
+            }
+            
+            // Start keep-alive session management
+            startKeepAlive();
             
             refresh(); 
         } else if (r.status === 401) {
             const j = await r.json().catch(() => ({}));
             if (j.need_2fa) {
-                msgEl.textContent = 'Please enter your 2FA code';
+                msgEl.textContent = '🔐 Please enter your 2FA code';
+                msgEl.style.color = '#fdcb6e';
                 $('#li-otp').focus();
             } else {
-                msgEl.textContent = 'Invalid credentials';
+                msgEl.textContent = '❌ Invalid credentials. Please try again.';
+                msgEl.style.color = '#ff6b6b';
+                $('#li-pass').value = ''; // Clear password for security
+                $('#li-pass').focus();
             }
+        } else if (r.status === 429) {
+            msgEl.textContent = '⏱️ Too many attempts. Please wait before trying again.';
+            msgEl.style.color = '#ff7675';
         } else {
-            msgEl.textContent = 'Login failed';
+            msgEl.textContent = `❌ Login failed (Status: ${r.status}). Please try again.`;
+            msgEl.style.color = '#ff6b6b';
         }
     } catch (e) { 
-        msgEl.textContent = 'Connection error'; 
+        console.error('Login error:', e);
+        msgEl.textContent = '🌐 Connection error. Please check your network and try again.'; 
+        msgEl.style.color = '#ff6b6b';
+    } finally {
+        // Re-enable button and restore text
+        loginBtn.disabled = false;
+        loginBtn.textContent = 'Login';
     }
 };
 
-// Check authentication status on page load
+// Enhanced authentication check with improved error handling and session management
 async function checkAuth() {
     try {
-        const r = await fetch('/api/status');
+        const r = await fetch('/api/status', {
+            credentials: 'same-origin',
+            headers: { 
+                'Content-Type': 'application/json',
+                'Cache-Control': 'no-cache'
+            }
+        });
+        
         if (r.status === 401) {
+            console.log('🔒 Authentication required - redirecting to login');
+            sessionValidationAttempts = 0; // Reset validation attempts
             showLogin();
-        } else {
+            return false;
+        } else if (r.status === 200) {
             const j = await r.json();
             CSRF = j.csrf || '';
+            console.log('✅ Authentication verified successfully');
             hideLogin();
+            
+            // Reset session validation counter on successful auth
+            sessionValidationAttempts = 0;
+            
+            return true;
+        } else {
+            console.warn(`⚠️ Unexpected auth response status: ${r.status}`);
+            
+            // Handle other status codes gracefully
+            if (r.status >= 500) {
+                toast('Server temporarily unavailable. Retrying...', 'warning');
+                // Retry after a delay for server errors
+                setTimeout(checkAuth, 3000);
+            }
+            return false;
         }
     } catch (e) {
-        showLogin();
+        console.error('❌ Authentication check failed:', e);
+        
+        // Distinguish between network errors and other issues
+        if (e.name === 'TypeError' && e.message.includes('fetch')) {
+            toast('Network connection issue. Please check your connection.', 'error');
+        } else {
+            toast('Authentication check failed. Please refresh the page.', 'error');
+        }
+        
+        // Increment session validation attempts
+        sessionValidationAttempts = (sessionValidationAttempts || 0) + 1;
+        
+        // If too many failures, show login to reset session
+        if (sessionValidationAttempts >= 3) {
+            console.log('🔄 Too many auth failures - showing login to reset session');
+            showLogin();
+            sessionValidationAttempts = 0;
+        } else {
+            // For single failures, just show login
+            showLogin();
+        }
+        
+        return false;
     }
 }
 
@@ -10215,6 +10404,7 @@ async function scanSystemTools() {
     try {
         const response = await fetch('/api/tools/scan', {
             method: 'POST',
+            credentials: 'same-origin',
             headers: { 'X-CSRF': CSRF, 'Content-Type': 'application/json' }
         });
         
@@ -10262,6 +10452,7 @@ async function installMissingTools() {
     try {
         const response = await fetch('/api/tools/install', {
             method: 'POST',
+            credentials: 'same-origin',
             headers: { 'X-CSRF': CSRF, 'Content-Type': 'application/json' }
         });
         
@@ -10290,6 +10481,7 @@ async function executeTool(toolName) {
     try {
         const response = await fetch('/api/tools/execute', {
             method: 'POST',
+            credentials: 'same-origin',
             headers: { 'X-CSRF': CSRF, 'Content-Type': 'application/json' },
             body: JSON.stringify({ tool: toolName })
         });
@@ -10378,6 +10570,7 @@ async function executeManualCommand() {
     try {
         const response = await fetch('/api/tools/execute', {
             method: 'POST',
+            credentials: 'same-origin',
             headers: { 'X-CSRF': CSRF, 'Content-Type': 'application/json' },
             body: JSON.stringify({ tool: 'custom', command: command })
         });
@@ -10425,7 +10618,10 @@ async function initializeVoice() {
         
         // Try to load voice_enabled setting from status API
         try {
-            const response = await fetch('/api/status');
+            const response = await fetch('/api/status', {
+                credentials: 'same-origin',
+                headers: { 'Content-Type': 'application/json' }
+            });
             if (response.ok) {
                 const data = await response.json();
                 voiceEnabled = data.voice_enabled !== undefined ? data.voice_enabled : true;
@@ -10670,6 +10866,7 @@ async function saveJarvisMemory() {
     try {
         await fetch('/api/jarvis/memory', {
             method: 'POST',
+            credentials: 'same-origin',
             headers: { 'X-CSRF': CSRF, 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 memory: jarvisMemory,
@@ -10852,6 +11049,7 @@ async function sendChat() {
             // Execute the tool via the Tools API
             const toolResponse = await fetch('/api/tools/execute', {
                 method: 'POST',
+                credentials: 'same-origin',
                 headers: { 'X-CSRF': CSRF, 'Content-Type': 'application/json' },
                 body: JSON.stringify({ 
                     tool: j.action.tool,
