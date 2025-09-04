@@ -4423,11 +4423,11 @@ class Handler(SimpleHTTPRequestHandler):
             
             # If AUTH_STRICT is enabled and no valid session, clear session cookie
             if AUTH_STRICT and not sess:
-                self._set_headers(200, 'text/html; charset=utf-8', {'Set-Cookie': 'NSSESS=deleted; Path=/; HttpOnly; Max-Age=0; SameSite=Strict'})
+                self._set_headers(200, 'text/html; charset=utf-8', {'Set-Cookie': 'NSSESS=deleted; Path=/; HttpOnly; Max-Age=0; SameSite=Lax'})
             # If force_login_on_reload is enabled, clear session cookie on fresh page loads without session
             # This ensures login prompt appears on refresh while preserving API access after successful login
             elif force_login_on_reload and not sess and is_page_load:
-                self._set_headers(200, 'text/html; charset=utf-8', {'Set-Cookie': 'NSSESS=deleted; Path=/; HttpOnly; Max-Age=0; SameSite=Strict'})
+                self._set_headers(200, 'text/html; charset=utf-8', {'Set-Cookie': 'NSSESS=deleted; Path=/; HttpOnly; Max-Age=0; SameSite=Lax'})
             else:
                 self._set_headers(200, 'text/html; charset=utf-8')
             html = read_text(INDEX, '<h1>NovaShield</h1>')
@@ -4440,7 +4440,7 @@ class Handler(SimpleHTTPRequestHandler):
             user = sess.get('user', 'unknown') if sess else 'unknown'
             py_alert('INFO', f'LOGOUT user={user} ip={client_ip}')
             audit(f'LOGOUT user={user} ip={client_ip}')
-            self._set_headers(302, 'text/plain', {'Set-Cookie': 'NSSESS=deleted; Path=/; HttpOnly; Max-Age=0; SameSite=Strict', 'Location':'/'})
+            self._set_headers(302, 'text/plain', {'Set-Cookie': 'NSSESS=deleted; Path=/; HttpOnly; Max-Age=0; SameSite=Lax', 'Location':'/'})
             self.wfile.write(b'bye'); return
 
         if parsed.path.startswith('/static/'):
@@ -4760,7 +4760,7 @@ class Handler(SimpleHTTPRequestHandler):
                 login_ok(self)
                 py_alert('INFO', f'LOGIN OK user={user} ip={ip}')
                 audit(f'LOGIN OK user={user} ip={ip} user_agent={user_agent[:50]}')
-                self._set_headers(200, 'application/json', {'Set-Cookie': f'NSSESS={token}; Path=/; HttpOnly; SameSite=Strict'})
+                self._set_headers(200, 'application/json', {'Set-Cookie': f'NSSESS={token}; Path=/; HttpOnly; SameSite=Lax'})
                 self.wfile.write(json.dumps({'ok':True,'csrf':csrf}).encode('utf-8')); return
                 
             login_fail(self); 
