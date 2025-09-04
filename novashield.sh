@@ -1009,7 +1009,7 @@ _monitor_mem(){
 _monitor_disk(){
   set +e; set +o pipefail
   local interval warn crit mount
-  interval=$(ensure_int "$(yaml_get "disk" "interval_sec" "10")" 10)
+  interval=$(ensure_int "$(yaml_get "disk" "interval_sec" "60")" 60)
   warn=$(ensure_int "$(yaml_get "disk" "warn_pct" "85")" 85)
   crit=$(ensure_int "$(yaml_get "disk" "crit_pct" "95")" 95)
   mount=$(yaml_get "disk" "mount" "/")
@@ -1278,36 +1278,90 @@ _monitor_logs(){
 _supervisor(){
   set +e; set +o pipefail
   local interval=10
+  
+  # Restart tracking for rate limiting (max 5 restarts per service per hour)
+  local restart_state="${NS_CTRL}/restart_tracking.json"
+  mkdir -p "$(dirname "$restart_state")" 2>/dev/null
+  
+  # Initialize restart tracking if it doesn't exist
+  if [ ! -f "$restart_state" ]; then
+    echo '{}' > "$restart_state" 2>/dev/null || true
+  fi
+  
   while true; do
+    local current_hour=$(date +%Y%m%d%H)
+    
+    # Helper function to check and record restarts
+    check_restart_limit() {
+      local service="$1"
+      local restart_data
+      restart_data=$(cat "$restart_state" 2>/dev/null || echo '{}')
+      
+      # Get restart count for current hour
+      local current_count
+      current_count=$(echo "$restart_data" | python3 -c "
+import json, sys
+try:
+    data = json.load(sys.stdin)
+    print(data.get('$service', {}).get('$current_hour', 0))
+except:
+    print(0)
+" 2>/dev/null || echo 0)
+      
+      if [ "$current_count" -ge 5 ]; then
+        alert CRIT "Service $service exceeded restart limit (5/hour). Manual intervention required."
+        return 1
+      fi
+      
+      # Record this restart
+      local new_count=$((current_count + 1))
+      echo "$restart_data" | python3 -c "
+import json, sys
+try:
+    data = json.load(sys.stdin)
+    if '$service' not in data:
+        data['$service'] = {}
+    data['$service']['$current_hour'] = $new_count
+    json.dump(data, sys.stdout)
+except:
+    print('{}')
+" > "$restart_state" 2>/dev/null || true
+      
+      # Add exponential backoff based on restart count
+      local backoff_sleep=$((new_count * new_count))  # 1s, 4s, 9s, 16s, 25s
+      [ "$backoff_sleep" -gt 60 ] && backoff_sleep=60  # Cap at 60s
+      
+      if [ "$new_count" -gt 1 ]; then
+        alert WARN "Service $service restart #$new_count this hour. Applying ${backoff_sleep}s backoff delay."
+        sleep "$backoff_sleep"
+      fi
+      
+      return 0
+    }
+    
     # Only perform auto-restart if explicitly enabled (opt-in for stable behavior)
     if is_auto_restart_enabled; then
       for p in cpu memory disk network integrity process userlogins services logs; do
         if [ -f "${NS_PID}/${p}.pid" ]; then
           local pid; pid=$(safe_read_pid "${NS_PID}/${p}.pid")
           if [ "$pid" -eq 0 ] || ! kill -0 "$pid" 2>/dev/null; then
-            alert ERROR "Monitor $p crashed. Restarting."
-            case "$p" in
-              cpu) _monitor_cpu & safe_write_pid "${NS_PID}/${p}.pid" $! ;;
-              memory) _monitor_mem & safe_write_pid "${NS_PID}/${p}.pid" $! ;;
-              disk) _monitor_disk & safe_write_pid "${NS_PID}/${p}.pid" $! ;;
-              network) _monitor_net & safe_write_pid "${NS_PID}/${p}.pid" $! ;;
-              integrity) _monitor_integrity & safe_write_pid "${NS_PID}/${p}.pid" $! ;;
-              process) _monitor_process & safe_write_pid "${NS_PID}/${p}.pid" $! ;;
-              userlogins) _monitor_userlogins & safe_write_pid "${NS_PID}/${p}.pid" $! ;;
-              services) _monitor_services & safe_write_pid "${NS_PID}/${p}.pid" $! ;;
-              logs) _monitor_logs & safe_write_pid "${NS_PID}/${p}.pid" $! ;;
-            esac
+            if check_restart_limit "$p"; then
+              alert ERROR "Monitor $p crashed. Restarting (within rate limits)."
+              case "$p" in
+                cpu) _monitor_cpu & safe_write_pid "${NS_PID}/${p}.pid" $! ;;
+                memory) _monitor_mem & safe_write_pid "${NS_PID}/${p}.pid" $! ;;
+                disk) _monitor_disk & safe_write_pid "${NS_PID}/${p}.pid" $! ;;
+                network) _monitor_net & safe_write_pid "${NS_PID}/${p}.pid" $! ;;
+                integrity) _monitor_integrity & safe_write_pid "${NS_PID}/${p}.pid" $! ;;
+                process) _monitor_process & safe_write_pid "${NS_PID}/${p}.pid" $! ;;
+                userlogins) _monitor_userlogins & safe_write_pid "${NS_PID}/${p}.pid" $! ;;
+                services) _monitor_services & safe_write_pid "${NS_PID}/${p}.pid" $! ;;
+                logs) _monitor_logs & safe_write_pid "${NS_PID}/${p}.pid" $! ;;
+              esac
+            fi
           fi
         fi
       done
-      # Always restart web server for stability (critical component)
-      if [ -f "${NS_PID}/web.pid" ]; then
-        local wpid; wpid=$(safe_read_pid "${NS_PID}/web.pid")
-        if [ "$wpid" -eq 0 ] || ! kill -0 "$wpid" 2>/dev/null; then
-          alert ERROR "Web server crashed. Restarting automatically."
-          start_web || true
-        fi
-      fi
     else
       # In stable mode, just log crashed services without restarting
       for p in cpu memory disk network integrity process userlogins services logs; do
@@ -1318,15 +1372,19 @@ _supervisor(){
           fi
         fi
       done
-      # Always restart web server even when auto-restart is disabled (critical for dashboard access)
-      if [ -f "${NS_PID}/web.pid" ]; then
-        local wpid; wpid=$(safe_read_pid "${NS_PID}/web.pid")
-        if [ "$wpid" -eq 0 ] || ! kill -0 "$wpid" 2>/dev/null; then
-          alert WARN "Web server crashed. Restarting automatically (critical component)."
+    fi
+    
+    # Always restart web server (critical component) with rate limiting
+    if [ -f "${NS_PID}/web.pid" ]; then
+      local wpid; wpid=$(safe_read_pid "${NS_PID}/web.pid")
+      if [ "$wpid" -eq 0 ] || ! kill -0 "$wpid" 2>/dev/null; then
+        if check_restart_limit "web"; then
+          alert ERROR "Web server crashed. Restarting automatically (critical component, within rate limits)."
           start_web || true
         fi
       fi
     fi
+    
     sleep "$interval"
   done
 }
@@ -1392,12 +1450,12 @@ start_monitors(){
   _spawn_monitor logs _monitor_logs
   _spawn_monitor scheduler _monitor_scheduler
   
-  # Only start supervisor if auto-restart is enabled (opt-in feature)
+  # Always start supervisor for critical web server monitoring, with limited auto-restart for other services
+  _spawn_monitor supervisor _supervisor
   if is_auto_restart_enabled; then
-    _spawn_monitor supervisor _supervisor
-    ns_log "Auto-restart supervisor enabled"
+    ns_log "Full auto-restart supervisor enabled for all services"
   else
-    ns_log "Auto-restart disabled - services will not auto-restart if they crash"
+    ns_log "Limited auto-restart enabled - only web server will auto-restart (other services require manual restart)"
   fi
   
   ns_ok "Monitors started"
@@ -4451,18 +4509,19 @@ class Handler(SimpleHTTPRequestHandler):
         return
 
     def do_GET(self):
-        # Enhanced connection logging - log all incoming connections
-        ip = get_client_ip(self)
-        user_agent = self.headers.get('User-Agent', 'Unknown')
-        path = self.path
-        
-        # Log all connections to security.log
-        security_log_path = os.path.join(NS_LOGS, 'security.log')
         try:
-            Path(os.path.dirname(security_log_path)).mkdir(parents=True, exist_ok=True)
-            with open(security_log_path, 'a', encoding='utf-8') as f:
-                f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} [CONNECTION] IP={ip} Path={path} UserAgent='{user_agent[:100]}'\n")
-        except Exception: pass
+            # Enhanced connection logging - log all incoming connections
+            ip = get_client_ip(self)
+            user_agent = self.headers.get('User-Agent', 'Unknown')
+            path = self.path
+            
+            # Log all connections to security.log
+            security_log_path = os.path.join(NS_LOGS, 'security.log')
+            try:
+                Path(os.path.dirname(security_log_path)).mkdir(parents=True, exist_ok=True)
+                with open(security_log_path, 'a', encoding='utf-8') as f:
+                    f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} [CONNECTION] IP={ip} Path={path} UserAgent='{user_agent[:100]}'\n")
+            except Exception: pass
         
         parsed = urlparse(self.path)
 
@@ -4751,20 +4810,38 @@ class Handler(SimpleHTTPRequestHandler):
             self._set_headers(404); self.wfile.write(b'{}'); return
 
         self._set_headers(404); self.wfile.write(b'{"error":"not found"}')
+        
+        except Exception as e:
+            # Comprehensive exception handler for do_GET - prevents server crashes
+            try:
+                error_msg = f"GET request handler error: {str(e)}"
+                server_error_log = os.path.join(NS_LOGS, 'server.error.log')
+                Path(os.path.dirname(server_error_log)).mkdir(parents=True, exist_ok=True)
+                with open(server_error_log, 'a', encoding='utf-8') as f:
+                    f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} [GET_ERROR] {error_msg}\nTraceback: {__import__('traceback').format_exc()}\n\n")
+                # Send error response to client
+                self.send_response(500)
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                self.wfile.write(json.dumps({'error': 'Internal server error'}).encode('utf-8'))
+            except Exception:
+                # Last resort - minimal error handling
+                pass
 
     def do_POST(self):
-        # Enhanced connection logging for POST requests
-        ip = self.client_address[0]
-        user_agent = self.headers.get('User-Agent', 'Unknown')
-        path = self.path
-        
-        # Log all POST connections to security.log
-        security_log_path = os.path.join(NS_LOGS, 'security.log')
         try:
-            Path(os.path.dirname(security_log_path)).mkdir(parents=True, exist_ok=True)
-            with open(security_log_path, 'a', encoding='utf-8') as f:
-                f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} [POST_REQUEST] IP={ip} Path={path} UserAgent='{user_agent[:100]}'\n")
-        except Exception: pass
+            # Enhanced connection logging for POST requests
+            ip = self.client_address[0]
+            user_agent = self.headers.get('User-Agent', 'Unknown')
+            path = self.path
+            
+            # Log all POST connections to security.log
+            security_log_path = os.path.join(NS_LOGS, 'security.log')
+            try:
+                Path(os.path.dirname(security_log_path)).mkdir(parents=True, exist_ok=True)
+                with open(security_log_path, 'a', encoding='utf-8') as f:
+                    f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} [POST_REQUEST] IP={ip} Path={path} UserAgent='{user_agent[:100]}'\n")
+            except Exception: pass
         
         parsed = urlparse(self.path)
         if not rate_limit_ok(self, parsed.path):
@@ -5607,6 +5684,23 @@ class Handler(SimpleHTTPRequestHandler):
                 return
 
         self._set_headers(400); self.wfile.write(b'{"ok":false}')
+        
+        except Exception as e:
+            # Comprehensive exception handler for do_POST - prevents server crashes
+            try:
+                error_msg = f"POST request handler error: {str(e)}"
+                server_error_log = os.path.join(NS_LOGS, 'server.error.log')
+                Path(os.path.dirname(server_error_log)).mkdir(parents=True, exist_ok=True)
+                with open(server_error_log, 'a', encoding='utf-8') as f:
+                    f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} [POST_ERROR] {error_msg}\nTraceback: {__import__('traceback').format_exc()}\n\n")
+                # Send error response to client
+                self.send_response(500)
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                self.wfile.write(json.dumps({'error': 'Internal server error'}).encode('utf-8'))
+            except Exception:
+                # Last resort - minimal error handling
+                pass
 
 def pick_host_port():
     cfg_reload()
@@ -11735,23 +11829,72 @@ start_web(){
   # Stop any existing web server tracked by us
   stop_web || true
   
-  # Start server with error handling
-  python3 "${NS_WWW}/server.py" >"${NS_HOME}/web.log" 2>&1 &
-  local pid=$!
+  # Start server with error handling - use enhanced wrapper if available and enabled
+  local use_wrapper="${NOVASHIELD_USE_WEB_WRAPPER:-0}"
+  local wrapper_script="${NS_BIN}/web_wrapper.sh"
   
-  # Check if the process started successfully
-  sleep 0.1
-  if ! kill -0 "$pid" 2>/dev/null; then
-    die "Failed to start web server process"
-  fi
-  safe_write_pid "${NS_PID}/web.pid" "$pid"
-  
-  # Give server a moment to start and verify it's running
-  sleep 2
-  if ! kill -0 "$pid" 2>/dev/null; then
-    ns_err "Web server failed to start. Check ${NS_HOME}/web.log for errors"
-    cat "${NS_HOME}/web.log" | tail -10 >&2
-    return 1
+  if [ "$use_wrapper" = "1" ] && [ -f "$wrapper_script" ] && [ -x "$wrapper_script" ]; then
+    ns_log "Starting web server with enhanced stability wrapper..."
+    "$wrapper_script" >"${NS_HOME}/web_wrapper.log" 2>&1 &
+    local pid=$!
+    
+    # Give wrapper time to start the actual server
+    sleep 2
+    
+    # Check if wrapper is running
+    if ! kill -0 "$pid" 2>/dev/null; then
+      ns_err "Web wrapper failed to start. Check ${NS_HOME}/web_wrapper.log for errors"
+      [ -f "${NS_HOME}/web_wrapper.log" ] && tail -10 "${NS_HOME}/web_wrapper.log" >&2
+      return 1
+    fi
+    
+    # The web.pid file should be created by the wrapper
+    local web_pid
+    for i in {1..10}; do
+      if [ -f "${NS_PID}/web.pid" ]; then
+        web_pid=$(safe_read_pid "${NS_PID}/web.pid")
+        if [ "$web_pid" -gt 0 ] && kill -0 "$web_pid" 2>/dev/null; then
+          break
+        fi
+      fi
+      sleep 1
+    done
+    
+    if [ "$web_pid" -eq 0 ] || ! kill -0 "$web_pid" 2>/dev/null; then
+      ns_err "Web server failed to start via wrapper. Check logs for errors"
+      kill "$pid" 2>/dev/null || true  # Stop the wrapper
+      return 1
+    fi
+    
+    # Also track the wrapper PID for cleanup
+    echo "$pid" > "${NS_PID}/web_wrapper.pid"
+    ns_ok "Web server started with enhanced wrapper (Server PID: $web_pid, Wrapper PID: $pid)"
+    
+  else
+    # Direct server startup (original method)
+    if [ "$use_wrapper" = "1" ]; then
+      ns_warn "Web wrapper requested but not available, using direct startup"
+    fi
+    
+    python3 "${NS_WWW}/server.py" >"${NS_HOME}/web.log" 2>&1 &
+    local pid=$!
+    
+    # Check if the process started successfully
+    sleep 0.1
+    if ! kill -0 "$pid" 2>/dev/null; then
+      die "Failed to start web server process"
+    fi
+    safe_write_pid "${NS_PID}/web.pid" "$pid"
+    
+    # Give server a moment to start and verify it's running
+    sleep 2
+    if ! kill -0 "$pid" 2>/dev/null; then
+      ns_err "Web server failed to start. Check ${NS_HOME}/web.log for errors"
+      cat "${NS_HOME}/web.log" | tail -10 >&2
+      return 1
+    fi
+    
+    ns_ok "Web server started (PID $pid)"
   fi
   
   # Verify the server is actually responding
@@ -11781,6 +11924,24 @@ stop_web(){
   local any=0
   local failed=0
   
+  # Stop web wrapper if it exists
+  if [ -f "${NS_PID}/web_wrapper.pid" ]; then
+    local wrapper_pid; wrapper_pid=$(safe_read_pid "${NS_PID}/web_wrapper.pid")
+    if [ "$wrapper_pid" -gt 0 ] && kill -0 "$wrapper_pid" 2>/dev/null; then
+      ns_log "Stopping web wrapper process $wrapper_pid..."
+      kill -TERM "$wrapper_pid" 2>/dev/null || true
+      sleep 2
+      if kill -0 "$wrapper_pid" 2>/dev/null; then
+        ns_warn "Web wrapper didn't respond to TERM, using KILL..."
+        kill -KILL "$wrapper_pid" 2>/dev/null || true
+        sleep 0.5
+      fi
+      any=1
+    fi
+    rm -f "${NS_PID}/web_wrapper.pid"
+  fi
+  
+  # Stop web server process
   if [ -f "${NS_PID}/web.pid" ]; then
     local pid; pid=$(safe_read_pid "${NS_PID}/web.pid")
     if [ "$pid" -gt 0 ]; then
@@ -11873,6 +12034,14 @@ install_all(){
   write_server_py
   write_dashboard
   ensure_auth_bootstrap
+  
+  # Install web wrapper script if it exists in current directory
+  if [ -f "$(dirname "$0")/web_wrapper.sh" ]; then
+    ns_log "Installing enhanced web server wrapper..."
+    cp "$(dirname "$0")/web_wrapper.sh" "${NS_BIN}/web_wrapper.sh" 2>/dev/null || true
+    chmod +x "${NS_BIN}/web_wrapper.sh" 2>/dev/null || true
+  fi
+  
   setup_termux_service || true
   setup_systemd_user || true
   ns_ok "Install complete. Use: $0 --start"
@@ -12007,6 +12176,7 @@ Optional Features (opt-in, disabled by default for stable behavior):
   --enable-auto-restart      Enable automatic restart of crashed services
   --enable-security-hardening  Enable enhanced security features
   --enable-strict-sessions   Enable strict session validation
+  --enable-web-wrapper       Enable enhanced web server stability wrapper with restart limiting
 
 Interactive:
   --menu                 Show interactive menu
@@ -12149,6 +12319,14 @@ case "${1:-}" in
     ns_log "Enabling strict session validation"
     export NOVASHIELD_STRICT_SESSIONS=1
     ns_ok "Strict sessions enabled for this session. To make permanent, add NOVASHIELD_STRICT_SESSIONS=1 to ~/.novashield/novashield.conf";;
+  --enable-web-wrapper)
+    ns_log "Enabling enhanced web server stability wrapper"
+    export NOVASHIELD_USE_WEB_WRAPPER=1
+    # Make web_wrapper.sh executable if it exists
+    if [ -f "${NS_BIN}/web_wrapper.sh" ]; then
+      chmod +x "${NS_BIN}/web_wrapper.sh" 2>/dev/null || true
+    fi
+    ns_ok "Web wrapper enabled for this session. To make permanent, add NOVASHIELD_USE_WEB_WRAPPER=1 to ~/.novashield/novashield.conf";;
   --menu) menu;;
   *) usage; exit 1;;
 esac

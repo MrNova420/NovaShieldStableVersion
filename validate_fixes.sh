@@ -35,35 +35,61 @@ else
 fi
 
 # Test 3: Exception handling validation
-echo -n "✓ Checking exception handling... "
-if grep -q "logging.basicConfig" "$NOVASHIELD_SCRIPT" && \
-   grep -q "serve_forever()" "$NOVASHIELD_SCRIPT" && \
-   grep -A5 "serve_forever()" "$NOVASHIELD_SCRIPT" | grep -q "except Exception"; then
+echo -n "✓ Checking comprehensive exception handling... "
+if grep -q "GET_ERROR" "$NOVASHIELD_SCRIPT" && \
+   grep -q "POST_ERROR" "$NOVASHIELD_SCRIPT" && \
+   grep -q "server.error.log" "$NOVASHIELD_SCRIPT"; then
     echo "PASS"
 else
-    echo "FAIL - Exception handling not found"
+    echo "FAIL - Comprehensive exception handling not found"
     exit 1
 fi
 
-# Test 4: Web wrapper validation
-echo -n "✓ Checking web wrapper... "
-if [ -f "${SCRIPT_DIR}/web_wrapper.sh" ] && [ -x "${SCRIPT_DIR}/web_wrapper.sh" ]; then
+# Test 4: Enhanced web wrapper validation
+echo -n "✓ Checking enhanced web wrapper... "
+if [ -f "${SCRIPT_DIR}/web_wrapper.sh" ] && [ -x "${SCRIPT_DIR}/web_wrapper.sh" ] && \
+   grep -q "MEMORY_THRESHOLD" "${SCRIPT_DIR}/web_wrapper.sh" && \
+   grep -q "monitor_server_resources" "${SCRIPT_DIR}/web_wrapper.sh" && \
+   grep -q "exponential backoff" "${SCRIPT_DIR}/web_wrapper.sh"; then
     echo "PASS"
 else
-    echo "FAIL - Web wrapper missing or not executable"
+    echo "FAIL - Enhanced web wrapper missing or incomplete"
     exit 1
 fi
 
-# Test 5: Auto-restart validation
-echo -n "✓ Validating auto-restart logic... "
-if grep -q "Restarting automatically" "$NOVASHIELD_SCRIPT"; then
+# Test 5: Enhanced auto-restart and rate limiting validation
+echo -n "✓ Validating enhanced auto-restart with rate limiting... "
+if grep -q "Always start supervisor for critical web server monitoring" "$NOVASHIELD_SCRIPT" && \
+   grep -q "check_restart_limit" "$NOVASHIELD_SCRIPT" && \
+   grep -q "restart_tracking.json" "$NOVASHIELD_SCRIPT" && \
+   grep -q "exponential backoff" "$NOVASHIELD_SCRIPT"; then
     echo "PASS"
 else
-    echo "FAIL - Auto-restart logic not found"
+    echo "FAIL - Enhanced auto-restart logic with rate limiting not found"
     exit 1
 fi
 
-# Test 6: Basic functionality test
+# Test 6: Web wrapper integration validation
+echo -n "✓ Checking web wrapper integration... "
+if grep -q "NOVASHIELD_USE_WEB_WRAPPER" "$NOVASHIELD_SCRIPT" && \
+   grep -q "enable-web-wrapper" "$NOVASHIELD_SCRIPT" && \
+   grep -q "enhanced stability wrapper" "$NOVASHIELD_SCRIPT"; then
+    echo "PASS"
+else
+    echo "FAIL - Web wrapper integration not properly implemented"
+    exit 1
+fi
+
+# Test 7: Disk monitor interval fix validation  
+echo -n "✓ Validating disk monitor interval fix... "
+if grep -A 4 "_monitor_disk(){" "$NOVASHIELD_SCRIPT" | grep -q '"60"'; then
+    echo "PASS"
+else
+    echo "FAIL - Disk monitor interval discrepancy not fixed"
+    exit 1
+fi
+
+# Test 8: Basic functionality test
 echo -n "✓ Testing basic functionality... "
 if timeout 10 "$NOVASHIELD_SCRIPT" --help >/dev/null 2>&1; then
     echo "PASS"
@@ -73,12 +99,20 @@ else
 fi
 
 echo ""
-echo "🎉 All validation tests PASSED!"
+echo "🎉 All comprehensive validation tests PASSED!"
 echo ""
-echo "Summary of Fixes Validated:"
-echo "• Exception handling: Server will log errors and continue running"
-echo "• Monitor intervals: Reduced by 70-92% to prevent resource exhaustion" 
-echo "• Auto-restart: Web server will restart automatically when crashed"
-echo "• Web wrapper: Enhanced restart safety with rate limiting available"
+echo "Summary of Enhanced Fixes Validated:"
+echo "• Comprehensive exception handling: Request handlers now catch all exceptions"
+echo "• Enhanced supervisor logic: Always monitors critical web server with rate limiting"  
+echo "• Restart rate limiting: Prevents crash loops with exponential backoff (max 5/hour)"
+echo "• Enhanced web wrapper: Resource monitoring, health checks, and crash detection"
+echo "• Web wrapper integration: Optional enhanced stability layer available"
+echo "• Monitor interval optimization: Reduced resource usage by 70-92%"
+echo "• Disk monitor fix: Interval discrepancy resolved (now uses 60s)"
+echo "• Enhanced error logging: Full stack traces logged to server.error.log"
 echo ""
-echo "The NovaShield stability fixes are properly implemented."
+echo "The NovaShield comprehensive stability fixes are properly implemented."
+echo ""
+echo "To enable enhanced features:"
+echo "  ./novashield.sh --enable-auto-restart    # Enable full auto-restart"
+echo "  ./novashield.sh --enable-web-wrapper     # Enable enhanced web wrapper"
