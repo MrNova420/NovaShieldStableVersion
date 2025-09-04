@@ -51,47 +51,18 @@ fi
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[0;33m'; BLUE='\033[0;34m'; NC='\033[0m'
 
 ns_now() { date '+%Y-%m-%d %H:%M:%S'; }
-
-# Enhanced logging with automatic rotation
-_rotate_log() {
-  local logfile="$1"
-  local max_lines="${2:-10000}"  # Default max 10K lines
-  
-  if [ -f "$logfile" ] && [ "$(wc -l < "$logfile" 2>/dev/null || echo 0)" -gt "$max_lines" ]; then
-    # Keep last 50% of lines
-    local keep_lines=$((max_lines / 2))
-    local temp_file="${logfile}.tmp.$$"
-    tail -n "$keep_lines" "$logfile" > "$temp_file" 2>/dev/null && mv "$temp_file" "$logfile"
-    echo "$(ns_now) [INFO ] Log rotated - kept last $keep_lines lines" >> "$logfile"
-  fi
-}
-
-ns_log() { 
-  mkdir -p "${NS_HOME}" 2>/dev/null
-  _rotate_log "${NS_HOME}/launcher.log" 5000
-  echo -e "$(ns_now) [INFO ] $*" | tee -a "${NS_HOME}/launcher.log" >&2
-}
-ns_warn(){ 
-  mkdir -p "${NS_HOME}" 2>/dev/null
-  _rotate_log "${NS_HOME}/launcher.log" 5000
-  echo -e "${YELLOW}$(ns_now) [WARN ] $*${NC}" | tee -a "${NS_HOME}/launcher.log" >&2
-}
-ns_err() { 
-  mkdir -p "${NS_HOME}" 2>/dev/null
-  _rotate_log "${NS_HOME}/launcher.log" 5000
-  echo -e "${RED}$(ns_now) [ERROR] $*${NC}" | tee -a "${NS_HOME}/launcher.log" >&2
-}
+ns_log() { mkdir -p "${NS_HOME}" 2>/dev/null; echo -e "$(ns_now) [INFO ] $*" | tee -a "${NS_HOME}/launcher.log" >&2; }
+ns_warn(){ mkdir -p "${NS_HOME}" 2>/dev/null; echo -e "${YELLOW}$(ns_now) [WARN ] $*${NC}" | tee -a "${NS_HOME}/launcher.log" >&2; }
+ns_err() { mkdir -p "${NS_HOME}" 2>/dev/null; echo -e "${RED}$(ns_now) [ERROR] $*${NC}" | tee -a "${NS_HOME}/launcher.log" >&2; }
 ns_ok()  { echo -e "${GREEN}✓ $*${NC}"; }
 
 audit(){ 
   mkdir -p "$(dirname "$NS_AUDIT")" 2>/dev/null
-  _rotate_log "$NS_AUDIT" 5000
   echo "$(ns_now) $*" | tee -a "$NS_AUDIT" >/dev/null
   # Also log security-relevant events to security.log
   case "$*" in
     *LOGIN*|*AUTH*|*SECURITY*|*BREACH*|*ATTACK*|*SUSPICIOUS*)
       mkdir -p "$(dirname "$NS_LOGS/security.log")" 2>/dev/null
-      _rotate_log "$NS_LOGS/security.log" 3000
       echo "$(ns_now) [SECURITY] $*" | tee -a "$NS_LOGS/security.log" >/dev/null
       ;;
   esac
@@ -102,7 +73,6 @@ alert(){
   local msg="$*"
   local line="$(ns_now) [$level] $msg"
   mkdir -p "$(dirname "$NS_ALERTS")" 2>/dev/null
-  _rotate_log "$NS_ALERTS" 3000
   echo "$line" | tee -a "$NS_ALERTS" >&2
   
   # Enhanced alert categorization - only log true security events to security.log
@@ -119,11 +89,9 @@ alert(){
           # This is a real security event
           case "$level" in
             CRIT|ERROR)
-              _rotate_log "$NS_LOGS/security.log" 3000
               echo "$(ns_now) [SECURITY] $level: $msg" | tee -a "$NS_LOGS/security.log" >/dev/null 2>&1
               ;;
             WARN)
-              _rotate_log "$NS_LOGS/security.log" 3000
               echo "$(ns_now) [SECURITY] $level: $msg" | tee -a "$NS_LOGS/security.log" >/dev/null 2>&1
               ;;
           esac
@@ -444,8 +412,8 @@ terminal:
 
 monitors:
   cpu:         { enabled: true,  interval_sec: 10, warn_load: 2.00, crit_load: 4.00 }
-  memory:      { enabled: true,  interval_sec: 10, warn_pct: 85,  crit_pct: 93, process_limit_mb: 500 }
-  disk:        { enabled: true,  interval_sec: 60, warn_pct: 85, crit_pct: 95, cleanup_pct: 90, mount: "/" }
+  memory:      { enabled: true,  interval_sec: 10, warn_pct: 85,  crit_pct: 93 }
+  disk:        { enabled: true,  interval_sec: 60, warn_pct: 85, crit_pct: 95, mount: "/" }
   network:     { enabled: true,  interval_sec: 60, iface: "", ping_host: "1.1.1.1", loss_warn: 20, external_checks: true, public_ip_services: ["icanhazip.com", "ifconfig.me", "api.ipify.org"] }
   integrity:   { enabled: true,  interval_sec: 60, watch_paths: ["/system/bin","/system/xbin","/usr/bin"] }
   process:     { enabled: true,  interval_sec: 30, suspicious: ["nc","nmap","hydra","netcat","telnet"] }
@@ -1014,15 +982,12 @@ _monitor_cpu(){
   done
 }
 
-# Enhanced memory monitoring with process memory tracking for long-term stability
 _monitor_mem(){
   set +e; set +o pipefail
-  local interval warn crit process_mem_limit
+  local interval warn crit
   interval=$(ensure_int "$(yaml_get "memory" "interval_sec" "10")" 10)
   warn=$(ensure_int "$(yaml_get "memory" "warn_pct" "85")" 85)
   crit=$(ensure_int "$(yaml_get "memory" "crit_pct" "95")" 95)
-  process_mem_limit=$(ensure_int "$(yaml_get "memory" "process_limit_mb" "500")" 500)
-  
   while true; do
     monitor_enabled memory || { sleep "$interval"; continue; }
     local mem_total mem_avail mem_used pct
@@ -1034,149 +999,19 @@ _monitor_mem(){
       read -r _ mem_total _ < <(free -k | awk '/Mem:/ {print $2, $3, $4}')
       mem_used=$(free -k | awk '/Mem:/ {print $3}'); pct=$((mem_used*100/mem_total))
     fi
-    
-    # Check NovaShield process memory usage for long-term stability
-    local web_pid=$(safe_read_pid "${NS_PID}/web.pid" 2>/dev/null || echo 0)
-    local web_mem=0
-    if [ "$web_pid" -gt 0 ] && kill -0 "$web_pid" 2>/dev/null; then
-      web_mem=$(ps -o rss= -p "$web_pid" 2>/dev/null | awk '{print int($1/1024)}' || echo 0)
-      if [ "$web_mem" -gt "$process_mem_limit" ]; then
-        alert WARN "Web server memory usage high: ${web_mem}MB (limit: ${process_mem_limit}MB) - may need restart"
-        # Log memory usage details for long-term tracking
-        mkdir -p "${NS_LOGS}" 2>/dev/null
-        _rotate_log "${NS_LOGS}/memory_alerts.log" 1000
-        echo "$(ns_now) Web server memory usage: ${web_mem}MB (PID: $web_pid)" >> "${NS_LOGS}/memory_alerts.log"
-      fi
-    fi
-    
-    # Check monitor processes memory usage
-    local total_monitor_mem=0
-    for monitor in cpu memory disk network integrity process userlogins services logs scheduler supervisor; do
-      local monitor_pid=$(safe_read_pid "${NS_PID}/${monitor}.pid" 2>/dev/null || echo 0)
-      if [ "$monitor_pid" -gt 0 ] && kill -0 "$monitor_pid" 2>/dev/null; then
-        local monitor_mem=$(ps -o rss= -p "$monitor_pid" 2>/dev/null | awk '{print int($1/1024)}' || echo 0)
-        total_monitor_mem=$((total_monitor_mem + monitor_mem))
-        
-        # Alert if individual monitor uses excessive memory (potential memory leak)
-        if [ "$monitor_mem" -gt 100 ]; then
-          alert WARN "Monitor $monitor memory usage high: ${monitor_mem}MB (PID: $monitor_pid) - potential leak"
-        fi
-      fi
-    done
-    
     local lvl="OK"; [ "$pct" -ge "$crit" ] && lvl="CRIT" || { [ "$pct" -ge "$warn" ] && lvl="WARN"; }
-    write_json "${NS_LOGS}/memory.json" "{\"ts\":\"$(ns_now)\",\"used_pct\":${pct},\"warn\":${warn},\"crit\":${crit},\"level\":\"${lvl}\",\"web_mem_mb\":${web_mem},\"monitor_total_mb\":${total_monitor_mem}}"
+    write_json "${NS_LOGS}/memory.json" "{\"ts\":\"$(ns_now)\",\"used_pct\":${pct},\"warn\":${warn},\"crit\":${crit},\"level\":\"${lvl}\"}"
     [ "$lvl" = "CRIT" ] && alert CRIT "Memory high: ${pct}%" || { [ "$lvl" = "WARN" ] && alert WARN "Memory elevated: ${pct}%"; }
     sleep "$interval"
   done
 }
 
-# Comprehensive storage management and cleanup for long-term operation
-storage_maintenance() {
-  local force_cleanup="${1:-false}"
-  ns_log "Starting storage maintenance routine..."
-  
-  # Create maintenance lock to prevent concurrent runs
-  local maintenance_lock="${NS_CTRL}/maintenance.lock"
-  if [ -f "$maintenance_lock" ] && [ "$force_cleanup" != "force" ]; then
-    local lock_age=$(($(date +%s) - $(stat -c %Y "$maintenance_lock" 2>/dev/null || echo 0)))
-    if [ "$lock_age" -lt 3600 ]; then  # Less than 1 hour old
-      ns_warn "Storage maintenance already running or recently completed. Skipping."
-      return 0
-    fi
-  fi
-  echo "$$" > "$maintenance_lock"
-  trap 'rm -f "'"$maintenance_lock"'" 2>/dev/null || true' EXIT
-  
-  local initial_size total_cleaned=0
-  initial_size=$(du -sb "${NS_HOME}" 2>/dev/null | cut -f1 || echo 0)
-  
-  # 1. Clean old backup files (keep last 10)
-  if [ -d "${NS_HOME}/backups" ]; then
-    local backup_count=$(ls -1 "${NS_HOME}/backups"/*.tar.gz 2>/dev/null | wc -l || echo 0)
-    if [ "$backup_count" -gt 10 ]; then
-      ns_log "Cleaning old backups (keeping last 10 of $backup_count)"
-      cd "${NS_HOME}/backups" && ls -1t *.tar.gz 2>/dev/null | tail -n +11 | xargs rm -f
-    fi
-  fi
-  
-  # 2. Clean temporary files older than 24 hours
-  if [ -d "${NS_TMP}" ]; then
-    find "${NS_TMP}" -type f -mtime +1 -delete 2>/dev/null || true
-    find "${NS_TMP}" -empty -type d -delete 2>/dev/null || true
-  fi
-  
-  # 3. Rotate and clean log files
-  for log_file in "${NS_LOGS}"/*.log "${NS_HOME}"/*.log; do
-    if [ -f "$log_file" ]; then
-      _rotate_log "$log_file" 5000
-    fi
-  done
-  
-  # 4. Clean old monitoring JSON files (keep last 100 entries each)
-  for json_file in "${NS_LOGS}"/*.json; do
-    if [ -f "$json_file" ] && [ "$(wc -l < "$json_file" 2>/dev/null || echo 0)" -gt 100 ]; then
-      tail -n 50 "$json_file" > "${json_file}.tmp" 2>/dev/null && mv "${json_file}.tmp" "$json_file"
-    fi
-  done
-  
-  # 5. Clean expired sessions and rate limit entries
-  if [ -f "${NS_SESS_DB}" ]; then
-    python3 -c "
-import json, time
-try:
-    with open('${NS_SESS_DB}', 'r') as f:
-        db = json.load(f)
-    current_time = int(time.time())
-    cleaned = {k:v for k,v in db.items() if k.startswith('_') or 
-              (isinstance(v, dict) and v.get('expires', current_time + 1) > current_time)}
-    with open('${NS_SESS_DB}', 'w') as f:
-        json.dump(cleaned, f)
-except: pass
-" 2>/dev/null || true
-  fi
-  
-  # 6. Clean old rate limiting data (older than 24 hours)
-  if [ -f "${NS_RL_DB}" ]; then
-    python3 -c "
-import json, time
-try:
-    with open('${NS_RL_DB}', 'r') as f:
-        db = json.load(f)
-    current_time = int(time.time())
-    cleaned = {k:v for k,v in db.items() if current_time - v < 86400}
-    with open('${NS_RL_DB}', 'w') as f:
-        json.dump(cleaned, f)
-except: pass
-" 2>/dev/null || true
-  fi
-  
-  # 7. Clean old restart tracking data
-  local restart_files=("${NS_CTRL}/restart_tracking.json" "${NS_PID}/restart_limits.txt")
-  for restart_file in "${restart_files[@]}"; do
-    if [ -f "$restart_file" ]; then
-      find "$(dirname "$restart_file")" -name "$(basename "$restart_file")" -mtime +1 -delete 2>/dev/null || true
-    fi
-  done
-  
-  local final_size cleaned_mb
-  final_size=$(du -sb "${NS_HOME}" 2>/dev/null | cut -f1 || echo "$initial_size")
-  total_cleaned=$((initial_size - final_size))
-  cleaned_mb=$((total_cleaned / 1024 / 1024))
-  
-  ns_ok "Storage maintenance completed. Cleaned: ${cleaned_mb}MB"
-  rm -f "$maintenance_lock" 2>/dev/null || true
-  trap - EXIT
-}
-
-# Enhanced disk space monitoring with integrated cleanup
 _monitor_disk(){
   set +e; set +o pipefail
-  local interval warn crit mount cleanup_threshold
+  local interval warn crit mount
   interval=$(ensure_int "$(yaml_get "disk" "interval_sec" "60")" 60)
   warn=$(ensure_int "$(yaml_get "disk" "warn_pct" "85")" 85)
   crit=$(ensure_int "$(yaml_get "disk" "crit_pct" "95")" 95)
-  cleanup_threshold=$(ensure_int "$(yaml_get "disk" "cleanup_pct" "90")" 90)
   mount=$(yaml_get "disk" "mount" "/")
   [ -z "$mount" ] && mount="/"
   if [ "$IS_TERMUX" -eq 1 ] && [ "$mount" = "/" ]; then
@@ -1185,23 +1020,9 @@ _monitor_disk(){
   while true; do
     monitor_enabled disk || { sleep "$interval"; continue; }
     local use; use=$(df -P "$mount" | awk 'END {gsub("%","",$5); print $5+0}')
-    local lvl="OK"
-    
-    # Determine alert level and trigger cleanup if needed
-    if [ "$use" -ge "$crit" ]; then
-      lvl="CRIT"
-      # Critical disk space - force cleanup
-      storage_maintenance "force" &
-    elif [ "$use" -ge "$cleanup_threshold" ]; then
-      lvl="WARN"
-      # High disk usage - trigger maintenance
-      storage_maintenance &
-    elif [ "$use" -ge "$warn" ]; then
-      lvl="WARN"
-    fi
-    
-    write_json "${NS_LOGS}/disk.json" "{\"ts\":\"$(ns_now)\",\"use_pct\":${use},\"warn\":${warn},\"crit\":${crit},\"mount\":\"${mount}\",\"level\":\"${lvl}\",\"cleanup_threshold\":${cleanup_threshold}}"
-    [ "$lvl" = "CRIT" ] && alert CRIT "Disk $mount critical: ${use}% (cleanup triggered)" || { [ "$lvl" = "WARN" ] && alert WARN "Disk $mount elevated: ${use}%"; }
+    local lvl="OK"; [ "$use" -ge "$crit" ] && lvl="CRIT" || { [ "$use" -ge "$warn" ] && lvl="WARN"; }
+    write_json "${NS_LOGS}/disk.json" "{\"ts\":\"$(ns_now)\",\"use_pct\":${use},\"warn\":${warn},\"crit\":${crit},\"mount\":\"${mount}\",\"level\":\"${lvl}\"}"
+    [ "$lvl" = "CRIT" ] && alert CRIT "Disk $mount high: ${use}%" || { [ "$lvl" = "WARN" ] && alert WARN "Disk $mount elevated: ${use}%"; }
     sleep "$interval"
   done
 }
@@ -1651,103 +1472,11 @@ scheduler_run_action(){
     backup) backup_snapshot;;
     version) version_snapshot;;
     restart_monitors) restart_monitors;;
-    storage_maintenance) storage_maintenance "scheduled";;
-    health_check) health_check_system;;
     *) if [ -x "${NS_MODULES}/${act}.sh" ]; then "${NS_MODULES}/${act}.sh" || alert ERROR "Module ${act} failed"; else ns_warn "Unknown scheduler action: $act"; fi ;;
   esac
 }
 
-# Comprehensive web server health check for long-term stability
-web_health_check() {
-  local web_pid=$(safe_read_pid "${NS_PID}/web.pid" 2>/dev/null || echo 0)
-  if [ "$web_pid" -gt 0 ] && kill -0 "$web_pid" 2>/dev/null; then
-    # Check if web server is responsive
-    local host port
-    host=$(yaml_get "http" "host" "127.0.0.1")
-    port=$(yaml_get "http" "port" "8765")
-    
-    if command -v curl >/dev/null 2>&1; then
-      if ! curl -sf "http://${host}:${port}/" -m 5 >/dev/null 2>&1; then
-        alert WARN "Web server not responding on http://${host}:${port}/ (PID: $web_pid exists but not serving)"
-        # Log detailed health check failure
-        mkdir -p "${NS_LOGS}" 2>/dev/null
-        _rotate_log "${NS_LOGS}/health_checks.log" 1000
-        echo "$(ns_now) Web server health check failed - process exists but not responding" >> "${NS_LOGS}/health_checks.log"
-      fi
-    fi
-    
-    # Check for error log growth
-    local error_log="${NS_LOGS}/server.error.log"
-    if [ -f "$error_log" ]; then
-      local error_lines=$(wc -l < "$error_log" 2>/dev/null || echo 0)
-      if [ "$error_lines" -gt 100 ]; then
-        alert WARN "Web server error log growing: $error_lines lines - check for recurring errors"
-        _rotate_log "$error_log" 200
-      fi
-    fi
-  fi
-}
-
-# System health check for long-term operation monitoring
-health_check_system() {
-  ns_log "Running comprehensive system health check..."
-  local health_report="${NS_LOGS}/health_report.log"
-  mkdir -p "${NS_LOGS}" 2>/dev/null
-  _rotate_log "$health_report" 1000
-  
-  {
-    echo "=== System Health Check $(date) ==="
-    
-    # Check available disk space on NovaShield directory
-    local ns_disk_usage=$(du -sh "${NS_HOME}" 2>/dev/null || echo "unknown")
-    local root_avail=$(df -h "${NS_HOME}" | awk 'NR==2 {print $4}' || echo "unknown")
-    echo "NovaShield directory size: $ns_disk_usage"
-    echo "Available disk space: $root_avail"
-    
-    # Check running processes
-    echo "NovaShield processes:"
-    for monitor in cpu memory disk network integrity process userlogins services logs scheduler supervisor; do
-      local pid=$(safe_read_pid "${NS_PID}/${monitor}.pid" 2>/dev/null || echo 0)
-      local status="stopped"
-      if [ "$pid" -gt 0 ] && kill -0 "$pid" 2>/dev/null; then
-        local mem=$(ps -o rss= -p "$pid" 2>/dev/null | awk '{print int($1/1024)}' || echo 0)
-        status="running (${mem}MB)"
-      fi
-      printf "  %-12s: %s\n" "$monitor" "$status"
-    done
-    
-    local web_pid=$(safe_read_pid "${NS_PID}/web.pid" 2>/dev/null || echo 0)
-    if [ "$web_pid" -gt 0 ] && kill -0 "$web_pid" 2>/dev/null; then
-      local web_mem=$(ps -o rss= -p "$web_pid" 2>/dev/null | awk '{print int($1/1024)}' || echo 0)
-      echo "  Web server   : running (${web_mem}MB)"
-    else
-      echo "  Web server   : stopped"
-    fi
-    
-    # Check log files sizes
-    echo "Log files:"
-    for log_file in "${NS_LOGS}"/*.log "${NS_HOME}"/*.log; do
-      if [ -f "$log_file" ]; then
-        local size=$(du -sh "$log_file" 2>/dev/null | cut -f1 || echo "0")
-        local lines=$(wc -l < "$log_file" 2>/dev/null || echo 0)
-        printf "  %-20s: %s (%s lines)\n" "$(basename "$log_file")" "$size" "$lines"
-      fi
-    done
-    
-    echo "=== End Health Check ==="
-    echo ""
-  } >> "$health_report"
-  
-  ns_log "System health check completed - report saved to health_report.log"
-}
-
 _spawn_monitor(){ local name="$1"; shift; "$@" & safe_write_pid "${NS_PID}/${name}.pid" $!; }
-
-# Add maintenance command for manual storage cleanup and health checks
-maintenance() {
-  storage_maintenance "manual"
-  health_check_system
-}
 
 start_monitors(){
   ns_log "Starting monitors..."
@@ -5283,12 +5012,11 @@ class Handler(SimpleHTTPRequestHandler):
                     self._set_headers(200); self.wfile.write(json.dumps({'ok':True}).encode('utf-8')); return
                 except Exception: pass
             self_path = read_text(SELF_PATH_FILE).strip() or os.path.join(NS_HOME, 'bin', 'novashield.sh')
-            if action in ('backup','version','restart_monitors','clear_logs','maintenance'):
+            if action in ('backup','version','restart_monitors','clear_logs'):
                 try:
                     if action=='backup': os.system(f'\"{self_path}\" --backup >/dev/null 2>&1 &')
                     if action=='version': os.system(f'\"{self_path}\" --version-snapshot >/dev/null 2>&1 &')
                     if action=='restart_monitors': os.system(f'\"{self_path}\" --restart-monitors >/dev/null 2>&1 &')
-                    if action=='maintenance': os.system(f'\"{self_path}\" --maintenance >/dev/null 2>&1 &')
                     if action=='clear_logs':
                         # Clear old log entries (keep last 100 lines of each log)
                         log_files = [
@@ -5537,10 +5265,10 @@ class Handler(SimpleHTTPRequestHandler):
                         'ok': True,
                         'output': output
                     }).encode('utf-8'))
-                except Exception as e:
-                    security_log(f"COMMAND_ERROR user={username} ip={user_ip} error={str(e)}")
-                    self._set_headers(500)
-                    self.wfile.write(json.dumps({'ok': False, 'error': str(e)}).encode('utf-8'))
+            except Exception as e:
+                security_log(f"COMMAND_ERROR user={username} ip={user_ip} error={str(e)}")
+                self._set_headers(500)
+                self.wfile.write(json.dumps({'ok': False, 'error': str(e)}).encode('utf-8'))
             return
             
             if parsed.path == '/api/webgen':
@@ -5549,10 +5277,10 @@ class Handler(SimpleHTTPRequestHandler):
                     data = json.loads(body or '{}')
                 except Exception:
                     data = {}
-            title = data.get('title','Untitled'); content = data.get('content','')
-            slug = ''.join([c.lower() if c.isalnum() else '-' for c in title]).strip('-') or f'page-{int(time.time())}'
-            Path(SITE_DIR).mkdir(parents=True, exist_ok=True)
-            page_path = os.path.join(SITE_DIR, f'{slug}.html')
+                title = data.get('title','Untitled'); content = data.get('content','')
+                slug = ''.join([c.lower() if c.isalnum() else '-' for c in title]).strip('-') or f'page-{int(time.time())}'
+                Path(SITE_DIR).mkdir(parents=True, exist_ok=True)
+                page_path = os.path.join(SITE_DIR, f'{slug}.html')
             write_text(page_path, f'<!DOCTYPE html><html><head><meta charset="utf-8"><title>{title}</title></head><body><h1>{title}</h1><div>{content}</div></body></html>')
             pages = [p for p in os.listdir(SITE_DIR) if p.endswith('.html')]
             links = '\n'.join([f'<li><a href="/site/{p}">{p}</a></li>' for p in pages if p!='index.html'])
@@ -5561,12 +5289,9 @@ class Handler(SimpleHTTPRequestHandler):
             self._set_headers(200); self.wfile.write(json.dumps({'ok':True,'page':f'/site/{slug}.html'}).encode('utf-8')); return
 
         # File manager actions
+                try: data=json.loads(body or '{}')
             if parsed.path == '/api/fs_write':
-                if not require_auth(self): return
-                try:
-                    data = json.loads(body or '{}')
-                except Exception:
-                    data = {}
+            except Exception: data={}
             path=data.get('path',''); content=data.get('content','')
             full=os.path.abspath(path)
             if (not full.startswith(NS_HOME)) or full.startswith(NS_KEYS):
@@ -5575,12 +5300,9 @@ class Handler(SimpleHTTPRequestHandler):
             except Exception as e: self._set_headers(500); self.wfile.write(json.dumps({'ok':False,'error':str(e)}).encode('utf-8'))
             return
 
+                try: data=json.loads(body or '{}')
             if parsed.path == '/api/fs_mkdir':
-                if not require_auth(self): return
-                try:
-                    data = json.loads(body or '{}')
-                except Exception:
-                    data = {}
+            except Exception: data={}
             path=data.get('path','')
             full=os.path.abspath(path)
             if (not full.startswith(NS_HOME)) or full.startswith(NS_KEYS):
@@ -5589,12 +5311,9 @@ class Handler(SimpleHTTPRequestHandler):
             except Exception as e: self._set_headers(500); self.wfile.write(json.dumps({'ok':False,'error':str(e)}).encode('utf-8'))
             return
 
+                try: data=json.loads(body or '{}')
             if parsed.path == '/api/fs_mv':
-                if not require_auth(self): return
-                try:
-                    data = json.loads(body or '{}')
-                except Exception:
-                    data = {}
+            except Exception: data={}
             src=data.get('src',''); dst=data.get('dst','')
             srcf=os.path.abspath(src); dstf=os.path.abspath(dst)
             if (not srcf.startswith(NS_HOME)) or (not dstf.startswith(NS_HOME)) or srcf.startswith(NS_KEYS) or dstf.startswith(NS_KEYS):
@@ -5603,12 +5322,9 @@ class Handler(SimpleHTTPRequestHandler):
             except Exception as e: self._set_headers(500); self.wfile.write(json.dumps({'ok':False,'error':str(e)}).encode('utf-8'))
             return
 
+                try: data=json.loads(body or '{}')
             if parsed.path == '/api/fs_rm':
-                if not require_auth(self): return
-                try:
-                    data = json.loads(body or '{}')
-                except Exception:
-                    data = {}
+            except Exception: data={}
             path=data.get('path',''); full=os.path.abspath(path)
             if (not full.startswith(NS_HOME)) or full.startswith(NS_KEYS):
                 self._set_headers(403); self.wfile.write(b'{"error":"forbidden"}'); return
@@ -5623,98 +5339,98 @@ class Handler(SimpleHTTPRequestHandler):
 
             if parsed.path == '/api/security':
                 if not require_auth(self): return
-                # Comprehensive security dashboard data - moved from duplicate do_POST
+            # Comprehensive security dashboard data - moved from duplicate do_POST
                 try:
-                    # Read and parse log files
-                    auth_logs = []
-                    audit_logs = []
-                    security_logs = []
-                    integrity_logs = []
-                    
-                    # Parse session log for detailed authentication events
-                    session_path = os.path.join(NS_HOME, 'session.log')
-                    alerts_path = os.path.join(NS_LOGS, 'alerts.log')
-                    security_path = os.path.join(NS_LOGS, 'security.log')
-                    audit_path = os.path.join(NS_LOGS, 'audit.log')
-                    
-                    stats = {
-                        'auth_success': 0,
-                        'auth_fail': 0,
-                        'active_sessions': 0,
-                        'audit_count': 0,
-                        'security_count': 0,
-                        'threat_count': 0,
-                        'integrity_files': 0,
-                        'integrity_changes': 0,
-                        'last_audit': 'Never'
-                    }
-                    
-                    # Parse session log for detailed authentication events
-                    if os.path.exists(session_path):
-                        try:
-                            with open(session_path, 'r', encoding='utf-8') as f:
-                                lines = f.readlines()[-50:]  # Last 50 lines
-                                for line in lines:
-                                    line = line.strip()
-                                    if not line: continue
-                                    
-                                    parts = line.split(' ', 2)
-                                    if len(parts) >= 3:
-                                        timestamp = f"{parts[0]} {parts[1]}"
-                                        message = parts[2]
-                                        
-                                        log_entry = {
-                                            'timestamp': timestamp,
-                                            'message': message,
-                                            'level': 'info'
-                                        }
-                                        
-                                        if 'SUCCESSFUL_LOGIN' in message:
-                                            stats['auth_success'] += 1
-                                            log_entry['level'] = 'success'
-                                            auth_logs.append(log_entry)
-                                        elif 'FAILED_LOGIN' in message:
-                                            stats['auth_fail'] += 1
-                                            log_entry['level'] = 'error'
-                                            auth_logs.append(log_entry)
-                        except Exception as e:
-                            print(f"Error reading session log: {e}")
-                    
-                    # Count active sessions with expiry check
+                # Read and parse log files
+                auth_logs = []
+                audit_logs = []
+                security_logs = []
+                integrity_logs = []
+                
+                # Parse session log for detailed authentication events
+                session_path = os.path.join(NS_HOME, 'session.log')
+                alerts_path = os.path.join(NS_LOGS, 'alerts.log')
+                security_path = os.path.join(NS_LOGS, 'security.log')
+                audit_path = os.path.join(NS_LOGS, 'audit.log')
+                
+                stats = {
+                    'auth_success': 0,
+                    'auth_fail': 0,
+                    'active_sessions': 0,
+                    'audit_count': 0,
+                    'security_count': 0,
+                    'threat_count': 0,
+                    'integrity_files': 0,
+                    'integrity_changes': 0,
+                    'last_audit': 'Never'
+                }
+                
+                # Parse session log for detailed authentication events
+                if os.path.exists(session_path):
                     try:
-                        sessions_db = read_json(SESSIONS, {})
-                        current_time = int(time.time())
-                        active_count = 0
-                        for session_id, session_data in sessions_db.items():
-                            if isinstance(session_data, dict):
-                                session_expiry = session_data.get('expires', 0)
-                                if session_expiry > current_time:
-                                    active_count += 1
-                        stats['active_sessions'] = active_count
-                    except Exception as e:
-                        print(f"Error counting active sessions: {e}")
-                        stats['active_sessions'] = 0
-                    
-                    # Parse security log for dedicated security events
-                    if os.path.exists(security_path):
-                        try:
-                            with open(security_path, 'r', encoding='utf-8') as f:
-                                lines = f.readlines()[-100:]  # Increased to 100 for comprehensive logs
-                                for line in lines:
-                                    line = line.strip()
-                                    if not line: continue
+                        with open(session_path, 'r', encoding='utf-8') as f:
+                            lines = f.readlines()[-50:]  # Last 50 lines
+                            for line in lines:
+                                line = line.strip()
+                                if not line: continue
+                                
+                                parts = line.split(' ', 2)
+                                if len(parts) >= 3:
+                                    timestamp = f"{parts[0]} {parts[1]}"
+                                    message = parts[2]
                                     
-                                    parts = line.split(' ', 3)
-                                    if len(parts) >= 4:
-                                        timestamp = f"{parts[0]} {parts[1]}"
-                                        level_type = parts[2].strip('[]').lower()
-                                        message = parts[3]
-                                        
-                                        log_entry = {
-                                            'timestamp': timestamp,
-                                            'message': message,
-                                            'level': level_type
-                                        }
+                                    log_entry = {
+                                        'timestamp': timestamp,
+                                        'message': message,
+                                        'level': 'info'
+                                    }
+                                    
+                                    if 'SUCCESSFUL_LOGIN' in message:
+                                        stats['auth_success'] += 1
+                                        log_entry['level'] = 'success'
+                                        auth_logs.append(log_entry)
+                                    elif 'FAILED_LOGIN' in message:
+                                        stats['auth_fail'] += 1
+                                        log_entry['level'] = 'error'
+                                        auth_logs.append(log_entry)
+                    except Exception as e:
+                        print(f"Error reading session log: {e}")
+                
+                # Count active sessions with expiry check
+                try:
+                    sessions_db = read_json(SESSIONS, {})
+                    current_time = int(time.time())
+                    active_count = 0
+                    for session_id, session_data in sessions_db.items():
+                        if isinstance(session_data, dict):
+                            session_expiry = session_data.get('expires', 0)
+                            if session_expiry > current_time:
+                                active_count += 1
+                    stats['active_sessions'] = active_count
+                except Exception as e:
+                    print(f"Error counting active sessions: {e}")
+                    stats['active_sessions'] = 0
+                
+                # Parse security log for dedicated security events
+                if os.path.exists(security_path):
+                    try:
+                        with open(security_path, 'r', encoding='utf-8') as f:
+                            lines = f.readlines()[-100:]  # Increased to 100 for comprehensive logs
+                            for line in lines:
+                                line = line.strip()
+                                if not line: continue
+                                
+                                parts = line.split(' ', 3)
+                                if len(parts) >= 4:
+                                    timestamp = f"{parts[0]} {parts[1]}"
+                                    level_type = parts[2].strip('[]').lower()
+                                    message = parts[3]
+                                    
+                                    log_entry = {
+                                        'timestamp': timestamp,
+                                        'message': message,
+                                        'level': level_type
+                                    }
                                     
                                     # Enhanced categorization for new log types
                                     if level_type in ['threat', 'critical']:
@@ -5739,317 +5455,316 @@ class Handler(SimpleHTTPRequestHandler):
                                     
                                     security_logs.append(log_entry)
                                     stats['security_count'] += 1
-                        except Exception as e:
-                            print(f"Error reading security log: {e}")
-                    
-                    # Parse audit log for detailed system events
-                    if os.path.exists(audit_path):
-                        try:
-                            with open(audit_path, 'r', encoding='utf-8') as f:
-                                lines = f.readlines()[-50:]  # Last 50 lines
-                                for line in lines:
-                                    line = line.strip()
-                                    if not line: continue
-                                    
-                                    parts = line.split(' ', 2)
-                                    if len(parts) >= 3:
-                                        timestamp = f"{parts[0]} {parts[1]}"
-                                        message = parts[2]
-                                        
-                                        log_entry = {
-                                            'timestamp': timestamp,
-                                            'message': message,
-                                            'level': 'info'
-                                        }
-                                        
-                                        if 'LOGIN OK' in message or 'LOGIN SUCCESS' in message:
-                                            stats['auth_success'] += 1
-                                            log_entry['level'] = 'success'
-                                            auth_logs.append(log_entry)
-                                        elif 'LOGIN FAIL' in message:
-                                            stats['auth_fail'] += 1
-                                            log_entry['level'] = 'error'
-                                            auth_logs.append(log_entry)
-                                        elif any(kw in message for kw in ['MONITOR', 'CONTROL', 'FS']):
-                                            audit_logs.append(log_entry)
-                                        
-                                        stats['audit_count'] += 1
-                                        stats['last_audit'] = timestamp
-                        except Exception as e:
-                            print(f"Error reading audit log: {e}")
-                    
-                    # Parse alerts for security events
-                    if os.path.exists(alerts_path):
-                        try:
-                            with open(alerts_path, 'r', encoding='utf-8') as f:
-                                lines = f.readlines()[-50:]
-                                for line in lines:
-                                    line = line.strip()
-                                    if not line: continue
-                                    
-                                    parts = line.split(' ', 3)
-                                    if len(parts) >= 4:
-                                        timestamp = f"{parts[0]} {parts[1]}"
-                                        level = parts[2].strip('[]').lower()
-                                        message = parts[3]
-                                        
-                                        log_entry = {
-                                            'timestamp': timestamp,
-                                            'message': message,
-                                            'level': level
-                                        }
-                                        
-                                        if level in ['crit', 'error']:
-                                            stats['threat_count'] += 1
-                                        
-                                        # Add to security logs if it's a security-related alert
-                                        if any(kw in message.lower() for kw in ['network', 'integrity', 'suspicious', 'attack', 'breach']):
-                                            security_logs.append(log_entry)
-                                            stats['security_count'] += 1
-                        except Exception as e:
-                            print(f"Error reading alerts log: {e}")
-                    
-                    # Check integrity monitoring
-                    integrity_state_path = os.path.join(NS_CTRL, 'integrity.state')
-                    if os.path.exists(integrity_state_path):
-                        try:
-                            integrity_data = read_json(integrity_state_path, {})
-                            stats['integrity_files'] = integrity_data.get('files', 0)
-                            stats['integrity_changes'] = integrity_data.get('changes_detected', 0)
-                            
-                            # Add recent integrity events to logs
-                            recent_changes = integrity_data.get('recent_changes', [])
-                            for change in recent_changes[-20:]:  # Last 20 changes
-                                integrity_logs.append({
-                                    'timestamp': change.get('timestamp', 'Unknown'),
-                                    'message': f"File change detected: {change.get('file', 'unknown')} ({change.get('type', 'modified')})",
-                                    'level': 'warning'
-                                })
-                        except Exception as e:
-                            print(f"Error reading integrity state: {e}")
-                    else:
-                        # Fallback to integrity.json
-                        integrity_json = read_json(os.path.join(NS_LOGS, 'integrity.json'), {})
-                        stats['integrity_files'] = integrity_json.get('files', 0)
-                        stats['integrity_changes'] = integrity_json.get('changes', 0)
-                    
-                    response = {
-                        'ok': True,
-                        'stats': stats,
-                        'logs': {
-                            'auth': auth_logs[-20:],  # Last 20 auth events
-                            'audit': audit_logs[-20:],  # Last 20 audit events  
-                            'security': security_logs[-20:],  # Last 20 security events
-                            'integrity': integrity_logs[-20:]  # Last 20 integrity events
-                        }
-                    }
-                    
-                    self._set_headers(200); 
-                    self.wfile.write(json.dumps(response).encode('utf-8'))
-                    return
+                    except Exception as e:
+                        print(f"Error reading security log: {e}")
                 
-                except Exception as e:
-                    print(f"Security API error: {e}")
-                    self._set_headers(500); 
-                    self.wfile.write(json.dumps({'error': str(e)}).encode('utf-8'))
-                    return
+                # Parse audit log for detailed system events
+                if os.path.exists(audit_path):
+                    try:
+                        with open(audit_path, 'r', encoding='utf-8') as f:
+                            lines = f.readlines()[-50:]  # Last 50 lines
+                            for line in lines:
+                                line = line.strip()
+                                if not line: continue
+                                
+                                parts = line.split(' ', 2)
+                                if len(parts) >= 3:
+                                    timestamp = f"{parts[0]} {parts[1]}"
+                                    message = parts[2]
+                                    
+                                    log_entry = {
+                                        'timestamp': timestamp,
+                                        'message': message,
+                                        'level': 'info'
+                                    }
+                                    
+                                    if 'LOGIN OK' in message or 'LOGIN SUCCESS' in message:
+                                        stats['auth_success'] += 1
+                                        log_entry['level'] = 'success'
+                                        auth_logs.append(log_entry)
+                                    elif 'LOGIN FAIL' in message:
+                                        stats['auth_fail'] += 1
+                                        log_entry['level'] = 'error'
+                                        auth_logs.append(log_entry)
+                                    elif any(kw in message for kw in ['MONITOR', 'CONTROL', 'FS']):
+                                        audit_logs.append(log_entry)
+                                    
+                                    stats['audit_count'] += 1
+                                    stats['last_audit'] = timestamp
+                    except Exception as e:
+                        print(f"Error reading audit log: {e}")
+                
+                # Parse alerts for security events
+                if os.path.exists(alerts_path):
+                    try:
+                        with open(alerts_path, 'r', encoding='utf-8') as f:
+                            lines = f.readlines()[-50:]
+                            for line in lines:
+                                line = line.strip()
+                                if not line: continue
+                                
+                                parts = line.split(' ', 3)
+                                if len(parts) >= 4:
+                                    timestamp = f"{parts[0]} {parts[1]}"
+                                    level = parts[2].strip('[]').lower()
+                                    message = parts[3]
+                                    
+                                    log_entry = {
+                                        'timestamp': timestamp,
+                                        'message': message,
+                                        'level': level
+                                    }
+                                    
+                                    if level in ['crit', 'error']:
+                                        stats['threat_count'] += 1
+                                    
+                                    # Add to security logs if it's a security-related alert
+                                    if any(kw in message.lower() for kw in ['network', 'integrity', 'suspicious', 'attack', 'breach']):
+                                        security_logs.append(log_entry)
+                                        stats['security_count'] += 1
+                    except Exception as e:
+                        print(f"Error reading alerts log: {e}")
+                
+                # Check integrity monitoring
+                integrity_state_path = os.path.join(NS_CTRL, 'integrity.state')
+                if os.path.exists(integrity_state_path):
+                    try:
+                        integrity_data = read_json(integrity_state_path, {})
+                        stats['integrity_files'] = integrity_data.get('files', 0)
+                        stats['integrity_changes'] = integrity_data.get('changes_detected', 0)
+                        
+                        # Add recent integrity events to logs
+                        recent_changes = integrity_data.get('recent_changes', [])
+                        for change in recent_changes[-20:]:  # Last 20 changes
+                            integrity_logs.append({
+                                'timestamp': change.get('timestamp', 'Unknown'),
+                                'message': f"File change detected: {change.get('file', 'unknown')} ({change.get('type', 'modified')})",
+                                'level': 'warning'
+                            })
+                    except Exception as e:
+                        print(f"Error reading integrity state: {e}")
+                else:
+                    # Fallback to integrity.json
+                    integrity_json = read_json(os.path.join(NS_LOGS, 'integrity.json'), {})
+                    stats['integrity_files'] = integrity_json.get('files', 0)
+                    stats['integrity_changes'] = integrity_json.get('changes', 0)
+                
+                response = {
+                    'ok': True,
+                    'stats': stats,
+                    'logs': {
+                        'auth': auth_logs[-20:],  # Last 20 auth events
+                        'audit': audit_logs[-20:],  # Last 20 audit events  
+                        'security': security_logs[-20:],  # Last 20 security events
+                        'integrity': integrity_logs[-20:]  # Last 20 integrity events
+                    }
+                }
+                
+                self._set_headers(200); 
+                self.wfile.write(json.dumps(response).encode('utf-8'))
+                return
+                
+            except Exception as e:
+                print(f"Security API error: {e}")
+                self._set_headers(500); 
+                self.wfile.write(json.dumps({'error': str(e)}).encode('utf-8'))
+                return
 
             if parsed.path == '/api/config/save':
                 if not require_auth(self): return
                 sess = get_session(self) or {}
-                
-                # Check CSRF if required
+            
+            # Check CSRF if required
                 if csrf_required():
-                    client_csrf = self.headers.get('X-CSRF','')
-                    if client_csrf != sess.get('csrf',''):
-                        self._set_headers(403)
-                        self.wfile.write(json.dumps({'error': 'CSRF token mismatch'}).encode('utf-8'))
-                        return
+                client_csrf = self.headers.get('X-CSRF','')
+                if client_csrf != sess.get('csrf',''):
+                    self._set_headers(403)
+                    self.wfile.write(json.dumps({'error': 'CSRF token mismatch'}).encode('utf-8'))
+                    return
             
                 try:
-                    # Read POST data
-                    content_length = int(self.headers.get('Content-Length', 0))
-                    if content_length == 0:
-                        self._set_headers(400)
-                        self.wfile.write(json.dumps({'error': 'No configuration data provided'}).encode('utf-8'))
-                        return
-                    
-                    post_data = self.rfile.read(content_length).decode('utf-8')
-                    data = json.loads(post_data)
-                    new_config = data.get('config', '')
-                    
-                    if not new_config.strip():
-                        self._set_headers(400)
-                        self.wfile.write(json.dumps({'error': 'Configuration cannot be empty'}).encode('utf-8'))
-                        return
-                    
-                    # Basic YAML validation (check for obvious syntax errors)
-                    config_lines = new_config.split('\n')
-                    for i, line in enumerate(config_lines, 1):
-                        stripped = line.strip()
-                        if stripped and not stripped.startswith('#'):
-                            # Basic checks for valid YAML structure
-                            if ':' not in stripped and not stripped.startswith('-'):
-                                if not stripped.replace(' ', '').replace('\t', ''):
-                                    continue  # Skip empty lines
-                                self._set_headers(400)
-                                self.wfile.write(json.dumps({'error': f'Invalid YAML syntax on line {i}: missing colon'}).encode('utf-8'))
-                                return
-                    
-                    # Create backup of current config
-                    if os.path.exists(CONFIG):
-                        backup_timestamp = time.strftime('%Y%m%d_%H%M%S')
-                        backup_path = f"{CONFIG}.bak.{backup_timestamp}"
-                        try:
-                            import shutil
-                            shutil.copy2(CONFIG, backup_path)
-                            security_log(f"CONFIG_BACKUP created={backup_path} user={sess.get('user', 'unknown')} ip={get_client_ip(self)}")
-                        except Exception as e:
-                            # Log but don't fail the save operation
-                            security_log(f"CONFIG_BACKUP_FAILED error={str(e)} user={sess.get('user', 'unknown')}")
-                    
-                    # Write new configuration
-                    with open(CONFIG, 'w', encoding='utf-8') as f:
-                        f.write(new_config)
-                    
-                    # Log the configuration change
-                    audit(f"CONFIG_SAVED user={sess.get('user', 'unknown')} ip={get_client_ip(self)} size={len(new_config)}")
-                    security_log(f"CONFIG_MODIFIED user={sess.get('user', 'unknown')} ip={get_client_ip(self)}")
-                    
-                    self._set_headers(200)
-                    self.wfile.write(json.dumps({
-                        'success': True, 
-                        'message': 'Configuration saved successfully',
-                        'backup_created': backup_path if 'backup_path' in locals() else None
-                    }).encode('utf-8'))
-                    return
-                    
-                except json.JSONDecodeError:
+                # Read POST data
+                content_length = int(self.headers.get('Content-Length', 0))
+                if content_length == 0:
                     self._set_headers(400)
-                    self.wfile.write(json.dumps({'error': 'Invalid JSON in request'}).encode('utf-8'))
+                    self.wfile.write(json.dumps({'error': 'No configuration data provided'}).encode('utf-8'))
                     return
-                except Exception as e:
-                    security_log(f"CONFIG_SAVE_ERROR user={sess.get('user', 'unknown')} ip={get_client_ip(self)} error={str(e)}")
-                    self._set_headers(500)
-                    self.wfile.write(json.dumps({'error': f'Failed to save configuration: {str(e)}'}).encode('utf-8'))
+                
+                post_data = self.rfile.read(content_length).decode('utf-8')
+                data = json.loads(post_data)
+                new_config = data.get('config', '')
+                
+                if not new_config.strip():
+                    self._set_headers(400)
+                    self.wfile.write(json.dumps({'error': 'Configuration cannot be empty'}).encode('utf-8'))
                     return
+                
+                # Basic YAML validation (check for obvious syntax errors)
+                config_lines = new_config.split('\n')
+                for i, line in enumerate(config_lines, 1):
+                    stripped = line.strip()
+                    if stripped and not stripped.startswith('#'):
+                        # Basic checks for valid YAML structure
+                        if ':' not in stripped and not stripped.startswith('-'):
+                            if not stripped.replace(' ', '').replace('\t', ''):
+                                continue  # Skip empty lines
+                            self._set_headers(400)
+                            self.wfile.write(json.dumps({'error': f'Invalid YAML syntax on line {i}: missing colon'}).encode('utf-8'))
+                            return
+                
+                # Create backup of current config
+                if os.path.exists(CONFIG):
+                    backup_timestamp = time.strftime('%Y%m%d_%H%M%S')
+                    backup_path = f"{CONFIG}.bak.{backup_timestamp}"
+                    try:
+                        import shutil
+                        shutil.copy2(CONFIG, backup_path)
+                        security_log(f"CONFIG_BACKUP created={backup_path} user={sess.get('user', 'unknown')} ip={get_client_ip(self)}")
+                    except Exception as e:
+                        # Log but don't fail the save operation
+                        security_log(f"CONFIG_BACKUP_FAILED error={str(e)} user={sess.get('user', 'unknown')}")
+                
+                # Write new configuration
+                with open(CONFIG, 'w', encoding='utf-8') as f:
+                    f.write(new_config)
+                
+                # Log the configuration change
+                audit(f"CONFIG_SAVED user={sess.get('user', 'unknown')} ip={get_client_ip(self)} size={len(new_config)}")
+                security_log(f"CONFIG_MODIFIED user={sess.get('user', 'unknown')} ip={get_client_ip(self)}")
+                
+                self._set_headers(200)
+                self.wfile.write(json.dumps({
+                    'success': True, 
+                    'message': 'Configuration saved successfully',
+                    'backup_created': backup_path if 'backup_path' in locals() else None
+                }).encode('utf-8'))
+                return
+                
+                    except json.JSONDecodeError:
+                self._set_headers(400)
+                self.wfile.write(json.dumps({'error': 'Invalid JSON in request'}).encode('utf-8'))
+                return
+                    except Exception as e:
+                security_log(f"CONFIG_SAVE_ERROR user={sess.get('user', 'unknown')} ip={get_client_ip(self)} error={str(e)}")
+                self._set_headers(500)
+                self.wfile.write(json.dumps({'error': f'Failed to save configuration: {str(e)}'}).encode('utf-8'))
+                return
 
             if parsed.path == '/api/security/action':
                 if not require_auth(self): return
                 sess = get_session(self) or {}
-                
-                # Check CSRF if required
+            
+            # Check CSRF if required
                 if csrf_required():
-                    client_csrf = self.headers.get('X-CSRF','')
-                    if client_csrf != sess.get('csrf',''):
-                        self._set_headers(403)
-                        self.wfile.write(json.dumps({'error': 'CSRF token mismatch'}).encode('utf-8'))
-                        return
-                
+                client_csrf = self.headers.get('X-CSRF','')
+                if client_csrf != sess.get('csrf',''):
+                    self._set_headers(403)
+                    self.wfile.write(json.dumps({'error': 'CSRF token mismatch'}).encode('utf-8'))
+                    return
+            
                 try:
-                    # Read POST data
-                    content_length = int(self.headers.get('Content-Length', 0))
-                    if content_length == 0:
+                # Read POST data
+                content_length = int(self.headers.get('Content-Length', 0))
+                if content_length == 0:
+                    self._set_headers(400)
+                    self.wfile.write(json.dumps({'error': 'No action data provided'}).encode('utf-8'))
+                    return
+                
+                post_data = self.rfile.read(content_length).decode('utf-8')
+                data = json.loads(post_data)
+                action = data.get('action', '')
+                ip_address = data.get('ip', '')
+                
+                if not action:
+                    self._set_headers(400)
+                    self.wfile.write(json.dumps({'error': 'No action specified'}).encode('utf-8'))
+                    return
+                
+                # Load bans database
+                bans = read_json(BANS_DB, {})
+                
+                # Perform the requested action
+                result = {}
+                if action == 'ban_ip':
+                    if not ip_address:
                         self._set_headers(400)
-                        self.wfile.write(json.dumps({'error': 'No action data provided'}).encode('utf-8'))
+                        self.wfile.write(json.dumps({'error': 'IP address required for ban action'}).encode('utf-8'))
                         return
                     
-                    post_data = self.rfile.read(content_length).decode('utf-8')
-                    data = json.loads(post_data)
-                    action = data.get('action', '')
-                    ip_address = data.get('ip', '')
+                    # Add IP to bans
+                    bans[ip_address] = {
+                        'banned_at': time.strftime('%Y-%m-%d %H:%M:%S'),
+                        'banned_by': sess.get('user', 'unknown'),
+                        'reason': data.get('reason', 'Manual ban via security actions')
+                    }
+                    write_json(BANS_DB, bans)
                     
-                    if not action:
+                    audit(f"SECURITY_ACTION action=ban_ip ip={ip_address} user={sess.get('user', 'unknown')}")
+                    security_log(f"IP_BANNED ip={ip_address} user={sess.get('user', 'unknown')} reason={data.get('reason', 'Manual')}")
+                    
+                    result = {'success': True, 'message': f'IP {ip_address} banned successfully'}
+                    
+                elif action == 'unban_ip':
+                    if not ip_address:
                         self._set_headers(400)
-                        self.wfile.write(json.dumps({'error': 'No action specified'}).encode('utf-8'))
+                        self.wfile.write(json.dumps({'error': 'IP address required for unban action'}).encode('utf-8'))
                         return
                     
-                    # Load bans database
-                    bans = read_json(BANS_DB, {})
-                    
-                    # Perform the requested action
-                    result = {}
-                    if action == 'ban_ip':
-                        if not ip_address:
-                            self._set_headers(400)
-                            self.wfile.write(json.dumps({'error': 'IP address required for ban action'}).encode('utf-8'))
-                            return
-                        
-                        # Add IP to bans
-                        bans[ip_address] = {
-                            'banned_at': time.strftime('%Y-%m-%d %H:%M:%S'),
-                            'banned_by': sess.get('user', 'unknown'),
-                            'reason': data.get('reason', 'Manual ban via security actions')
-                        }
+                    # Remove IP from bans
+                    if ip_address in bans:
+                        del bans[ip_address]
                         write_json(BANS_DB, bans)
                         
-                        audit(f"SECURITY_ACTION action=ban_ip ip={ip_address} user={sess.get('user', 'unknown')}")
-                        security_log(f"IP_BANNED ip={ip_address} user={sess.get('user', 'unknown')} reason={data.get('reason', 'Manual')}")
+                        audit(f"SECURITY_ACTION action=unban_ip ip={ip_address} user={sess.get('user', 'unknown')}")
+                        security_log(f"IP_UNBANNED ip={ip_address} user={sess.get('user', 'unknown')}")
                         
-                        result = {'success': True, 'message': f'IP {ip_address} banned successfully'}
-                        
-                    elif action == 'unban_ip':
-                        if not ip_address:
-                            self._set_headers(400)
-                            self.wfile.write(json.dumps({'error': 'IP address required for unban action'}).encode('utf-8'))
-                            return
-                        
-                        # Remove IP from bans
-                        if ip_address in bans:
-                            del bans[ip_address]
-                            write_json(BANS_DB, bans)
-                            
-                            audit(f"SECURITY_ACTION action=unban_ip ip={ip_address} user={sess.get('user', 'unknown')}")
-                            security_log(f"IP_UNBANNED ip={ip_address} user={sess.get('user', 'unknown')}")
-                            
-                            result = {'success': True, 'message': f'IP {ip_address} unbanned successfully'}
-                        else:
-                            result = {'success': False, 'message': f'IP {ip_address} was not banned'}
-                            
-                    elif action == 'list_banned_ips':
-                        # Return list of banned IPs
-                        banned_list = []
-                        for ip, info in bans.items():
-                            banned_list.append({
-                                'ip': ip,
-                                'banned_at': info.get('banned_at', 'Unknown'),
-                                'banned_by': info.get('banned_by', 'Unknown'),
-                                'reason': info.get('reason', 'No reason provided')
-                            })
-                        
-                        result = {
-                            'success': True,
-                            'banned_ips': banned_list,
-                            'total_banned': len(banned_list)
-                        }
-                        
+                        result = {'success': True, 'message': f'IP {ip_address} unbanned successfully'}
                     else:
-                        self._set_headers(400)
-                        self.wfile.write(json.dumps({'error': f'Unknown action: {action}'}).encode('utf-8'))
-                        return
+                        result = {'success': False, 'message': f'IP {ip_address} was not banned'}
+                        
+                elif action == 'list_banned_ips':
+                    # Return list of banned IPs
+                    banned_list = []
+                    for ip, info in bans.items():
+                        banned_list.append({
+                            'ip': ip,
+                            'banned_at': info.get('banned_at', 'Unknown'),
+                            'banned_by': info.get('banned_by', 'Unknown'),
+                            'reason': info.get('reason', 'No reason provided')
+                        })
                     
-                    # Add updated stats
-                    result['stats'] = {
-                        'total_banned_ips': len(bans),
-                        'timestamp': time.strftime('%Y-%m-%d %H:%M:%S')
+                    result = {
+                        'success': True,
+                        'banned_ips': banned_list,
+                        'total_banned': len(banned_list)
                     }
                     
-                    self._set_headers(200)
-                    self.wfile.write(json.dumps(result).encode('utf-8'))
-                    return
-                    
-                except json.JSONDecodeError:
+                else:
                     self._set_headers(400)
-                    self.wfile.write(json.dumps({'error': 'Invalid JSON in request'}).encode('utf-8'))
+                    self.wfile.write(json.dumps({'error': f'Unknown action: {action}'}).encode('utf-8'))
                     return
-                except Exception as e:
-                    security_log(f"SECURITY_ACTION_ERROR action={action} user={sess.get('user', 'unknown')} ip={get_client_ip(self)} error={str(e)}")
-                    self._set_headers(500)
-                    self.wfile.write(json.dumps({'error': f'Security action failed: {str(e)}'}).encode('utf-8'))
-                    return
+                
+                # Add updated stats
+                result['stats'] = {
+                    'total_banned_ips': len(bans),
+                    'timestamp': time.strftime('%Y-%m-%d %H:%M:%S')
+                }
+                
+                self._set_headers(200)
+                self.wfile.write(json.dumps(result).encode('utf-8'))
+                return
+                
+                except json.JSONDecodeError:
+                self._set_headers(400)
+                self.wfile.write(json.dumps({'error': 'Invalid JSON in request'}).encode('utf-8'))
+                return
+            except Exception as e:
+                security_log(f"SECURITY_ACTION_ERROR action={action} user={sess.get('user', 'unknown')} ip={get_client_ip(self)} error={str(e)}")
+                self._set_headers(500)
+                self.wfile.write(json.dumps({'error': f'Security action failed: {str(e)}'}).encode('utf-8'))
+                return
 
-            # Fallback response for unmatched paths
-            self._set_headers(400); self.wfile.write(b'{"ok":false}')
+        self._set_headers(400); self.wfile.write(b'{"ok":false}')
         
         except Exception as e:
             # Comprehensive exception handler for do_POST - prevents server crashes
@@ -12902,7 +12617,6 @@ Security & Backup:
   --version-snapshot     Create version snapshot (no encryption)
   --encrypt <path>       Encrypt file or directory
   --decrypt <file.enc>   Decrypt file (prompts for output path)
-  --maintenance          Run storage cleanup and system health check
 
 User Management:
   --add-user             Add a new web dashboard user
@@ -13005,7 +12719,6 @@ case "${1:-}" in
   --status) status;;
   --backup) backup_snapshot;;
   --version-snapshot) version_snapshot;;
-  --maintenance) maintenance;;
   --disable-external-checks) 
     ns_log "Disabling external network checks in configuration"
     # Create or update config to disable external network checks
