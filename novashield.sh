@@ -4561,7 +4561,7 @@ class Handler(SimpleHTTPRequestHandler):
                 html = read_text(INDEX, '<h1>NovaShield</h1>')
                 self.wfile.write(html.encode('utf-8')); return
 
-            if parsed.path == '/logout':
+            if parsed.path == '/':
                 # Log logout event
                 client_ip = self.client_address[0]
                 sess = get_session(self)
@@ -4581,6 +4581,30 @@ class Handler(SimpleHTTPRequestHandler):
                     if p.endswith('.html'): ctype='text/html; charset=utf-8'
                     self._set_headers(200, ctype); self.wfile.write(read_text(p).encode('utf-8')); return
                 self._set_headers(404); self.wfile.write(b'{}'); return
+
+                # Keep-alive endpoint to prevent session expiration
+                if not auth_enabled():
+                    # If auth is disabled, always return success
+                    self._set_headers(200)
+                    self.wfile.write(json.dumps({'status': 'ok', 'auth': 'disabled'}).encode('utf-8'))
+                    return
+                
+                sess = get_session(self)
+                if not sess:
+                    self._set_headers(401)
+                    self.wfile.write(json.dumps({'error': 'unauthorized'}).encode('utf-8'))
+                    return
+                    
+                # Session is valid, return success with basic info
+                data = {
+                    'status': 'ok',
+                    'user': sess.get('user', 'unknown'),
+                    'timestamp': time.strftime('%Y-%m-%d %H:%M:%S'),
+                    'session_valid': True
+                }
+                self._set_headers(200)
+                self.wfile.write(json.dumps(data).encode('utf-8'))
+                return
 
             if parsed.path == '/api/ping':
                 # Keep-alive endpoint to prevent session expiration
@@ -4608,8 +4632,8 @@ class Handler(SimpleHTTPRequestHandler):
                 return
 
             if parsed.path == '/api/status':
-            if not require_auth(self): return
-            sess = get_session(self) or {}
+                if not require_auth(self): return
+                sess = get_session(self) or {}
             
             # Helper function to check monitor enabled state using NS_CTRL flags
             def monitor_enabled(name):
@@ -4654,39 +4678,39 @@ class Handler(SimpleHTTPRequestHandler):
             self._set_headers(200); self.wfile.write(json.dumps(data).encode('utf-8')); return
 
             if parsed.path == '/api/whoami':
-            info = {
-                'ns_home': NS_HOME,
-                'ns_www': NS_WWW,
-                'ns_www_is_symlink': os.path.islink(NS_WWW),
-                'index_exists': os.path.isfile(INDEX),
-                'index_sha256': hashlib.sha256(read_text(INDEX,'').encode('utf-8')).hexdigest() if os.path.isfile(INDEX) else None,
-                'server_sha256': hashlib.sha256(read_text(os.path.join(NS_WWW,'server.py'), '').encode('utf-8')).hexdigest() if os.path.isfile(os.path.join(NS_WWW,'server.py')) else None,
-                'time': time.strftime('%Y-%m-%d %H:%M:%S')
-            }
-            self._set_headers(200); self.wfile.write(json.dumps(info).encode('utf-8')); return
-
-            if parsed.path == '/api/config':
-            if not require_auth(self): return
-            sess = get_session(self) or {}
-            try:
-                # Read and parse the config file
-                config_text = read_text(CONFIG, '')
-                # Return config in expected JSON format
-                config_data = {
-                    'config': config_text,
-                    'csrf': sess.get('csrf','') if auth_enabled() else 'public'
+                info = {
+                    'ns_home': NS_HOME,
+                    'ns_www': NS_WWW,
+                    'ns_www_is_symlink': os.path.islink(NS_WWW),
+                    'index_exists': os.path.isfile(INDEX),
+                    'index_sha256': hashlib.sha256(read_text(INDEX,'').encode('utf-8')).hexdigest() if os.path.isfile(INDEX) else None,
+                    'server_sha256': hashlib.sha256(read_text(os.path.join(NS_WWW,'server.py'), '').encode('utf-8')).hexdigest() if os.path.isfile(os.path.join(NS_WWW,'server.py')) else None,
+                    'time': time.strftime('%Y-%m-%d %H:%M:%S')
                 }
-                self._set_headers(200); self.wfile.write(json.dumps(config_data).encode('utf-8')); return
-            except Exception as e:
-                self._set_headers(500); self.wfile.write(json.dumps({'error': str(e)}).encode('utf-8')); return
+                self._set_headers(200); self.wfile.write(json.dumps(info).encode('utf-8')); return
+
+                        if parsed.path == '/api/config':
+                if not require_auth(self): return
+                sess = get_session(self) or {}
+                try:
+                    # Read and parse the config file
+                    config_text = read_text(CONFIG, '')
+                    # Return config in expected JSON format
+                    config_data = {
+                        'config': config_text,
+                        'csrf': sess.get('csrf','') if auth_enabled() else 'public'
+                    }
+                    self._set_headers(200); self.wfile.write(json.dumps(config_data).encode('utf-8')); return
+                except Exception as e:
+                    self._set_headers(500); self.wfile.write(json.dumps({'error': str(e)}).encode('utf-8')); return
 
         # Jarvis AI memory management - GET handler
             if parsed.path == '/api/jarvis/memory':
-            if not require_auth(self): return
-            sess = get_session(self)
-            username = sess.get('user', 'public') if sess else 'public'
+                if not require_auth(self): return
+                sess = get_session(self)
+                username = sess.get('user', 'public') if sess else 'public'
             
-            try:
+                try:
                 # Load user's encrypted memory
                 user_memory = load_user_memory(username)
                 self._set_headers(200)
@@ -4708,8 +4732,8 @@ class Handler(SimpleHTTPRequestHandler):
 
         # Users and sessions management - GET handler
             if parsed.path == '/api/users':
-            if not require_auth(self): return
-            try:
+                if not require_auth(self): return
+                try:
                 db = users_db()
                 current_time = int(time.time())
                 users_list = []
@@ -4758,24 +4782,24 @@ class Handler(SimpleHTTPRequestHandler):
                 return
 
             if parsed.path == '/api/logs':
-            if not require_auth(self): return
-            q = parse_qs(parsed.query); name = (q.get('name', ['launcher.log'])[0]).replace('..','')
-            p = os.path.join(NS_HOME, name)
-            if not os.path.exists(p): p = os.path.join(NS_LOGS, name)
-            lines = []
-            try:
+                if not require_auth(self): return
+                q = parse_qs(parsed.query); name = (q.get('name', ['launcher.log'])[0]).replace('..','')
+                p = os.path.join(NS_HOME, name)
+                if not os.path.exists(p): p = os.path.join(NS_LOGS, name)
+                lines = []
+                try:
                 with open(p,'r',encoding='utf-8') as f: lines=f.read().splitlines()[-200:]
             except Exception: pass
             self._set_headers(200); self.wfile.write(json.dumps({'name': name, 'lines': lines}).encode('utf-8')); return
 
             if parsed.path == '/api/fs':
-            if not require_auth(self): return
-            q = parse_qs(parsed.query); d = q.get('dir',[''])[0]
-            if not d: d = NS_HOME
-            d = os.path.abspath(d)
-            if not d.startswith(NS_HOME): self._set_headers(403); self.wfile.write(b'{"error":"forbidden"}'); return
-            out=[]
-            try:
+                if not require_auth(self): return
+                q = parse_qs(parsed.query); d = q.get('dir',[''])[0]
+                if not d: d = NS_HOME
+                d = os.path.abspath(d)
+                if not d.startswith(NS_HOME): self._set_headers(403); self.wfile.write(b'{"error":"forbidden"}'); return
+                out=[]
+                try:
                 for entry in os.scandir(d):
                     if entry.name.startswith('.'): continue
                     if os.path.abspath(d).startswith(NS_KEYS) and entry.is_file(): continue
@@ -4784,13 +4808,13 @@ class Handler(SimpleHTTPRequestHandler):
             self._set_headers(200); self.wfile.write(json.dumps({'dir':d,'entries':out}).encode('utf-8')); return
 
             if parsed.path == '/api/fs_read':
-            if not require_auth(self): return
-            q = parse_qs(parsed.query); p = (q.get('path',[''])[0])
-            full = os.path.abspath(p)
-            if not full.startswith(NS_HOME): self._set_headers(403); self.wfile.write(b'{"error":"forbidden"}'); return
-            if not os.path.exists(full) or not os.path.isfile(full):
+                if not require_auth(self): return
+                q = parse_qs(parsed.query); p = (q.get('path',[''])[0])
+                full = os.path.abspath(p)
+                if not full.startswith(NS_HOME): self._set_headers(403); self.wfile.write(b'{"error":"forbidden"}'); return
+                if not os.path.exists(full) or not os.path.isfile(full):
                 self._set_headers(404); self.wfile.write(b'{"error":"not found"}'); return
-            try:
+                try:
                 size = os.path.getsize(full)
                 content = open(full,'rb').read(500_000).decode('utf-8','ignore')
                 self._set_headers(200); self.wfile.write(json.dumps({'ok':True,'path':full,'size':size,'content':content}).encode('utf-8')); return
@@ -4798,18 +4822,18 @@ class Handler(SimpleHTTPRequestHandler):
                 self._set_headers(500); self.wfile.write(json.dumps({'ok':False,'error':str(e)}).encode('utf-8')); return
 
             if parsed.path == '/site':
-            index = os.path.join(SITE_DIR,'index.html')
-            self._set_headers(200,'text/html; charset=utf-8'); self.wfile.write(read_text(index,'<h1>No site yet</h1>').encode('utf-8')); return
+                index = os.path.join(SITE_DIR,'index.html')
+                self._set_headers(200,'text/html; charset=utf-8'); self.wfile.write(read_text(index,'<h1>No site yet</h1>').encode('utf-8')); return
 
-        if parsed.path.startswith('/site/'):
-            p = parsed.path[len('/site/'):]
-            full = os.path.join(SITE_DIR, p)
-            if not os.path.abspath(full).startswith(SITE_DIR): self._set_headers(403); self.wfile.write(b'{}'); return
-            if os.path.exists(full):
+                if parsed.path.startswith('/site/'):
+                p = parsed.path[len('/site/'):]
+                full = os.path.join(SITE_DIR, p)
+                if not os.path.abspath(full).startswith(SITE_DIR): self._set_headers(403); self.wfile.write(b'{}'); return
+                if os.path.exists(full):
                 self._set_headers(200, 'text/html; charset=utf-8'); self.wfile.write(read_text(full).encode('utf-8')); return
-            self._set_headers(404); self.wfile.write(b'{}'); return
+                self._set_headers(404); self.wfile.write(b'{}'); return
 
-        self._set_headers(404); self.wfile.write(b'{"error":"not found"}')
+                self._set_headers(404); self.wfile.write(b'{"error":"not found"}')
         
         except Exception as e:
             # Comprehensive exception handler for do_GET - prevents server crashes
@@ -4864,12 +4888,12 @@ class Handler(SimpleHTTPRequestHandler):
         length = int(self.headers.get('Content-Length', 0))
         body = self.rfile.read(length).decode('utf-8') if length else ''
 
-            if parsed.path == '/api/login':
-            # Enhanced login attempt logging with detailed connection info
-            ip = self.client_address[0]
-            user_agent = self.headers.get('User-Agent', 'Unknown')
+                # Enhanced login attempt logging with detailed connection info
+                ip = self.client_address[0]
+                user_agent = self.headers.get('User-Agent', 'Unknown')
             
-            try: data = json.loads(body or '{}'); user=data.get('user',''); pwd=data.get('pass',''); otp=data.get('otp','')
+                try: data = json.loads(body or '{}'); user=data.get('user',''); pwd=data.get('pass',''); otp=data.get('otp','')
+            if parsed.path == '/api/login':
             except Exception: data={}; user=''; pwd=''; otp=''
             
             # Log all login attempts regardless of success/failure
@@ -4916,8 +4940,8 @@ class Handler(SimpleHTTPRequestHandler):
 
         if not require_auth(self): return
 
+                try: data = json.loads(body or '{}')
             if parsed.path == '/api/control':
-            try: data = json.loads(body or '{}')
             except Exception: data={}
             action = data.get('action',''); target = data.get('target','')
             flag = os.path.join(NS_CTRL, f'{target}.disabled')
@@ -4962,8 +4986,8 @@ class Handler(SimpleHTTPRequestHandler):
             self._set_headers(400); self.wfile.write(b'{"ok":false}'); return
 
             if parsed.path == '/api/chat':
-            if not require_auth(self): return
-            try: 
+                if not require_auth(self): return
+                try: 
                 data = json.loads(body or '{}')
             except Exception: 
                 py_alert('WARN', f'Chat API invalid JSON from {self.client_address[0]}')
@@ -5049,12 +5073,12 @@ class Handler(SimpleHTTPRequestHandler):
         
         # Enhanced Jarvis AI memory management
             if parsed.path == '/api/jarvis/memory':
-            if not require_auth(self): return
-            sess = get_session(self)
-            username = sess.get('user', 'public') if sess else 'public'
+                if not require_auth(self): return
+                sess = get_session(self)
+                username = sess.get('user', 'public') if sess else 'public'
             
             # Save user's encrypted memory
-            try:
+                try:
                 data = json.loads(body or '{}')
                 
                 # Load existing memory or start with default
@@ -5081,8 +5105,8 @@ class Handler(SimpleHTTPRequestHandler):
         
         # Tools management API
             if parsed.path == '/api/tools/scan':
-            if not require_auth(self): return
-            try:
+                if not require_auth(self): return
+                try:
                 tools_info = scan_system_tools()
                 self._set_headers(200)
                 self.wfile.write(json.dumps({
@@ -5095,8 +5119,8 @@ class Handler(SimpleHTTPRequestHandler):
             return
         
             if parsed.path == '/api/tools/install':
-            if not require_auth(self): return
-            try:
+                if not require_auth(self): return
+                try:
                 output = install_missing_tools()
                 self._set_headers(200)
                 self.wfile.write(json.dumps({
@@ -5109,8 +5133,8 @@ class Handler(SimpleHTTPRequestHandler):
             return
         
             if parsed.path == '/api/tools/execute':
-            if not require_auth(self): return
-            try:
+                if not require_auth(self): return
+                try:
                 data = json.loads(body or '{}')
                 tool_name = data.get('tool', '')
                 custom_command = data.get('command', '')
@@ -5193,8 +5217,8 @@ class Handler(SimpleHTTPRequestHandler):
                 self.wfile.write(json.dumps({'ok': False, 'error': str(e)}).encode('utf-8'))
             return
         
+                try: data = json.loads(body or '{}')
             if parsed.path == '/api/webgen':
-            try: data = json.loads(body or '{}')
             except Exception: data={}
             title = data.get('title','Untitled'); content = data.get('content','')
             slug = ''.join([c.lower() if c.isalnum() else '-' for c in title]).strip('-') or f'page-{int(time.time())}'
@@ -5208,8 +5232,8 @@ class Handler(SimpleHTTPRequestHandler):
             self._set_headers(200); self.wfile.write(json.dumps({'ok':True,'page':f'/site/{slug}.html'}).encode('utf-8')); return
 
         # File manager actions
+                try: data=json.loads(body or '{}')
             if parsed.path == '/api/fs_write':
-            try: data=json.loads(body or '{}')
             except Exception: data={}
             path=data.get('path',''); content=data.get('content','')
             full=os.path.abspath(path)
@@ -5219,8 +5243,8 @@ class Handler(SimpleHTTPRequestHandler):
             except Exception as e: self._set_headers(500); self.wfile.write(json.dumps({'ok':False,'error':str(e)}).encode('utf-8'))
             return
 
+                try: data=json.loads(body or '{}')
             if parsed.path == '/api/fs_mkdir':
-            try: data=json.loads(body or '{}')
             except Exception: data={}
             path=data.get('path','')
             full=os.path.abspath(path)
@@ -5230,8 +5254,8 @@ class Handler(SimpleHTTPRequestHandler):
             except Exception as e: self._set_headers(500); self.wfile.write(json.dumps({'ok':False,'error':str(e)}).encode('utf-8'))
             return
 
+                try: data=json.loads(body or '{}')
             if parsed.path == '/api/fs_mv':
-            try: data=json.loads(body or '{}')
             except Exception: data={}
             src=data.get('src',''); dst=data.get('dst','')
             srcf=os.path.abspath(src); dstf=os.path.abspath(dst)
@@ -5241,8 +5265,8 @@ class Handler(SimpleHTTPRequestHandler):
             except Exception as e: self._set_headers(500); self.wfile.write(json.dumps({'ok':False,'error':str(e)}).encode('utf-8'))
             return
 
+                try: data=json.loads(body or '{}')
             if parsed.path == '/api/fs_rm':
-            try: data=json.loads(body or '{}')
             except Exception: data={}
             path=data.get('path',''); full=os.path.abspath(path)
             if (not full.startswith(NS_HOME)) or full.startswith(NS_KEYS):
@@ -5257,9 +5281,9 @@ class Handler(SimpleHTTPRequestHandler):
             return
 
             if parsed.path == '/api/security':
-            if not require_auth(self): return
+                if not require_auth(self): return
             # Comprehensive security dashboard data - moved from duplicate do_POST
-            try:
+                try:
                 # Read and parse log files
                 auth_logs = []
                 audit_logs = []
@@ -5490,18 +5514,18 @@ class Handler(SimpleHTTPRequestHandler):
                 return
 
             if parsed.path == '/api/config/save':
-            if not require_auth(self): return
-            sess = get_session(self) or {}
+                if not require_auth(self): return
+                sess = get_session(self) or {}
             
             # Check CSRF if required
-            if csrf_required():
+                if csrf_required():
                 client_csrf = self.headers.get('X-CSRF','')
                 if client_csrf != sess.get('csrf',''):
                     self._set_headers(403)
                     self.wfile.write(json.dumps({'error': 'CSRF token mismatch'}).encode('utf-8'))
                     return
             
-            try:
+                try:
                 # Read POST data
                 content_length = int(self.headers.get('Content-Length', 0))
                 if content_length == 0:
@@ -5570,18 +5594,18 @@ class Handler(SimpleHTTPRequestHandler):
                 return
 
             if parsed.path == '/api/security/action':
-            if not require_auth(self): return
-            sess = get_session(self) or {}
+                if not require_auth(self): return
+                sess = get_session(self) or {}
             
             # Check CSRF if required
-            if csrf_required():
+                if csrf_required():
                 client_csrf = self.headers.get('X-CSRF','')
                 if client_csrf != sess.get('csrf',''):
                     self._set_headers(403)
                     self.wfile.write(json.dumps({'error': 'CSRF token mismatch'}).encode('utf-8'))
                     return
             
-            try:
+                try:
                 # Read POST data
                 content_length = int(self.headers.get('Content-Length', 0))
                 if content_length == 0:
@@ -5673,7 +5697,7 @@ class Handler(SimpleHTTPRequestHandler):
                 self.wfile.write(json.dumps(result).encode('utf-8'))
                 return
                 
-            except json.JSONDecodeError:
+                except json.JSONDecodeError:
                 self._set_headers(400)
                 self.wfile.write(json.dumps({'error': 'Invalid JSON in request'}).encode('utf-8'))
                 return
