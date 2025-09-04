@@ -5688,95 +5688,96 @@ class Handler(SimpleHTTPRequestHandler):
                     ip_address = data.get('ip', '')
                     
                     if not action:
-                    self._set_headers(400)
-                    self.wfile.write(json.dumps({'error': 'No action specified'}).encode('utf-8'))
-                    return
-                
-                # Load bans database
-                bans = read_json(BANS_DB, {})
-                
-                # Perform the requested action
-                result = {}
-                if action == 'ban_ip':
-                    if not ip_address:
                         self._set_headers(400)
-                        self.wfile.write(json.dumps({'error': 'IP address required for ban action'}).encode('utf-8'))
+                        self.wfile.write(json.dumps({'error': 'No action specified'}).encode('utf-8'))
                         return
                     
-                    # Add IP to bans
-                    bans[ip_address] = {
-                        'banned_at': time.strftime('%Y-%m-%d %H:%M:%S'),
-                        'banned_by': sess.get('user', 'unknown'),
-                        'reason': data.get('reason', 'Manual ban via security actions')
-                    }
-                    write_json(BANS_DB, bans)
+                    # Load bans database
+                    bans = read_json(BANS_DB, {})
                     
-                    audit(f"SECURITY_ACTION action=ban_ip ip={ip_address} user={sess.get('user', 'unknown')}")
-                    security_log(f"IP_BANNED ip={ip_address} user={sess.get('user', 'unknown')} reason={data.get('reason', 'Manual')}")
-                    
-                    result = {'success': True, 'message': f'IP {ip_address} banned successfully'}
-                    
-                elif action == 'unban_ip':
-                    if not ip_address:
-                        self._set_headers(400)
-                        self.wfile.write(json.dumps({'error': 'IP address required for unban action'}).encode('utf-8'))
-                        return
-                    
-                    # Remove IP from bans
-                    if ip_address in bans:
-                        del bans[ip_address]
+                    # Perform the requested action
+                    result = {}
+                    if action == 'ban_ip':
+                        if not ip_address:
+                            self._set_headers(400)
+                            self.wfile.write(json.dumps({'error': 'IP address required for ban action'}).encode('utf-8'))
+                            return
+                        
+                        # Add IP to bans
+                        bans[ip_address] = {
+                            'banned_at': time.strftime('%Y-%m-%d %H:%M:%S'),
+                            'banned_by': sess.get('user', 'unknown'),
+                            'reason': data.get('reason', 'Manual ban via security actions')
+                        }
                         write_json(BANS_DB, bans)
                         
-                        audit(f"SECURITY_ACTION action=unban_ip ip={ip_address} user={sess.get('user', 'unknown')}")
-                        security_log(f"IP_UNBANNED ip={ip_address} user={sess.get('user', 'unknown')}")
+                        audit(f"SECURITY_ACTION action=ban_ip ip={ip_address} user={sess.get('user', 'unknown')}")
+                        security_log(f"IP_BANNED ip={ip_address} user={sess.get('user', 'unknown')} reason={data.get('reason', 'Manual')}")
                         
-                        result = {'success': True, 'message': f'IP {ip_address} unbanned successfully'}
+                        result = {'success': True, 'message': f'IP {ip_address} banned successfully'}
+                        
+                    elif action == 'unban_ip':
+                        if not ip_address:
+                            self._set_headers(400)
+                            self.wfile.write(json.dumps({'error': 'IP address required for unban action'}).encode('utf-8'))
+                            return
+                        
+                        # Remove IP from bans
+                        if ip_address in bans:
+                            del bans[ip_address]
+                            write_json(BANS_DB, bans)
+                            
+                            audit(f"SECURITY_ACTION action=unban_ip ip={ip_address} user={sess.get('user', 'unknown')}")
+                            security_log(f"IP_UNBANNED ip={ip_address} user={sess.get('user', 'unknown')}")
+                            
+                            result = {'success': True, 'message': f'IP {ip_address} unbanned successfully'}
+                        else:
+                            result = {'success': False, 'message': f'IP {ip_address} was not banned'}
+                            
+                    elif action == 'list_banned_ips':
+                        # Return list of banned IPs
+                        banned_list = []
+                        for ip, info in bans.items():
+                            banned_list.append({
+                                'ip': ip,
+                                'banned_at': info.get('banned_at', 'Unknown'),
+                                'banned_by': info.get('banned_by', 'Unknown'),
+                                'reason': info.get('reason', 'No reason provided')
+                            })
+                        
+                        result = {
+                            'success': True,
+                            'banned_ips': banned_list,
+                            'total_banned': len(banned_list)
+                        }
+                        
                     else:
-                        result = {'success': False, 'message': f'IP {ip_address} was not banned'}
-                        
-                elif action == 'list_banned_ips':
-                    # Return list of banned IPs
-                    banned_list = []
-                    for ip, info in bans.items():
-                        banned_list.append({
-                            'ip': ip,
-                            'banned_at': info.get('banned_at', 'Unknown'),
-                            'banned_by': info.get('banned_by', 'Unknown'),
-                            'reason': info.get('reason', 'No reason provided')
-                        })
+                        self._set_headers(400)
+                        self.wfile.write(json.dumps({'error': f'Unknown action: {action}'}).encode('utf-8'))
+                        return
                     
-                    result = {
-                        'success': True,
-                        'banned_ips': banned_list,
-                        'total_banned': len(banned_list)
+                    # Add updated stats
+                    result['stats'] = {
+                        'total_banned_ips': len(bans),
+                        'timestamp': time.strftime('%Y-%m-%d %H:%M:%S')
                     }
                     
-                else:
-                    self._set_headers(400)
-                    self.wfile.write(json.dumps({'error': f'Unknown action: {action}'}).encode('utf-8'))
+                    self._set_headers(200)
+                    self.wfile.write(json.dumps(result).encode('utf-8'))
                     return
-                
-                # Add updated stats
-                result['stats'] = {
-                    'total_banned_ips': len(bans),
-                    'timestamp': time.strftime('%Y-%m-%d %H:%M:%S')
-                }
-                
-                self._set_headers(200)
-                self.wfile.write(json.dumps(result).encode('utf-8'))
-                return
-                
+                    
                 except json.JSONDecodeError:
-                self._set_headers(400)
-                self.wfile.write(json.dumps({'error': 'Invalid JSON in request'}).encode('utf-8'))
-                return
-            except Exception as e:
-                security_log(f"SECURITY_ACTION_ERROR action={action} user={sess.get('user', 'unknown')} ip={get_client_ip(self)} error={str(e)}")
-                self._set_headers(500)
-                self.wfile.write(json.dumps({'error': f'Security action failed: {str(e)}'}).encode('utf-8'))
-                return
+                    self._set_headers(400)
+                    self.wfile.write(json.dumps({'error': 'Invalid JSON in request'}).encode('utf-8'))
+                    return
+                except Exception as e:
+                    security_log(f"SECURITY_ACTION_ERROR action={action} user={sess.get('user', 'unknown')} ip={get_client_ip(self)} error={str(e)}")
+                    self._set_headers(500)
+                    self.wfile.write(json.dumps({'error': f'Security action failed: {str(e)}'}).encode('utf-8'))
+                    return
 
-        self._set_headers(400); self.wfile.write(b'{"ok":false}')
+            # Fallback response for unmatched paths
+            self._set_headers(400); self.wfile.write(b'{"ok":false}')
         
         except Exception as e:
             # Comprehensive exception handler for do_POST - prevents server crashes
