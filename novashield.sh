@@ -10007,6 +10007,7 @@ $('#li-btn').onclick = async () => {
         const r = await fetch('/api/login', {
             method: 'POST', 
             headers: {'Content-Type': 'application/json'}, 
+            credentials: 'same-origin',
             body: JSON.stringify({user, pass, otp})
         });
         
