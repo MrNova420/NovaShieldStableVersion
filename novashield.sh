@@ -51,18 +51,47 @@ fi
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[0;33m'; BLUE='\033[0;34m'; NC='\033[0m'
 
 ns_now() { date '+%Y-%m-%d %H:%M:%S'; }
-ns_log() { mkdir -p "${NS_HOME}" 2>/dev/null; echo -e "$(ns_now) [INFO ] $*" | tee -a "${NS_HOME}/launcher.log" >&2; }
-ns_warn(){ mkdir -p "${NS_HOME}" 2>/dev/null; echo -e "${YELLOW}$(ns_now) [WARN ] $*${NC}" | tee -a "${NS_HOME}/launcher.log" >&2; }
-ns_err() { mkdir -p "${NS_HOME}" 2>/dev/null; echo -e "${RED}$(ns_now) [ERROR] $*${NC}" | tee -a "${NS_HOME}/launcher.log" >&2; }
+
+# Enhanced logging with automatic rotation
+_rotate_log() {
+  local logfile="$1"
+  local max_lines="${2:-10000}"  # Default max 10K lines
+  
+  if [ -f "$logfile" ] && [ "$(wc -l < "$logfile" 2>/dev/null || echo 0)" -gt "$max_lines" ]; then
+    # Keep last 50% of lines
+    local keep_lines=$((max_lines / 2))
+    local temp_file="${logfile}.tmp.$$"
+    tail -n "$keep_lines" "$logfile" > "$temp_file" 2>/dev/null && mv "$temp_file" "$logfile"
+    echo "$(ns_now) [INFO ] Log rotated - kept last $keep_lines lines" >> "$logfile"
+  fi
+}
+
+ns_log() { 
+  mkdir -p "${NS_HOME}" 2>/dev/null
+  _rotate_log "${NS_HOME}/launcher.log" 5000
+  echo -e "$(ns_now) [INFO ] $*" | tee -a "${NS_HOME}/launcher.log" >&2
+}
+ns_warn(){ 
+  mkdir -p "${NS_HOME}" 2>/dev/null
+  _rotate_log "${NS_HOME}/launcher.log" 5000
+  echo -e "${YELLOW}$(ns_now) [WARN ] $*${NC}" | tee -a "${NS_HOME}/launcher.log" >&2
+}
+ns_err() { 
+  mkdir -p "${NS_HOME}" 2>/dev/null
+  _rotate_log "${NS_HOME}/launcher.log" 5000
+  echo -e "${RED}$(ns_now) [ERROR] $*${NC}" | tee -a "${NS_HOME}/launcher.log" >&2
+}
 ns_ok()  { echo -e "${GREEN}✓ $*${NC}"; }
 
 audit(){ 
   mkdir -p "$(dirname "$NS_AUDIT")" 2>/dev/null
+  _rotate_log "$NS_AUDIT" 5000
   echo "$(ns_now) $*" | tee -a "$NS_AUDIT" >/dev/null
   # Also log security-relevant events to security.log
   case "$*" in
     *LOGIN*|*AUTH*|*SECURITY*|*BREACH*|*ATTACK*|*SUSPICIOUS*)
       mkdir -p "$(dirname "$NS_LOGS/security.log")" 2>/dev/null
+      _rotate_log "$NS_LOGS/security.log" 3000
       echo "$(ns_now) [SECURITY] $*" | tee -a "$NS_LOGS/security.log" >/dev/null
       ;;
   esac
@@ -73,6 +102,7 @@ alert(){
   local msg="$*"
   local line="$(ns_now) [$level] $msg"
   mkdir -p "$(dirname "$NS_ALERTS")" 2>/dev/null
+  _rotate_log "$NS_ALERTS" 3000
   echo "$line" | tee -a "$NS_ALERTS" >&2
   
   # Enhanced alert categorization - only log true security events to security.log
@@ -89,9 +119,11 @@ alert(){
           # This is a real security event
           case "$level" in
             CRIT|ERROR)
+              _rotate_log "$NS_LOGS/security.log" 3000
               echo "$(ns_now) [SECURITY] $level: $msg" | tee -a "$NS_LOGS/security.log" >/dev/null 2>&1
               ;;
             WARN)
+              _rotate_log "$NS_LOGS/security.log" 3000
               echo "$(ns_now) [SECURITY] $level: $msg" | tee -a "$NS_LOGS/security.log" >/dev/null 2>&1
               ;;
           esac
@@ -412,8 +444,8 @@ terminal:
 
 monitors:
   cpu:         { enabled: true,  interval_sec: 10, warn_load: 2.00, crit_load: 4.00 }
-  memory:      { enabled: true,  interval_sec: 10, warn_pct: 85,  crit_pct: 93 }
-  disk:        { enabled: true,  interval_sec: 60, warn_pct: 85, crit_pct: 95, mount: "/" }
+  memory:      { enabled: true,  interval_sec: 10, warn_pct: 85,  crit_pct: 93, process_limit_mb: 500 }
+  disk:        { enabled: true,  interval_sec: 60, warn_pct: 85, crit_pct: 95, cleanup_pct: 90, mount: "/" }
   network:     { enabled: true,  interval_sec: 60, iface: "", ping_host: "1.1.1.1", loss_warn: 20, external_checks: true, public_ip_services: ["icanhazip.com", "ifconfig.me", "api.ipify.org"] }
   integrity:   { enabled: true,  interval_sec: 60, watch_paths: ["/system/bin","/system/xbin","/usr/bin"] }
   process:     { enabled: true,  interval_sec: 30, suspicious: ["nc","nmap","hydra","netcat","telnet"] }
@@ -982,12 +1014,15 @@ _monitor_cpu(){
   done
 }
 
+# Enhanced memory monitoring with process memory tracking for long-term stability
 _monitor_mem(){
   set +e; set +o pipefail
-  local interval warn crit
+  local interval warn crit process_mem_limit
   interval=$(ensure_int "$(yaml_get "memory" "interval_sec" "10")" 10)
   warn=$(ensure_int "$(yaml_get "memory" "warn_pct" "85")" 85)
   crit=$(ensure_int "$(yaml_get "memory" "crit_pct" "95")" 95)
+  process_mem_limit=$(ensure_int "$(yaml_get "memory" "process_limit_mb" "500")" 500)
+  
   while true; do
     monitor_enabled memory || { sleep "$interval"; continue; }
     local mem_total mem_avail mem_used pct
@@ -999,19 +1034,149 @@ _monitor_mem(){
       read -r _ mem_total _ < <(free -k | awk '/Mem:/ {print $2, $3, $4}')
       mem_used=$(free -k | awk '/Mem:/ {print $3}'); pct=$((mem_used*100/mem_total))
     fi
+    
+    # Check NovaShield process memory usage for long-term stability
+    local web_pid=$(safe_read_pid "${NS_PID}/web.pid" 2>/dev/null || echo 0)
+    local web_mem=0
+    if [ "$web_pid" -gt 0 ] && kill -0 "$web_pid" 2>/dev/null; then
+      web_mem=$(ps -o rss= -p "$web_pid" 2>/dev/null | awk '{print int($1/1024)}' || echo 0)
+      if [ "$web_mem" -gt "$process_mem_limit" ]; then
+        alert WARN "Web server memory usage high: ${web_mem}MB (limit: ${process_mem_limit}MB) - may need restart"
+        # Log memory usage details for long-term tracking
+        mkdir -p "${NS_LOGS}" 2>/dev/null
+        _rotate_log "${NS_LOGS}/memory_alerts.log" 1000
+        echo "$(ns_now) Web server memory usage: ${web_mem}MB (PID: $web_pid)" >> "${NS_LOGS}/memory_alerts.log"
+      fi
+    fi
+    
+    # Check monitor processes memory usage
+    local total_monitor_mem=0
+    for monitor in cpu memory disk network integrity process userlogins services logs scheduler supervisor; do
+      local monitor_pid=$(safe_read_pid "${NS_PID}/${monitor}.pid" 2>/dev/null || echo 0)
+      if [ "$monitor_pid" -gt 0 ] && kill -0 "$monitor_pid" 2>/dev/null; then
+        local monitor_mem=$(ps -o rss= -p "$monitor_pid" 2>/dev/null | awk '{print int($1/1024)}' || echo 0)
+        total_monitor_mem=$((total_monitor_mem + monitor_mem))
+        
+        # Alert if individual monitor uses excessive memory (potential memory leak)
+        if [ "$monitor_mem" -gt 100 ]; then
+          alert WARN "Monitor $monitor memory usage high: ${monitor_mem}MB (PID: $monitor_pid) - potential leak"
+        fi
+      fi
+    done
+    
     local lvl="OK"; [ "$pct" -ge "$crit" ] && lvl="CRIT" || { [ "$pct" -ge "$warn" ] && lvl="WARN"; }
-    write_json "${NS_LOGS}/memory.json" "{\"ts\":\"$(ns_now)\",\"used_pct\":${pct},\"warn\":${warn},\"crit\":${crit},\"level\":\"${lvl}\"}"
+    write_json "${NS_LOGS}/memory.json" "{\"ts\":\"$(ns_now)\",\"used_pct\":${pct},\"warn\":${warn},\"crit\":${crit},\"level\":\"${lvl}\",\"web_mem_mb\":${web_mem},\"monitor_total_mb\":${total_monitor_mem}}"
     [ "$lvl" = "CRIT" ] && alert CRIT "Memory high: ${pct}%" || { [ "$lvl" = "WARN" ] && alert WARN "Memory elevated: ${pct}%"; }
     sleep "$interval"
   done
 }
 
+# Comprehensive storage management and cleanup for long-term operation
+storage_maintenance() {
+  local force_cleanup="${1:-false}"
+  ns_log "Starting storage maintenance routine..."
+  
+  # Create maintenance lock to prevent concurrent runs
+  local maintenance_lock="${NS_CTRL}/maintenance.lock"
+  if [ -f "$maintenance_lock" ] && [ "$force_cleanup" != "force" ]; then
+    local lock_age=$(($(date +%s) - $(stat -c %Y "$maintenance_lock" 2>/dev/null || echo 0)))
+    if [ "$lock_age" -lt 3600 ]; then  # Less than 1 hour old
+      ns_warn "Storage maintenance already running or recently completed. Skipping."
+      return 0
+    fi
+  fi
+  echo "$$" > "$maintenance_lock"
+  trap 'rm -f "'"$maintenance_lock"'" 2>/dev/null || true' EXIT
+  
+  local initial_size total_cleaned=0
+  initial_size=$(du -sb "${NS_HOME}" 2>/dev/null | cut -f1 || echo 0)
+  
+  # 1. Clean old backup files (keep last 10)
+  if [ -d "${NS_HOME}/backups" ]; then
+    local backup_count=$(ls -1 "${NS_HOME}/backups"/*.tar.gz 2>/dev/null | wc -l || echo 0)
+    if [ "$backup_count" -gt 10 ]; then
+      ns_log "Cleaning old backups (keeping last 10 of $backup_count)"
+      cd "${NS_HOME}/backups" && ls -1t *.tar.gz 2>/dev/null | tail -n +11 | xargs rm -f
+    fi
+  fi
+  
+  # 2. Clean temporary files older than 24 hours
+  if [ -d "${NS_TMP}" ]; then
+    find "${NS_TMP}" -type f -mtime +1 -delete 2>/dev/null || true
+    find "${NS_TMP}" -empty -type d -delete 2>/dev/null || true
+  fi
+  
+  # 3. Rotate and clean log files
+  for log_file in "${NS_LOGS}"/*.log "${NS_HOME}"/*.log; do
+    if [ -f "$log_file" ]; then
+      _rotate_log "$log_file" 5000
+    fi
+  done
+  
+  # 4. Clean old monitoring JSON files (keep last 100 entries each)
+  for json_file in "${NS_LOGS}"/*.json; do
+    if [ -f "$json_file" ] && [ "$(wc -l < "$json_file" 2>/dev/null || echo 0)" -gt 100 ]; then
+      tail -n 50 "$json_file" > "${json_file}.tmp" 2>/dev/null && mv "${json_file}.tmp" "$json_file"
+    fi
+  done
+  
+  # 5. Clean expired sessions and rate limit entries
+  if [ -f "${NS_SESS_DB}" ]; then
+    python3 -c "
+import json, time
+try:
+    with open('${NS_SESS_DB}', 'r') as f:
+        db = json.load(f)
+    current_time = int(time.time())
+    cleaned = {k:v for k,v in db.items() if k.startswith('_') or 
+              (isinstance(v, dict) and v.get('expires', current_time + 1) > current_time)}
+    with open('${NS_SESS_DB}', 'w') as f:
+        json.dump(cleaned, f)
+except: pass
+" 2>/dev/null || true
+  fi
+  
+  # 6. Clean old rate limiting data (older than 24 hours)
+  if [ -f "${NS_RL_DB}" ]; then
+    python3 -c "
+import json, time
+try:
+    with open('${NS_RL_DB}', 'r') as f:
+        db = json.load(f)
+    current_time = int(time.time())
+    cleaned = {k:v for k,v in db.items() if current_time - v < 86400}
+    with open('${NS_RL_DB}', 'w') as f:
+        json.dump(cleaned, f)
+except: pass
+" 2>/dev/null || true
+  fi
+  
+  # 7. Clean old restart tracking data
+  local restart_files=("${NS_CTRL}/restart_tracking.json" "${NS_PID}/restart_limits.txt")
+  for restart_file in "${restart_files[@]}"; do
+    if [ -f "$restart_file" ]; then
+      find "$(dirname "$restart_file")" -name "$(basename "$restart_file")" -mtime +1 -delete 2>/dev/null || true
+    fi
+  done
+  
+  local final_size cleaned_mb
+  final_size=$(du -sb "${NS_HOME}" 2>/dev/null | cut -f1 || echo "$initial_size")
+  total_cleaned=$((initial_size - final_size))
+  cleaned_mb=$((total_cleaned / 1024 / 1024))
+  
+  ns_ok "Storage maintenance completed. Cleaned: ${cleaned_mb}MB"
+  rm -f "$maintenance_lock" 2>/dev/null || true
+  trap - EXIT
+}
+
+# Enhanced disk space monitoring with integrated cleanup
 _monitor_disk(){
   set +e; set +o pipefail
-  local interval warn crit mount
+  local interval warn crit mount cleanup_threshold
   interval=$(ensure_int "$(yaml_get "disk" "interval_sec" "60")" 60)
   warn=$(ensure_int "$(yaml_get "disk" "warn_pct" "85")" 85)
   crit=$(ensure_int "$(yaml_get "disk" "crit_pct" "95")" 95)
+  cleanup_threshold=$(ensure_int "$(yaml_get "disk" "cleanup_pct" "90")" 90)
   mount=$(yaml_get "disk" "mount" "/")
   [ -z "$mount" ] && mount="/"
   if [ "$IS_TERMUX" -eq 1 ] && [ "$mount" = "/" ]; then
@@ -1020,9 +1185,23 @@ _monitor_disk(){
   while true; do
     monitor_enabled disk || { sleep "$interval"; continue; }
     local use; use=$(df -P "$mount" | awk 'END {gsub("%","",$5); print $5+0}')
-    local lvl="OK"; [ "$use" -ge "$crit" ] && lvl="CRIT" || { [ "$use" -ge "$warn" ] && lvl="WARN"; }
-    write_json "${NS_LOGS}/disk.json" "{\"ts\":\"$(ns_now)\",\"use_pct\":${use},\"warn\":${warn},\"crit\":${crit},\"mount\":\"${mount}\",\"level\":\"${lvl}\"}"
-    [ "$lvl" = "CRIT" ] && alert CRIT "Disk $mount high: ${use}%" || { [ "$lvl" = "WARN" ] && alert WARN "Disk $mount elevated: ${use}%"; }
+    local lvl="OK"
+    
+    # Determine alert level and trigger cleanup if needed
+    if [ "$use" -ge "$crit" ]; then
+      lvl="CRIT"
+      # Critical disk space - force cleanup
+      storage_maintenance "force" &
+    elif [ "$use" -ge "$cleanup_threshold" ]; then
+      lvl="WARN"
+      # High disk usage - trigger maintenance
+      storage_maintenance &
+    elif [ "$use" -ge "$warn" ]; then
+      lvl="WARN"
+    fi
+    
+    write_json "${NS_LOGS}/disk.json" "{\"ts\":\"$(ns_now)\",\"use_pct\":${use},\"warn\":${warn},\"crit\":${crit},\"mount\":\"${mount}\",\"level\":\"${lvl}\",\"cleanup_threshold\":${cleanup_threshold}}"
+    [ "$lvl" = "CRIT" ] && alert CRIT "Disk $mount critical: ${use}% (cleanup triggered)" || { [ "$lvl" = "WARN" ] && alert WARN "Disk $mount elevated: ${use}%"; }
     sleep "$interval"
   done
 }
@@ -1472,11 +1651,103 @@ scheduler_run_action(){
     backup) backup_snapshot;;
     version) version_snapshot;;
     restart_monitors) restart_monitors;;
+    storage_maintenance) storage_maintenance "scheduled";;
+    health_check) health_check_system;;
     *) if [ -x "${NS_MODULES}/${act}.sh" ]; then "${NS_MODULES}/${act}.sh" || alert ERROR "Module ${act} failed"; else ns_warn "Unknown scheduler action: $act"; fi ;;
   esac
 }
 
+# Comprehensive web server health check for long-term stability
+web_health_check() {
+  local web_pid=$(safe_read_pid "${NS_PID}/web.pid" 2>/dev/null || echo 0)
+  if [ "$web_pid" -gt 0 ] && kill -0 "$web_pid" 2>/dev/null; then
+    # Check if web server is responsive
+    local host port
+    host=$(yaml_get "http" "host" "127.0.0.1")
+    port=$(yaml_get "http" "port" "8765")
+    
+    if command -v curl >/dev/null 2>&1; then
+      if ! curl -sf "http://${host}:${port}/" -m 5 >/dev/null 2>&1; then
+        alert WARN "Web server not responding on http://${host}:${port}/ (PID: $web_pid exists but not serving)"
+        # Log detailed health check failure
+        mkdir -p "${NS_LOGS}" 2>/dev/null
+        _rotate_log "${NS_LOGS}/health_checks.log" 1000
+        echo "$(ns_now) Web server health check failed - process exists but not responding" >> "${NS_LOGS}/health_checks.log"
+      fi
+    fi
+    
+    # Check for error log growth
+    local error_log="${NS_LOGS}/server.error.log"
+    if [ -f "$error_log" ]; then
+      local error_lines=$(wc -l < "$error_log" 2>/dev/null || echo 0)
+      if [ "$error_lines" -gt 100 ]; then
+        alert WARN "Web server error log growing: $error_lines lines - check for recurring errors"
+        _rotate_log "$error_log" 200
+      fi
+    fi
+  fi
+}
+
+# System health check for long-term operation monitoring
+health_check_system() {
+  ns_log "Running comprehensive system health check..."
+  local health_report="${NS_LOGS}/health_report.log"
+  mkdir -p "${NS_LOGS}" 2>/dev/null
+  _rotate_log "$health_report" 1000
+  
+  {
+    echo "=== System Health Check $(date) ==="
+    
+    # Check available disk space on NovaShield directory
+    local ns_disk_usage=$(du -sh "${NS_HOME}" 2>/dev/null || echo "unknown")
+    local root_avail=$(df -h "${NS_HOME}" | awk 'NR==2 {print $4}' || echo "unknown")
+    echo "NovaShield directory size: $ns_disk_usage"
+    echo "Available disk space: $root_avail"
+    
+    # Check running processes
+    echo "NovaShield processes:"
+    for monitor in cpu memory disk network integrity process userlogins services logs scheduler supervisor; do
+      local pid=$(safe_read_pid "${NS_PID}/${monitor}.pid" 2>/dev/null || echo 0)
+      local status="stopped"
+      if [ "$pid" -gt 0 ] && kill -0 "$pid" 2>/dev/null; then
+        local mem=$(ps -o rss= -p "$pid" 2>/dev/null | awk '{print int($1/1024)}' || echo 0)
+        status="running (${mem}MB)"
+      fi
+      printf "  %-12s: %s\n" "$monitor" "$status"
+    done
+    
+    local web_pid=$(safe_read_pid "${NS_PID}/web.pid" 2>/dev/null || echo 0)
+    if [ "$web_pid" -gt 0 ] && kill -0 "$web_pid" 2>/dev/null; then
+      local web_mem=$(ps -o rss= -p "$web_pid" 2>/dev/null | awk '{print int($1/1024)}' || echo 0)
+      echo "  Web server   : running (${web_mem}MB)"
+    else
+      echo "  Web server   : stopped"
+    fi
+    
+    # Check log files sizes
+    echo "Log files:"
+    for log_file in "${NS_LOGS}"/*.log "${NS_HOME}"/*.log; do
+      if [ -f "$log_file" ]; then
+        local size=$(du -sh "$log_file" 2>/dev/null | cut -f1 || echo "0")
+        local lines=$(wc -l < "$log_file" 2>/dev/null || echo 0)
+        printf "  %-20s: %s (%s lines)\n" "$(basename "$log_file")" "$size" "$lines"
+      fi
+    done
+    
+    echo "=== End Health Check ==="
+    echo ""
+  } >> "$health_report"
+  
+  ns_log "System health check completed - report saved to health_report.log"
+}
+
 _spawn_monitor(){ local name="$1"; shift; "$@" & safe_write_pid "${NS_PID}/${name}.pid" $!; }
+
+# Add maintenance command for manual storage cleanup and health checks
+maintenance() {
+  storage_maintenance "manual"
+  health_check_system
+}
 
 start_monitors(){
   ns_log "Starting monitors..."
@@ -5012,11 +5283,12 @@ class Handler(SimpleHTTPRequestHandler):
                     self._set_headers(200); self.wfile.write(json.dumps({'ok':True}).encode('utf-8')); return
                 except Exception: pass
             self_path = read_text(SELF_PATH_FILE).strip() or os.path.join(NS_HOME, 'bin', 'novashield.sh')
-            if action in ('backup','version','restart_monitors','clear_logs'):
+            if action in ('backup','version','restart_monitors','clear_logs','maintenance'):
                 try:
                     if action=='backup': os.system(f'\"{self_path}\" --backup >/dev/null 2>&1 &')
                     if action=='version': os.system(f'\"{self_path}\" --version-snapshot >/dev/null 2>&1 &')
                     if action=='restart_monitors': os.system(f'\"{self_path}\" --restart-monitors >/dev/null 2>&1 &')
+                    if action=='maintenance': os.system(f'\"{self_path}\" --maintenance >/dev/null 2>&1 &')
                     if action=='clear_logs':
                         # Clear old log entries (keep last 100 lines of each log)
                         log_files = [
@@ -12630,6 +12902,7 @@ Security & Backup:
   --version-snapshot     Create version snapshot (no encryption)
   --encrypt <path>       Encrypt file or directory
   --decrypt <file.enc>   Decrypt file (prompts for output path)
+  --maintenance          Run storage cleanup and system health check
 
 User Management:
   --add-user             Add a new web dashboard user
@@ -12732,6 +13005,7 @@ case "${1:-}" in
   --status) status;;
   --backup) backup_snapshot;;
   --version-snapshot) version_snapshot;;
+  --maintenance) maintenance;;
   --disable-external-checks) 
     ns_log "Disabling external network checks in configuration"
     # Create or update config to disable external network checks
