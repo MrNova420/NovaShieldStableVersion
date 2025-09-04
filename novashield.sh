@@ -1379,9 +1379,51 @@ except:
       local wpid; wpid=$(safe_read_pid "${NS_PID}/web.pid")
       if [ "$wpid" -eq 0 ] || ! kill -0 "$wpid" 2>/dev/null; then
         if check_restart_limit "web"; then
-          alert ERROR "Web server crashed. Restarting automatically (critical component, within rate limits)."
-          start_web || true
+          # Enhanced logging for web server restarts
+          local crash_time=$(date '+%Y-%m-%d %H:%M:%S')
+          local crash_reason="Process not running"
+          
+          # Check if it was a crash or clean shutdown
+          if [ -f "${NS_HOME}/web.log" ]; then
+            local last_log=$(tail -1 "${NS_HOME}/web.log" 2>/dev/null || echo "")
+            if echo "$last_log" | grep -qi "error\|exception\|crash\|traceback"; then
+              crash_reason="Application error detected"
+            fi
+          fi
+          
+          # Log detailed restart information
+          {
+            echo "=== Web Server Restart Event ==="
+            echo "Timestamp: $crash_time"
+            echo "Previous PID: $wpid"
+            echo "Reason: $crash_reason"
+            echo "Restart attempt by supervisor"
+            echo "Rate limiting: Active (5/hour max)"
+          } >> "${NS_LOGS}/supervisor.log"
+          
+          alert ERROR "Web server crashed ($crash_reason). Restarting automatically (critical component, within rate limits)."
+          
+          # Attempt restart with enhanced error handling
+          if start_web; then
+            local new_pid; new_pid=$(safe_read_pid "${NS_PID}/web.pid")
+            ns_ok "Web server successfully restarted (new PID: $new_pid)"
+            alert INFO "Web server restart successful (PID: $new_pid)"
+          else
+            ns_err "Web server restart failed. Manual intervention required."
+            alert CRIT "Web server restart failed after crash. Check logs and restart manually."
+          fi
+        else
+          alert CRIT "Web server crashed but restart rate limit exceeded. Manual intervention required."
+          ns_err "Web server requires manual restart (rate limit exceeded)"
         fi
+      fi
+    elif [ ! -f "${NS_PID}/web.pid" ] && is_web_auto_start_enabled; then
+      # Web server should be running but PID file is missing
+      ns_warn "Web server PID file missing but service should be running. Starting web server..."
+      if start_web; then
+        alert INFO "Web server auto-started due to missing PID file"
+      else
+        alert WARN "Failed to auto-start missing web server"
       fi
     fi
     
@@ -2400,7 +2442,8 @@ def mirror_terminal(handler):
         except Exception:
             security_log(f"TERMINAL_CRITICAL_ERROR user={user} cannot_send_websocket_message")
             return
-        
+
+    # If we get here, we have a working terminal
     last_activity = time.time()
     last_ping = time.time()
     ping_interval = 30  # Send ping every 30 seconds
@@ -2785,7 +2828,7 @@ def save_user_memory(username, memory):
         # Log successful auto-sync
         py_alert('INFO', f'Auto-synced memory for user {username} (save #{memory["user_profile"].get("total_saves", 1)})')
         return True
-        
+
     except Exception as e:
         py_alert('ERROR', f'Critical error saving memory for user {username}: {str(e)}')
         return False
@@ -4523,93 +4566,117 @@ class Handler(SimpleHTTPRequestHandler):
                     f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} [CONNECTION] IP={ip} Path={path} UserAgent='{user_agent[:100]}'\n")
             except Exception: pass
         
-        parsed = urlparse(self.path)
+            parsed = urlparse(self.path)
 
-        if parsed.path == '/ws/term':
-            if not require_auth(self): return
-            mirror_terminal(self); return
+            if parsed.path == '/ws/term':
+                if not require_auth(self): return
+                mirror_terminal(self); return
 
-        if parsed.path == '/':
-            # Log dashboard access for security monitoring
-            client_ip = self.client_address[0]
-            user_agent = self.headers.get('User-Agent', 'Unknown')[:100]
-            sess = get_session(self)
-            if sess:
-                user = sess.get('user', 'unknown')
-                py_alert('INFO', f'DASHBOARD_ACCESS user={user} ip={client_ip} user_agent={user_agent}')
-                audit(f'DASHBOARD_ACCESS user={user} ip={client_ip}')
-            else:
-                py_alert('INFO', f'UNAUTHORIZED_ACCESS ip={client_ip} user_agent={user_agent}')
-                audit(f'UNAUTHORIZED_ACCESS ip={client_ip}')
-            
-            # Enhanced session handling with force_login_on_reload support
-            # Note: Jarvis memory is stored separately from sessions and persists across session clears
-            force_login_on_reload = _coerce_bool(cfg_get('security.force_login_on_reload', False), False)
-            
-            # Check if this is a fresh page load (not an AJAX request) by looking at headers
-            is_page_load = self.headers.get('Accept', '').startswith('text/html')
-            
-            # If AUTH_STRICT is enabled and no valid session, clear session cookie
-            if AUTH_STRICT and not sess:
-                self._set_headers(200, 'text/html; charset=utf-8', {'Set-Cookie': 'NSSESS=deleted; Path=/; HttpOnly; Max-Age=0; SameSite=Lax'})
-            # If force_login_on_reload is enabled, clear session cookie on fresh page loads without session
-            # This ensures login prompt appears on refresh while preserving API access after successful login
-            elif force_login_on_reload and not sess and is_page_load:
-                self._set_headers(200, 'text/html; charset=utf-8', {'Set-Cookie': 'NSSESS=deleted; Path=/; HttpOnly; Max-Age=0; SameSite=Lax'})
-            else:
-                self._set_headers(200, 'text/html; charset=utf-8')
-            html = read_text(INDEX, '<h1>NovaShield</h1>')
-            self.wfile.write(html.encode('utf-8')); return
-
-        if parsed.path == '/logout':
-            # Log logout event
-            client_ip = self.client_address[0]
-            sess = get_session(self)
-            user = sess.get('user', 'unknown') if sess else 'unknown'
-            py_alert('INFO', f'LOGOUT user={user} ip={client_ip}')
-            audit(f'LOGOUT user={user} ip={client_ip}')
-            self._set_headers(302, 'text/plain', {'Set-Cookie': 'NSSESS=deleted; Path=/; HttpOnly; Max-Age=0; SameSite=Lax', 'Location':'/'})
-            self.wfile.write(b'bye'); return
-
-        if parsed.path.startswith('/static/'):
-            p = os.path.join(NS_WWW, parsed.path[len('/static/'):])
-            if not os.path.abspath(p).startswith(NS_WWW): self._set_headers(404); self.wfile.write(b'{}'); return
-            if os.path.exists(p) and os.path.isfile(p):
-                ctype='text/plain'
-                if p.endswith('.js'): ctype='application/javascript'
-                if p.endswith('.css'): ctype='text/css'
-                if p.endswith('.html'): ctype='text/html; charset=utf-8'
-                self._set_headers(200, ctype); self.wfile.write(read_text(p).encode('utf-8')); return
-            self._set_headers(404); self.wfile.write(b'{}'); return
-
-        if parsed.path == '/api/ping':
-            # Keep-alive endpoint to prevent session expiration
-            if not auth_enabled():
-                # If auth is disabled, always return success
-                self._set_headers(200)
-                self.wfile.write(json.dumps({'status': 'ok', 'auth': 'disabled'}).encode('utf-8'))
-                return
-            
-            sess = get_session(self)
-            if not sess:
-                self._set_headers(401)
-                self.wfile.write(json.dumps({'error': 'unauthorized'}).encode('utf-8'))
-                return
+            if parsed.path == '/':
+                # Log dashboard access for security monitoring
+                client_ip = self.client_address[0]
+                user_agent = self.headers.get('User-Agent', 'Unknown')[:100]
+                sess = get_session(self)
+                if sess:
+                    user = sess.get('user', 'unknown')
+                    py_alert('INFO', f'DASHBOARD_ACCESS user={user} ip={client_ip} user_agent={user_agent}')
+                    audit(f'DASHBOARD_ACCESS user={user} ip={client_ip}')
+                else:
+                    py_alert('INFO', f'UNAUTHORIZED_ACCESS ip={client_ip} user_agent={user_agent}')
+                    audit(f'UNAUTHORIZED_ACCESS ip={client_ip}')
                 
-            # Session is valid, return success with basic info
-            data = {
-                'status': 'ok',
-                'user': sess.get('user', 'unknown'),
-                'timestamp': time.strftime('%Y-%m-%d %H:%M:%S'),
-                'session_valid': True
-            }
-            self._set_headers(200)
-            self.wfile.write(json.dumps(data).encode('utf-8'))
-            return
+                # Enhanced session handling with force_login_on_reload support
+                # Note: Jarvis memory is stored separately from sessions and persists across session clears
+                force_login_on_reload = _coerce_bool(cfg_get('security.force_login_on_reload', False), False)
+                
+                # Check if this is a fresh page load (not an AJAX request) by looking at headers
+                is_page_load = self.headers.get('Accept', '').startswith('text/html')
+                
+                # If AUTH_STRICT is enabled and no valid session, clear session cookie
+                if AUTH_STRICT and not sess:
+                    self._set_headers(200, 'text/html; charset=utf-8', {'Set-Cookie': 'NSSESS=deleted; Path=/; HttpOnly; Max-Age=0; SameSite=Lax'})
+                # If force_login_on_reload is enabled, clear session cookie on fresh page loads without session
+                # This ensures login prompt appears on refresh while preserving API access after successful login
+                elif force_login_on_reload and not sess and is_page_load:
+                    self._set_headers(200, 'text/html; charset=utf-8', {'Set-Cookie': 'NSSESS=deleted; Path=/; HttpOnly; Max-Age=0; SameSite=Lax'})
+                else:
+                    self._set_headers(200, 'text/html; charset=utf-8')
+                html = read_text(INDEX, '<h1>NovaShield</h1>')
+                self.wfile.write(html.encode('utf-8')); return
 
-        if parsed.path == '/api/status':
-            if not require_auth(self): return
-            sess = get_session(self) or {}
+            if parsed.path == '/':
+                # Log logout event
+                client_ip = self.client_address[0]
+                sess = get_session(self)
+                user = sess.get('user', 'unknown') if sess else 'unknown'
+                py_alert('INFO', f'LOGOUT user={user} ip={client_ip}')
+                audit(f'LOGOUT user={user} ip={client_ip}')
+                self._set_headers(302, 'text/plain', {'Set-Cookie': 'NSSESS=deleted; Path=/; HttpOnly; Max-Age=0; SameSite=Lax', 'Location':'/'})
+                self.wfile.write(b'bye'); return
+
+            if parsed.path.startswith('/static/'):
+                p = os.path.join(NS_WWW, parsed.path[len('/static/'):])
+                if not os.path.abspath(p).startswith(NS_WWW): self._set_headers(404); self.wfile.write(b'{}'); return
+                if os.path.exists(p) and os.path.isfile(p):
+                    ctype='text/plain'
+                    if p.endswith('.js'): ctype='application/javascript'
+                    if p.endswith('.css'): ctype='text/css'
+                    if p.endswith('.html'): ctype='text/html; charset=utf-8'
+                    self._set_headers(200, ctype); self.wfile.write(read_text(p).encode('utf-8')); return
+                self._set_headers(404); self.wfile.write(b'{}'); return
+
+                # Keep-alive endpoint to prevent session expiration
+                if not auth_enabled():
+                    # If auth is disabled, always return success
+                    self._set_headers(200)
+                    self.wfile.write(json.dumps({'status': 'ok', 'auth': 'disabled'}).encode('utf-8'))
+                    return
+                
+                sess = get_session(self)
+                if not sess:
+                    self._set_headers(401)
+                    self.wfile.write(json.dumps({'error': 'unauthorized'}).encode('utf-8'))
+                    return
+                    
+                # Session is valid, return success with basic info
+                data = {
+                    'status': 'ok',
+                    'user': sess.get('user', 'unknown'),
+                    'timestamp': time.strftime('%Y-%m-%d %H:%M:%S'),
+                    'session_valid': True
+                }
+                self._set_headers(200)
+                self.wfile.write(json.dumps(data).encode('utf-8'))
+                return
+
+            if parsed.path == '/api/ping':
+                # Keep-alive endpoint to prevent session expiration
+                if not auth_enabled():
+                    # If auth is disabled, always return success
+                    self._set_headers(200)
+                    self.wfile.write(json.dumps({'status': 'ok', 'auth': 'disabled'}).encode('utf-8'))
+                    return
+                
+                sess = get_session(self)
+                if not sess:
+                    self._set_headers(401)
+                    self.wfile.write(json.dumps({'error': 'unauthorized'}).encode('utf-8'))
+                    return
+                    
+                # Session is valid, return success with basic info
+                data = {
+                    'status': 'ok',
+                    'user': sess.get('user', 'unknown'),
+                    'timestamp': time.strftime('%Y-%m-%d %H:%M:%S'),
+                    'session_valid': True
+                }
+                self._set_headers(200)
+                self.wfile.write(json.dumps(data).encode('utf-8'))
+                return
+
+            if parsed.path == '/api/status':
+                if not require_auth(self): return
+                sess = get_session(self) or {}
             
             # Helper function to check monitor enabled state using NS_CTRL flags
             def monitor_enabled(name):
@@ -4653,70 +4720,70 @@ class Handler(SimpleHTTPRequestHandler):
             }
             self._set_headers(200); self.wfile.write(json.dumps(data).encode('utf-8')); return
 
-        if parsed.path == '/api/whoami':
-            info = {
-                'ns_home': NS_HOME,
-                'ns_www': NS_WWW,
-                'ns_www_is_symlink': os.path.islink(NS_WWW),
-                'index_exists': os.path.isfile(INDEX),
-                'index_sha256': hashlib.sha256(read_text(INDEX,'').encode('utf-8')).hexdigest() if os.path.isfile(INDEX) else None,
-                'server_sha256': hashlib.sha256(read_text(os.path.join(NS_WWW,'server.py'), '').encode('utf-8')).hexdigest() if os.path.isfile(os.path.join(NS_WWW,'server.py')) else None,
-                'time': time.strftime('%Y-%m-%d %H:%M:%S')
-            }
-            self._set_headers(200); self.wfile.write(json.dumps(info).encode('utf-8')); return
-
-        if parsed.path == '/api/config':
-            if not require_auth(self): return
-            sess = get_session(self) or {}
-            try:
-                # Read and parse the config file
-                config_text = read_text(CONFIG, '')
-                # Return config in expected JSON format
-                config_data = {
-                    'config': config_text,
-                    'csrf': sess.get('csrf','') if auth_enabled() else 'public'
+            if parsed.path == '/api/whoami':
+                info = {
+                    'ns_home': NS_HOME,
+                    'ns_www': NS_WWW,
+                    'ns_www_is_symlink': os.path.islink(NS_WWW),
+                    'index_exists': os.path.isfile(INDEX),
+                    'index_sha256': hashlib.sha256(read_text(INDEX,'').encode('utf-8')).hexdigest() if os.path.isfile(INDEX) else None,
+                    'server_sha256': hashlib.sha256(read_text(os.path.join(NS_WWW,'server.py'), '').encode('utf-8')).hexdigest() if os.path.isfile(os.path.join(NS_WWW,'server.py')) else None,
+                    'time': time.strftime('%Y-%m-%d %H:%M:%S')
                 }
-                self._set_headers(200); self.wfile.write(json.dumps(config_data).encode('utf-8')); return
-            except Exception as e:
-                self._set_headers(500); self.wfile.write(json.dumps({'error': str(e)}).encode('utf-8')); return
+                self._set_headers(200); self.wfile.write(json.dumps(info).encode('utf-8')); return
+
+            if parsed.path == '/api/config':
+                if not require_auth(self): return
+                sess = get_session(self) or {}
+                try:
+                    # Read and parse the config file
+                    config_text = read_text(CONFIG, '')
+                    # Return config in expected JSON format
+                    config_data = {
+                        'config': config_text,
+                        'csrf': sess.get('csrf','') if auth_enabled() else 'public'
+                    }
+                    self._set_headers(200); self.wfile.write(json.dumps(config_data).encode('utf-8')); return
+                except Exception as e:
+                    self._set_headers(500); self.wfile.write(json.dumps({'error': str(e)}).encode('utf-8')); return
 
         # Jarvis AI memory management - GET handler
-        if parsed.path == '/api/jarvis/memory':
-            if not require_auth(self): return
-            sess = get_session(self)
-            username = sess.get('user', 'public') if sess else 'public'
+            if parsed.path == '/api/jarvis/memory':
+                if not require_auth(self): return
+                sess = get_session(self)
+                username = sess.get('user', 'public') if sess else 'public'
             
-            try:
-                # Load user's encrypted memory
-                user_memory = load_user_memory(username)
-                self._set_headers(200)
-                self.wfile.write(json.dumps({
-                    'ok': True,
-                    'memory': user_memory.get('memory', {}),
-                    'preferences': user_memory.get('preferences', {}),
-                    'history': user_memory.get('history', [])
-                }).encode('utf-8'))
-            except Exception as e:
-                self._set_headers(200)
-                self.wfile.write(json.dumps({
-                    'ok': True,
-                    'memory': {},
-                    'preferences': {},
-                    'history': []
-                }).encode('utf-8'))
-            return
+                try:
+                    # Load user's encrypted memory
+                    user_memory = load_user_memory(username)
+                    self._set_headers(200)
+                    self.wfile.write(json.dumps({
+                        'ok': True,
+                        'memory': user_memory.get('memory', {}),
+                        'preferences': user_memory.get('preferences', {}),
+                        'history': user_memory.get('history', [])
+                    }).encode('utf-8'))
+                except Exception as e:
+                    self._set_headers(200)
+                    self.wfile.write(json.dumps({
+                        'ok': True,
+                        'memory': {},
+                        'preferences': {},
+                        'history': []
+                    }).encode('utf-8'))
+                return
 
         # Users and sessions management - GET handler
-        if parsed.path == '/api/users':
-            if not require_auth(self): return
-            try:
-                db = users_db()
-                current_time = int(time.time())
-                users_list = []
-                
-                # Get all usernames from _userdb
-                userdb = db.get('_userdb', {})
-                active_sessions = {}
+            if parsed.path == '/api/users':
+                if not require_auth(self): return
+                try:
+                    db = users_db()
+                    current_time = int(time.time())
+                    users_list = []
+                    
+                    # Get all usernames from _userdb
+                    userdb = db.get('_userdb', {})
+                    active_sessions = {}
                 
                 # Count active sessions per user
                 for token, session_data in db.items():
@@ -4757,59 +4824,59 @@ class Handler(SimpleHTTPRequestHandler):
                 self.wfile.write(json.dumps({'error': str(e)}).encode('utf-8'))
                 return
 
-        if parsed.path == '/api/logs':
-            if not require_auth(self): return
-            q = parse_qs(parsed.query); name = (q.get('name', ['launcher.log'])[0]).replace('..','')
-            p = os.path.join(NS_HOME, name)
-            if not os.path.exists(p): p = os.path.join(NS_LOGS, name)
-            lines = []
-            try:
+            if parsed.path == '/api/logs':
+                if not require_auth(self): return
+                q = parse_qs(parsed.query); name = (q.get('name', ['launcher.log'])[0]).replace('..','')
+                p = os.path.join(NS_HOME, name)
+                if not os.path.exists(p): p = os.path.join(NS_LOGS, name)
+                lines = []
+                try:
                 with open(p,'r',encoding='utf-8') as f: lines=f.read().splitlines()[-200:]
-            except Exception: pass
+                except Exception: pass
             self._set_headers(200); self.wfile.write(json.dumps({'name': name, 'lines': lines}).encode('utf-8')); return
 
-        if parsed.path == '/api/fs':
-            if not require_auth(self): return
-            q = parse_qs(parsed.query); d = q.get('dir',[''])[0]
-            if not d: d = NS_HOME
-            d = os.path.abspath(d)
-            if not d.startswith(NS_HOME): self._set_headers(403); self.wfile.write(b'{"error":"forbidden"}'); return
-            out=[]
-            try:
-                for entry in os.scandir(d):
-                    if entry.name.startswith('.'): continue
-                    if os.path.abspath(d).startswith(NS_KEYS) and entry.is_file(): continue
-                    out.append({'name':entry.name,'is_dir':entry.is_dir(),'size':(entry.stat().st_size if entry.is_file() else 0)})
-            except Exception: pass
+            if parsed.path == '/api/fs':
+                if not require_auth(self): return
+                q = parse_qs(parsed.query); d = q.get('dir',[''])[0]
+                if not d: d = NS_HOME
+                d = os.path.abspath(d)
+                if not d.startswith(NS_HOME): self._set_headers(403); self.wfile.write(b'{"error":"forbidden"}'); return
+                out=[]
+                try:
+                    for entry in os.scandir(d):
+                        if entry.name.startswith('.'): continue
+                        if os.path.abspath(d).startswith(NS_KEYS) and entry.is_file(): continue
+                        out.append({'name':entry.name,'is_dir':entry.is_dir(),'size':(entry.stat().st_size if entry.is_file() else 0)})
+                except Exception: pass
             self._set_headers(200); self.wfile.write(json.dumps({'dir':d,'entries':out}).encode('utf-8')); return
 
-        if parsed.path == '/api/fs_read':
-            if not require_auth(self): return
-            q = parse_qs(parsed.query); p = (q.get('path',[''])[0])
-            full = os.path.abspath(p)
-            if not full.startswith(NS_HOME): self._set_headers(403); self.wfile.write(b'{"error":"forbidden"}'); return
-            if not os.path.exists(full) or not os.path.isfile(full):
+            if parsed.path == '/api/fs_read':
+                if not require_auth(self): return
+                q = parse_qs(parsed.query); p = (q.get('path',[''])[0])
+                full = os.path.abspath(p)
+                if not full.startswith(NS_HOME): self._set_headers(403); self.wfile.write(b'{"error":"forbidden"}'); return
+                if not os.path.exists(full) or not os.path.isfile(full):
                 self._set_headers(404); self.wfile.write(b'{"error":"not found"}'); return
-            try:
-                size = os.path.getsize(full)
-                content = open(full,'rb').read(500_000).decode('utf-8','ignore')
-                self._set_headers(200); self.wfile.write(json.dumps({'ok':True,'path':full,'size':size,'content':content}).encode('utf-8')); return
-            except Exception as e:
+                try:
+                    size = os.path.getsize(full)
+                    content = open(full,'rb').read(500_000).decode('utf-8','ignore')
+                    self._set_headers(200); self.wfile.write(json.dumps({'ok':True,'path':full,'size':size,'content':content}).encode('utf-8')); return
+                except Exception as e:
                 self._set_headers(500); self.wfile.write(json.dumps({'ok':False,'error':str(e)}).encode('utf-8')); return
 
-        if parsed.path == '/site':
-            index = os.path.join(SITE_DIR,'index.html')
-            self._set_headers(200,'text/html; charset=utf-8'); self.wfile.write(read_text(index,'<h1>No site yet</h1>').encode('utf-8')); return
+            if parsed.path == '/site':
+                index = os.path.join(SITE_DIR,'index.html')
+                self._set_headers(200,'text/html; charset=utf-8'); self.wfile.write(read_text(index,'<h1>No site yet</h1>').encode('utf-8')); return
 
-        if parsed.path.startswith('/site/'):
-            p = parsed.path[len('/site/'):]
-            full = os.path.join(SITE_DIR, p)
-            if not os.path.abspath(full).startswith(SITE_DIR): self._set_headers(403); self.wfile.write(b'{}'); return
-            if os.path.exists(full):
+                if parsed.path.startswith('/site/'):
+                p = parsed.path[len('/site/'):]
+                full = os.path.join(SITE_DIR, p)
+                if not os.path.abspath(full).startswith(SITE_DIR): self._set_headers(403); self.wfile.write(b'{}'); return
+                if os.path.exists(full):
                 self._set_headers(200, 'text/html; charset=utf-8'); self.wfile.write(read_text(full).encode('utf-8')); return
-            self._set_headers(404); self.wfile.write(b'{}'); return
+                self._set_headers(404); self.wfile.write(b'{}'); return
 
-        self._set_headers(404); self.wfile.write(b'{"error":"not found"}')
+                self._set_headers(404); self.wfile.write(b'{"error":"not found"}')
         
         except Exception as e:
             # Comprehensive exception handler for do_GET - prevents server crashes
@@ -4843,7 +4910,7 @@ class Handler(SimpleHTTPRequestHandler):
                     f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} [POST_REQUEST] IP={ip} Path={path} UserAgent='{user_agent[:100]}'\n")
             except Exception: pass
         
-        parsed = urlparse(self.path)
+            parsed = urlparse(self.path)
         if not rate_limit_ok(self, parsed.path):
             # Log rate limit violations
             try:
@@ -4864,12 +4931,12 @@ class Handler(SimpleHTTPRequestHandler):
         length = int(self.headers.get('Content-Length', 0))
         body = self.rfile.read(length).decode('utf-8') if length else ''
 
-        if parsed.path == '/api/login':
-            # Enhanced login attempt logging with detailed connection info
-            ip = self.client_address[0]
-            user_agent = self.headers.get('User-Agent', 'Unknown')
+                # Enhanced login attempt logging with detailed connection info
+                ip = self.client_address[0]
+                user_agent = self.headers.get('User-Agent', 'Unknown')
             
-            try: data = json.loads(body or '{}'); user=data.get('user',''); pwd=data.get('pass',''); otp=data.get('otp','')
+                try: data = json.loads(body or '{}'); user=data.get('user',''); pwd=data.get('pass',''); otp=data.get('otp','')
+            if parsed.path == '/api/login':
             except Exception: data={}; user=''; pwd=''; otp=''
             
             # Log all login attempts regardless of success/failure
@@ -4916,8 +4983,8 @@ class Handler(SimpleHTTPRequestHandler):
 
         if not require_auth(self): return
 
-        if parsed.path == '/api/control':
-            try: data = json.loads(body or '{}')
+                try: data = json.loads(body or '{}')
+            if parsed.path == '/api/control':
             except Exception: data={}
             action = data.get('action',''); target = data.get('target','')
             flag = os.path.join(NS_CTRL, f'{target}.disabled')
@@ -4961,11 +5028,11 @@ class Handler(SimpleHTTPRequestHandler):
                 except Exception: pass
             self._set_headers(400); self.wfile.write(b'{"ok":false}'); return
 
-        if parsed.path == '/api/chat':
-            if not require_auth(self): return
-            try: 
-                data = json.loads(body or '{}')
-            except Exception: 
+            if parsed.path == '/api/chat':
+                if not require_auth(self): return
+                try: 
+                    data = json.loads(body or '{}')
+                except Exception:
                 py_alert('WARN', f'Chat API invalid JSON from {self.client_address[0]}')
                 self._set_headers(400); self.wfile.write(json.dumps({'ok':False,'error':'invalid json'}).encode('utf-8')); return
                 
@@ -5048,78 +5115,78 @@ class Handler(SimpleHTTPRequestHandler):
                 self._set_headers(500); self.wfile.write(json.dumps({'ok':False,'error':'ai error'}).encode('utf-8')); return
         
         # Enhanced Jarvis AI memory management
-        if parsed.path == '/api/jarvis/memory':
-            if not require_auth(self): return
-            sess = get_session(self)
-            username = sess.get('user', 'public') if sess else 'public'
+            if parsed.path == '/api/jarvis/memory':
+                if not require_auth(self): return
+                sess = get_session(self)
+                username = sess.get('user', 'public') if sess else 'public'
             
             # Save user's encrypted memory
-            try:
-                data = json.loads(body or '{}')
+                try:
+                    data = json.loads(body or '{}')
                 
                 # Load existing memory or start with default
-                user_memory = load_user_memory(username)
+                    user_memory = load_user_memory(username)
                 
                 # Update user's memory with new data
-                user_memory['memory'] = data.get('memory', {})
-                user_memory['preferences'] = data.get('preferences', {})
+                    user_memory['memory'] = data.get('memory', {})
+                    user_memory['preferences'] = data.get('preferences', {})
                 # Use 'conversations' instead of 'history' for consistency with ai_reply
-                user_memory['history'] = data.get('history', [])
-                user_memory['last_updated'] = time.time()
-                user_memory['last_seen'] = time.strftime('%Y-%m-%d %H:%M:%S')
+                    user_memory['history'] = data.get('history', [])
+                    user_memory['last_updated'] = time.time()
+                    user_memory['last_seen'] = time.strftime('%Y-%m-%d %H:%M:%S')
                 
                 # Save encrypted memory
-                save_user_memory(username, user_memory)
+                    save_user_memory(username, user_memory)
                 
-                self._set_headers(200)
-                self.wfile.write(json.dumps({'ok': True}).encode('utf-8'))
-            except Exception as e:
+                    self._set_headers(200)
+                    self.wfile.write(json.dumps({'ok': True}).encode('utf-8'))
+                except Exception as e:
                 py_alert('ERROR', f'Failed to save memory for {username}: {str(e)}')
                 self._set_headers(500)
                 self.wfile.write(json.dumps({'ok': False, 'error': str(e)}).encode('utf-8'))
             return
         
         # Tools management API
-        if parsed.path == '/api/tools/scan':
-            if not require_auth(self): return
-            try:
-                tools_info = scan_system_tools()
-                self._set_headers(200)
-                self.wfile.write(json.dumps({
+            if parsed.path == '/api/tools/scan':
+                if not require_auth(self): return
+                try:
+                    tools_info = scan_system_tools()
+                    self._set_headers(200)
+                    self.wfile.write(json.dumps({
                     'ok': True,
                     'tools': tools_info
-                }).encode('utf-8'))
-            except Exception as e:
+                    }).encode('utf-8'))
+                except Exception as e:
                 self._set_headers(500)
                 self.wfile.write(json.dumps({'ok': False, 'error': str(e)}).encode('utf-8'))
             return
         
-        if parsed.path == '/api/tools/install':
-            if not require_auth(self): return
-            try:
-                output = install_missing_tools()
-                self._set_headers(200)
-                self.wfile.write(json.dumps({
+            if parsed.path == '/api/tools/install':
+                if not require_auth(self): return
+                try:
+                    output = install_missing_tools()
+                    self._set_headers(200)
+                    self.wfile.write(json.dumps({
                     'ok': True,
                     'output': output
-                }).encode('utf-8'))
-            except Exception as e:
+                    }).encode('utf-8'))
+                except Exception as e:
                 self._set_headers(500)
                 self.wfile.write(json.dumps({'ok': False, 'error': str(e)}).encode('utf-8'))
             return
         
-        if parsed.path == '/api/tools/execute':
-            if not require_auth(self): return
-            try:
-                data = json.loads(body or '{}')
-                tool_name = data.get('tool', '')
-                custom_command = data.get('command', '')
-                tool_args = data.get('args', '')  # New: support for tool arguments
+            if parsed.path == '/api/tools/execute':
+                if not require_auth(self): return
+                try:
+                    data = json.loads(body or '{}')
+                    tool_name = data.get('tool', '')
+                    custom_command = data.get('command', '')
+                    tool_args = data.get('args', '')  # New: support for tool arguments
                 
                 # Get user session for verification
-                sess = get_session(self)
-                username = sess.get('user', 'unknown') if sess else 'unknown'
-                user_ip = self.client_address[0]
+                    sess = get_session(self)
+                    username = sess.get('user', 'unknown') if sess else 'unknown'
+                    user_ip = self.client_address[0]
                 
                 if not tool_name:
                     self._set_headers(400)
@@ -5193,8 +5260,8 @@ class Handler(SimpleHTTPRequestHandler):
                 self.wfile.write(json.dumps({'ok': False, 'error': str(e)}).encode('utf-8'))
             return
         
-        if parsed.path == '/api/webgen':
-            try: data = json.loads(body or '{}')
+                try: data = json.loads(body or '{}')
+            if parsed.path == '/api/webgen':
             except Exception: data={}
             title = data.get('title','Untitled'); content = data.get('content','')
             slug = ''.join([c.lower() if c.isalnum() else '-' for c in title]).strip('-') or f'page-{int(time.time())}'
@@ -5208,8 +5275,8 @@ class Handler(SimpleHTTPRequestHandler):
             self._set_headers(200); self.wfile.write(json.dumps({'ok':True,'page':f'/site/{slug}.html'}).encode('utf-8')); return
 
         # File manager actions
-        if parsed.path == '/api/fs_write':
-            try: data=json.loads(body or '{}')
+                try: data=json.loads(body or '{}')
+            if parsed.path == '/api/fs_write':
             except Exception: data={}
             path=data.get('path',''); content=data.get('content','')
             full=os.path.abspath(path)
@@ -5219,8 +5286,8 @@ class Handler(SimpleHTTPRequestHandler):
             except Exception as e: self._set_headers(500); self.wfile.write(json.dumps({'ok':False,'error':str(e)}).encode('utf-8'))
             return
 
-        if parsed.path == '/api/fs_mkdir':
-            try: data=json.loads(body or '{}')
+                try: data=json.loads(body or '{}')
+            if parsed.path == '/api/fs_mkdir':
             except Exception: data={}
             path=data.get('path','')
             full=os.path.abspath(path)
@@ -5230,8 +5297,8 @@ class Handler(SimpleHTTPRequestHandler):
             except Exception as e: self._set_headers(500); self.wfile.write(json.dumps({'ok':False,'error':str(e)}).encode('utf-8'))
             return
 
-        if parsed.path == '/api/fs_mv':
-            try: data=json.loads(body or '{}')
+                try: data=json.loads(body or '{}')
+            if parsed.path == '/api/fs_mv':
             except Exception: data={}
             src=data.get('src',''); dst=data.get('dst','')
             srcf=os.path.abspath(src); dstf=os.path.abspath(dst)
@@ -5241,8 +5308,8 @@ class Handler(SimpleHTTPRequestHandler):
             except Exception as e: self._set_headers(500); self.wfile.write(json.dumps({'ok':False,'error':str(e)}).encode('utf-8'))
             return
 
-        if parsed.path == '/api/fs_rm':
-            try: data=json.loads(body or '{}')
+                try: data=json.loads(body or '{}')
+            if parsed.path == '/api/fs_rm':
             except Exception: data={}
             path=data.get('path',''); full=os.path.abspath(path)
             if (not full.startswith(NS_HOME)) or full.startswith(NS_KEYS):
@@ -5256,10 +5323,10 @@ class Handler(SimpleHTTPRequestHandler):
                 self._set_headers(500); self.wfile.write(json.dumps({'ok':False,'error':str(e)}).encode('utf-8'))
             return
 
-        if parsed.path == '/api/security':
-            if not require_auth(self): return
+            if parsed.path == '/api/security':
+                if not require_auth(self): return
             # Comprehensive security dashboard data - moved from duplicate do_POST
-            try:
+                try:
                 # Read and parse log files
                 auth_logs = []
                 audit_logs = []
@@ -5489,19 +5556,19 @@ class Handler(SimpleHTTPRequestHandler):
                 self.wfile.write(json.dumps({'error': str(e)}).encode('utf-8'))
                 return
 
-        if parsed.path == '/api/config/save':
-            if not require_auth(self): return
-            sess = get_session(self) or {}
+            if parsed.path == '/api/config/save':
+                if not require_auth(self): return
+                sess = get_session(self) or {}
             
             # Check CSRF if required
-            if csrf_required():
+                if csrf_required():
                 client_csrf = self.headers.get('X-CSRF','')
                 if client_csrf != sess.get('csrf',''):
                     self._set_headers(403)
                     self.wfile.write(json.dumps({'error': 'CSRF token mismatch'}).encode('utf-8'))
                     return
             
-            try:
+                try:
                 # Read POST data
                 content_length = int(self.headers.get('Content-Length', 0))
                 if content_length == 0:
@@ -5559,29 +5626,29 @@ class Handler(SimpleHTTPRequestHandler):
                 }).encode('utf-8'))
                 return
                 
-            except json.JSONDecodeError:
+                    except json.JSONDecodeError:
                 self._set_headers(400)
                 self.wfile.write(json.dumps({'error': 'Invalid JSON in request'}).encode('utf-8'))
                 return
-            except Exception as e:
+                    except Exception as e:
                 security_log(f"CONFIG_SAVE_ERROR user={sess.get('user', 'unknown')} ip={get_client_ip(self)} error={str(e)}")
                 self._set_headers(500)
                 self.wfile.write(json.dumps({'error': f'Failed to save configuration: {str(e)}'}).encode('utf-8'))
                 return
 
-        if parsed.path == '/api/security/action':
-            if not require_auth(self): return
-            sess = get_session(self) or {}
+            if parsed.path == '/api/security/action':
+                if not require_auth(self): return
+                sess = get_session(self) or {}
             
             # Check CSRF if required
-            if csrf_required():
+                if csrf_required():
                 client_csrf = self.headers.get('X-CSRF','')
                 if client_csrf != sess.get('csrf',''):
                     self._set_headers(403)
                     self.wfile.write(json.dumps({'error': 'CSRF token mismatch'}).encode('utf-8'))
                     return
             
-            try:
+                try:
                 # Read POST data
                 content_length = int(self.headers.get('Content-Length', 0))
                 if content_length == 0:
@@ -5673,7 +5740,7 @@ class Handler(SimpleHTTPRequestHandler):
                 self.wfile.write(json.dumps(result).encode('utf-8'))
                 return
                 
-            except json.JSONDecodeError:
+                except json.JSONDecodeError:
                 self._set_headers(400)
                 self.wfile.write(json.dumps({'error': 'Invalid JSON in request'}).encode('utf-8'))
                 return
@@ -5766,12 +5833,12 @@ if __name__ == '__main__':
                     time.sleep(1)
                     continue
                     
-            except Exception as e:
+                except Exception as e:
                 print(f"Bind failed on {h}:{port}: {e}", file=sys.stderr)
                 time.sleep(0.5)
                 continue
                 
-    except Exception as e:
+                except Exception as e:
         # Top-level exception handler - log and exit cleanly
         error_msg = f"Critical server error: {str(e)}"
         print(error_msg, file=sys.stderr)
@@ -12229,8 +12296,48 @@ start_web(){
     # Give server a moment to start and verify it's running
     sleep 2
     if ! kill -0 "$pid" 2>/dev/null; then
-      ns_err "Web server failed to start. Check ${NS_HOME}/web.log for errors"
-      cat "${NS_HOME}/web.log" | tail -10 >&2
+      ns_err "Web server failed to start. Analyzing error details..."
+      
+      # Enhanced error logging and analysis
+      local web_log="${NS_HOME}/web.log"
+      local error_log="${NS_HOME}/server_startup.error"
+      
+      # Create detailed error report
+      {
+        echo "=== NovaShield Webserver Startup Failure Report ==="
+        echo "Timestamp: $(date)"
+        echo "Attempted PID: $pid"
+        echo "Server Path: ${NS_WWW}/server.py"
+        echo "Python Version: $(python3 --version 2>&1 || echo 'Python3 not found')"
+        echo ""
+        echo "=== Server Log (Last 20 lines) ==="
+        tail -20 "$web_log" 2>/dev/null || echo "No web.log found"
+        echo ""
+        echo "=== Python Syntax Check ==="
+        python3 -m py_compile "${NS_WWW}/server.py" 2>&1 || echo "Syntax check failed"
+        echo ""
+        echo "=== File Permissions ==="
+        ls -la "${NS_WWW}/server.py" 2>/dev/null || echo "Server file not found"
+        echo ""
+        echo "=== Available Handlers ==="
+        grep -n "if parsed.path ==" "${NS_WWW}/server.py" 2>/dev/null | head -10 || echo "No handlers found"
+        echo "=== End Report ==="
+      } > "$error_log"
+      
+      # Display critical error info to user
+      ns_err "Critical webserver startup errors detected:"
+      if [ -f "$web_log" ]; then
+        echo "--- Last 10 lines of web.log ---" >&2
+        tail -10 "$web_log" >&2
+      fi
+      
+      # Check for common syntax errors
+      if grep -q "SyntaxError\|IndentationError" "$web_log" 2>/dev/null; then
+        ns_err "Python syntax/indentation error detected in generated server.py"
+        ns_err "This indicates a code generation issue in the novashield.sh script"
+      fi
+      
+      ns_err "Full error analysis saved to: $error_log"
       return 1
     fi
     
