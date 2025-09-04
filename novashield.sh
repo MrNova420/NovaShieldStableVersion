@@ -4784,45 +4784,45 @@ class Handler(SimpleHTTPRequestHandler):
                     # Get all usernames from _userdb
                     userdb = db.get('_userdb', {})
                     active_sessions = {}
-                
-                # Count active sessions per user
-                for token, session_data in db.items():
-                    if token.startswith('_'):
-                        continue
-                    if isinstance(session_data, dict):
-                        user = session_data.get('user')
-                        expires = session_data.get('expires', 0)
-                        if user and expires > current_time:
-                            active_sessions[user] = active_sessions.get(user, 0) + 1
-                
-                # Build user list
-                for username in userdb.keys():
-                    active_count = active_sessions.get(username, 0)
-                    users_list.append({
-                        'username': username,
-                        'active': active_count > 0,
-                        'session_count': active_count
-                    })
-                
-                # Sort by username
-                users_list.sort(key=lambda x: x['username'])
-                
-                response = {
-                    'users': users_list,
-                    'total_users': len(users_list),
-                    'total_active_sessions': sum(active_sessions.values()),
-                    'timestamp': time.strftime('%Y-%m-%d %H:%M:%S')
-                }
-                
-                self._set_headers(200)
-                self.wfile.write(json.dumps(response).encode('utf-8'))
-                return
-                
-            except Exception as e:
-                security_log(f"USERS_API_ERROR error={str(e)}")
-                self._set_headers(500)
-                self.wfile.write(json.dumps({'error': str(e)}).encode('utf-8'))
-                return
+                    
+                    # Count active sessions per user
+                    for token, session_data in db.items():
+                        if token.startswith('_'):
+                            continue
+                        if isinstance(session_data, dict):
+                            user = session_data.get('user')
+                            expires = session_data.get('expires', 0)
+                            if user and expires > current_time:
+                                active_sessions[user] = active_sessions.get(user, 0) + 1
+                    
+                    # Build user list
+                    for username in userdb.keys():
+                        active_count = active_sessions.get(username, 0)
+                        users_list.append({
+                            'username': username,
+                            'active': active_count > 0,
+                            'session_count': active_count
+                        })
+                    
+                    # Sort by username
+                    users_list.sort(key=lambda x: x['username'])
+                    
+                    response = {
+                        'users': users_list,
+                        'total_users': len(users_list),
+                        'total_active_sessions': sum(active_sessions.values()),
+                        'timestamp': time.strftime('%Y-%m-%d %H:%M:%S')
+                    }
+                    
+                    self._set_headers(200)
+                    self.wfile.write(json.dumps(response).encode('utf-8'))
+                    return
+                    
+                except Exception as e:
+                    security_log(f"USERS_API_ERROR error={str(e)}")
+                    self._set_headers(500)
+                    self.wfile.write(json.dumps({'error': str(e)}).encode('utf-8'))
+                    return
 
             if parsed.path == '/api/logs':
                 if not require_auth(self): return
@@ -4831,7 +4831,7 @@ class Handler(SimpleHTTPRequestHandler):
                 if not os.path.exists(p): p = os.path.join(NS_LOGS, name)
                 lines = []
                 try:
-                with open(p,'r',encoding='utf-8') as f: lines=f.read().splitlines()[-200:]
+                    with open(p,'r',encoding='utf-8') as f: lines=f.read().splitlines()[-200:]
                 except Exception: pass
             self._set_headers(200); self.wfile.write(json.dumps({'name': name, 'lines': lines}).encode('utf-8')); return
 
@@ -4856,25 +4856,25 @@ class Handler(SimpleHTTPRequestHandler):
                 full = os.path.abspath(p)
                 if not full.startswith(NS_HOME): self._set_headers(403); self.wfile.write(b'{"error":"forbidden"}'); return
                 if not os.path.exists(full) or not os.path.isfile(full):
-                self._set_headers(404); self.wfile.write(b'{"error":"not found"}'); return
+                    self._set_headers(404); self.wfile.write(b'{"error":"not found"}'); return
                 try:
                     size = os.path.getsize(full)
                     content = open(full,'rb').read(500_000).decode('utf-8','ignore')
                     self._set_headers(200); self.wfile.write(json.dumps({'ok':True,'path':full,'size':size,'content':content}).encode('utf-8')); return
                 except Exception as e:
-                self._set_headers(500); self.wfile.write(json.dumps({'ok':False,'error':str(e)}).encode('utf-8')); return
+                    self._set_headers(500); self.wfile.write(json.dumps({'ok':False,'error':str(e)}).encode('utf-8')); return
 
             if parsed.path == '/site':
                 index = os.path.join(SITE_DIR,'index.html')
                 self._set_headers(200,'text/html; charset=utf-8'); self.wfile.write(read_text(index,'<h1>No site yet</h1>').encode('utf-8')); return
 
                 if parsed.path.startswith('/site/'):
-                p = parsed.path[len('/site/'):]
-                full = os.path.join(SITE_DIR, p)
-                if not os.path.abspath(full).startswith(SITE_DIR): self._set_headers(403); self.wfile.write(b'{}'); return
-                if os.path.exists(full):
-                self._set_headers(200, 'text/html; charset=utf-8'); self.wfile.write(read_text(full).encode('utf-8')); return
-                self._set_headers(404); self.wfile.write(b'{}'); return
+                    p = parsed.path[len('/site/'):]
+                    full = os.path.join(SITE_DIR, p)
+                    if not os.path.abspath(full).startswith(SITE_DIR): self._set_headers(403); self.wfile.write(b'{}'); return
+                    if os.path.exists(full):
+                        self._set_headers(200, 'text/html; charset=utf-8'); self.wfile.write(read_text(full).encode('utf-8')); return
+                    self._set_headers(404); self.wfile.write(b'{}'); return
 
                 self._set_headers(404); self.wfile.write(b'{"error":"not found"}')
         
@@ -4911,25 +4911,25 @@ class Handler(SimpleHTTPRequestHandler):
             except Exception: pass
         
             parsed = urlparse(self.path)
-        if not rate_limit_ok(self, parsed.path):
-            # Log rate limit violations
-            try:
-                with open(security_log_path, 'a', encoding='utf-8') as f:
-                    f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} [RATE_LIMIT] IP={ip} Path={path} UserAgent='{user_agent[:100]}'\n")
-            except Exception: pass
-            py_alert('WARN', f'Rate limit hit by {ip} on {path}')
-            self._set_headers(429); self.wfile.write(b'{"error":"rate"}'); return
+            if not rate_limit_ok(self, parsed.path):
+                # Log rate limit violations
+                try:
+                    with open(security_log_path, 'a', encoding='utf-8') as f:
+                        f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} [RATE_LIMIT] IP={ip} Path={path} UserAgent='{user_agent[:100]}'\n")
+                except Exception: pass
+                py_alert('WARN', f'Rate limit hit by {ip} on {path}')
+                self._set_headers(429); self.wfile.write(b'{"error":"rate"}'); return
             
-        if banned(self):
-            # Log banned IP attempts
-            try:
-                with open(security_log_path, 'a', encoding='utf-8') as f:
-                    f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} [BANNED_ACCESS] IP={ip} Path={path} UserAgent='{user_agent[:100]}'\n")
-            except Exception: pass
-            py_alert('WARN', f'Banned IP {ip} attempted access to {path}')
-            self._set_headers(429); self.wfile.write(b'{"error":"locked"}'); return
-        length = int(self.headers.get('Content-Length', 0))
-        body = self.rfile.read(length).decode('utf-8') if length else ''
+            if banned(self):
+                # Log banned IP attempts
+                try:
+                    with open(security_log_path, 'a', encoding='utf-8') as f:
+                        f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} [BANNED_ACCESS] IP={ip} Path={path} UserAgent='{user_agent[:100]}'\n")
+                except Exception: pass
+                py_alert('WARN', f'Banned IP {ip} attempted access to {path}')
+                self._set_headers(429); self.wfile.write(b'{"error":"locked"}'); return
+            length = int(self.headers.get('Content-Length', 0))
+            body = self.rfile.read(length).decode('utf-8') if length else ''
 
                 # Enhanced login attempt logging with detailed connection info
                 ip = self.client_address[0]
@@ -5833,12 +5833,12 @@ if __name__ == '__main__':
                     time.sleep(1)
                     continue
                     
-                except Exception as e:
+            except Exception as e:
                 print(f"Bind failed on {h}:{port}: {e}", file=sys.stderr)
                 time.sleep(0.5)
                 continue
                 
-                except Exception as e:
+    except Exception as e:
         # Top-level exception handler - log and exit cleanly
         error_msg = f"Critical server error: {str(e)}"
         print(error_msg, file=sys.stderr)
