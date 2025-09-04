@@ -5422,27 +5422,27 @@ class Handler(SimpleHTTPRequestHandler):
                     except Exception as e:
                         print(f"Error counting active sessions: {e}")
                         stats['active_sessions'] = 0
-                
-                # Parse security log for dedicated security events
-                if os.path.exists(security_path):
-                    try:
-                        with open(security_path, 'r', encoding='utf-8') as f:
-                            lines = f.readlines()[-100:]  # Increased to 100 for comprehensive logs
-                            for line in lines:
-                                line = line.strip()
-                                if not line: continue
-                                
-                                parts = line.split(' ', 3)
-                                if len(parts) >= 4:
-                                    timestamp = f"{parts[0]} {parts[1]}"
-                                    level_type = parts[2].strip('[]').lower()
-                                    message = parts[3]
+                    
+                    # Parse security log for dedicated security events
+                    if os.path.exists(security_path):
+                        try:
+                            with open(security_path, 'r', encoding='utf-8') as f:
+                                lines = f.readlines()[-100:]  # Increased to 100 for comprehensive logs
+                                for line in lines:
+                                    line = line.strip()
+                                    if not line: continue
                                     
-                                    log_entry = {
-                                        'timestamp': timestamp,
-                                        'message': message,
-                                        'level': level_type
-                                    }
+                                    parts = line.split(' ', 3)
+                                    if len(parts) >= 4:
+                                        timestamp = f"{parts[0]} {parts[1]}"
+                                        level_type = parts[2].strip('[]').lower()
+                                        message = parts[3]
+                                        
+                                        log_entry = {
+                                            'timestamp': timestamp,
+                                            'message': message,
+                                            'level': level_type
+                                        }
                                     
                                     # Enhanced categorization for new log types
                                     if level_type in ['threat', 'critical']:
@@ -5467,13 +5467,13 @@ class Handler(SimpleHTTPRequestHandler):
                                     
                                     security_logs.append(log_entry)
                                     stats['security_count'] += 1
-                    except Exception as e:
-                        print(f"Error reading security log: {e}")
-                
-                # Parse audit log for detailed system events
-                if os.path.exists(audit_path):
-                    try:
-                        with open(audit_path, 'r', encoding='utf-8') as f:
+                        except Exception as e:
+                            print(f"Error reading security log: {e}")
+                    
+                    # Parse audit log for detailed system events
+                    if os.path.exists(audit_path):
+                        try:
+                            with open(audit_path, 'r', encoding='utf-8') as f:
                             lines = f.readlines()[-50:]  # Last 50 lines
                             for line in lines:
                                 line = line.strip()
