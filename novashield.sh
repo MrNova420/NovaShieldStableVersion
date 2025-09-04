@@ -11443,6 +11443,24 @@ tabs.forEach(b => {
   console.log('✅ Tab switching initialized');
 }
 
+// Standalone showTab function for programmatic tab switching
+function showTab(tabName) {
+  try {
+    // Find the tab button and trigger click
+    const tabButton = $(`button[data-tab="${tabName}"]`);
+    if (tabButton) {
+      tabButton.click();
+      console.log(`✅ Switched to ${tabName} tab`);
+    } else {
+      console.error(`❌ Tab not found: ${tabName}`);
+      toast(`Tab ${tabName} not available`, 'error');
+    }
+  } catch (error) {
+    console.error(`❌ Failed to show tab ${tabName}:`, error);
+    toast(`Failed to switch to ${tabName} tab`, 'error');
+  }
+}
+
 // Enhanced Keep-alive functionality to prevent session expiration and login loops
 let keepAliveInterval = null;
 // sessionValidationAttempts is already declared earlier, use existing variable
