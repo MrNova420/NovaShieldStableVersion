@@ -100,7 +100,8 @@ audit(){
 alert(){
   local level="$1"; shift
   local msg="$*"
-  local line="$(ns_now) [$level] $msg"
+  local line
+  line="$(ns_now) [$level] $msg"
   mkdir -p "$(dirname "$NS_ALERTS")" 2>/dev/null
   _rotate_log "$NS_ALERTS" 3000
   echo "$line" | tee -a "$NS_ALERTS" >&2
@@ -113,7 +114,8 @@ alert(){
       ;;
     *)
       # Only log security-relevant events to security.log based on keywords
-      local msg_lower="$(echo "$msg" | tr '[:upper:]' '[:lower:]')"
+      local msg_lower
+      msg_lower="$(echo "$msg" | tr '[:upper:]' '[:lower:]')"
       case "$msg_lower" in
         *intrusion*|*auth*|*unauthorized*|*csrf*|*brute*|*attack*|*forbidden*|*blocked*|*command*|*traversal*|*ban*|*"rate limit"*|*login*|*breach*|*suspicious*)
           # This is a real security event
@@ -221,9 +223,22 @@ write_file(){
 }
 
 append_file(){ local path="$1"; shift; cat >>"$path"; }
-slurp(){ [ -f "$1" ] && cat "$1" || true; }
+slurp(){ 
+  if [ -f "$1" ]; then 
+    cat "$1"
+  else 
+    true
+  fi
+}
 is_int(){ [[ "$1" =~ ^[0-9]+$ ]]; }
-ensure_int(){ local v="$1" d="$2"; is_int "$v" && echo "$v" || echo "$d"; }
+ensure_int(){ 
+  local v="$1" d="$2"
+  if is_int "$v"; then 
+    echo "$v"
+  else 
+    echo "$d"
+  fi
+}
 
 # Safer YAML value extraction for nested keys (handles both single-line and multi-line formats)
 # Usage: yaml_get "section" "key" "default_value" 
@@ -5217,48 +5232,48 @@ class Handler(SimpleHTTPRequestHandler):
                     user = ''
                     pwd = ''
                     otp = ''
-            
-            # Log all login attempts regardless of success/failure
-            security_log_path = os.path.join(NS_LOGS, 'security.log')
-            try:
-                Path(os.path.dirname(security_log_path)).mkdir(parents=True, exist_ok=True)
-                with open(security_log_path, 'a', encoding='utf-8') as f:
-                    f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} [LOGIN_ATTEMPT] IP={ip} User={user} UserAgent='{user_agent[:100]}'\n")
-            except Exception: pass
-            
-            if not user or not pwd:
-                # Log invalid login attempts with missing credentials
+                
+                # Log all login attempts regardless of success/failure
+                security_log_path = os.path.join(NS_LOGS, 'security.log')
                 try:
+                    Path(os.path.dirname(security_log_path)).mkdir(parents=True, exist_ok=True)
                     with open(security_log_path, 'a', encoding='utf-8') as f:
-                        f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} [LOGIN_INVALID] IP={ip} Reason=missing_credentials UserAgent='{user_agent[:100]}'\n")
+                        f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} [LOGIN_ATTEMPT] IP={ip} User={user} UserAgent='{user_agent[:100]}'\n")
                 except Exception: pass
-                self._set_headers(400); self.wfile.write(b'{"ok":false}'); return
                 
-            if check_login(user, pwd):
-                sec = user_2fa_secret(user)
-                if require_2fa() or sec:
-                    now = totp_now(sec)
-                    if not otp or otp != now:
-                        login_fail(self)
-                        # Enhanced 2FA failure logging
-                        try:
-                            with open(security_log_path, 'a', encoding='utf-8') as f:
-                                f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} [2FA_FAIL] IP={ip} User={user} UserAgent='{user_agent[:100]}'\n")
-                        except Exception: pass
-                        self._set_headers(401); self.wfile.write(b'{"ok":false,"need_2fa":true}'); return
-                
-                # Create session after all authentication checks pass (moved outside 2FA block)
-                token, csrf = new_session(user)
-                login_ok(self)
-                py_alert('INFO', f'LOGIN OK user={user} ip={ip}')
-                audit(f'LOGIN OK user={user} ip={ip} user_agent={user_agent[:50]}')
-                self._set_headers(200, 'application/json', {'Set-Cookie': f'NSSESS={token}; Path=/; HttpOnly; SameSite=Lax'})
-                self.wfile.write(json.dumps({'ok':True,'csrf':csrf}).encode('utf-8')); return
-                
-            login_fail(self); 
-            py_alert('WARN', f'LOGIN FAIL user={user} ip={ip}')
-            audit(f'LOGIN FAIL user={user} ip={ip} user_agent={user_agent[:50]}')
-            self._set_headers(401); self.wfile.write(b'{"ok":false}'); return
+                if not user or not pwd:
+                    # Log invalid login attempts with missing credentials
+                    try:
+                        with open(security_log_path, 'a', encoding='utf-8') as f:
+                            f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} [LOGIN_INVALID] IP={ip} Reason=missing_credentials UserAgent='{user_agent[:100]}'\n")
+                    except Exception: pass
+                    self._set_headers(400); self.wfile.write(b'{"ok":false}'); return
+                    
+                if check_login(user, pwd):
+                    sec = user_2fa_secret(user)
+                    if require_2fa() or sec:
+                        now = totp_now(sec)
+                        if not otp or otp != now:
+                            login_fail(self)
+                            # Enhanced 2FA failure logging
+                            try:
+                                with open(security_log_path, 'a', encoding='utf-8') as f:
+                                    f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} [2FA_FAIL] IP={ip} User={user} UserAgent='{user_agent[:100]}'\n")
+                            except Exception: pass
+                            self._set_headers(401); self.wfile.write(b'{"ok":false,"need_2fa":true}'); return
+                    
+                    # Create session after all authentication checks pass (moved outside 2FA block)
+                    token, csrf = new_session(user)
+                    login_ok(self)
+                    py_alert('INFO', f'LOGIN OK user={user} ip={ip}')
+                    audit(f'LOGIN OK user={user} ip={ip} user_agent={user_agent[:50]}')
+                    self._set_headers(200, 'application/json', {'Set-Cookie': f'NSSESS={token}; Path=/; HttpOnly; SameSite=Lax'})
+                    self.wfile.write(json.dumps({'ok':True,'csrf':csrf}).encode('utf-8')); return
+                    
+                login_fail(self); 
+                py_alert('WARN', f'LOGIN FAIL user={user} ip={ip}')
+                audit(f'LOGIN FAIL user={user} ip={ip} user_agent={user_agent[:50]}')
+                self._set_headers(401); self.wfile.write(b'{"ok":false}'); return
 
             if not require_auth(self): return
 
@@ -12862,6 +12877,13 @@ print('yes' if len(ud)>0 else 'no')
 PY
 )
   if [ "$have_user" = "yes" ]; then return 0; fi
+  
+  # Handle non-interactive mode
+  if [ "${NS_NON_INTERACTIVE:-}" = "1" ]; then
+    ns_warn "Non-interactive mode: Skipping user creation. You can add users later with --add-user"
+    return 0
+  fi
+  
   echo
   ns_warn "No web users found but auth_enabled is true. Creating the first user."
   add_user
@@ -12887,6 +12909,7 @@ Usage: $0 [OPTION]
 
 Core Commands:
   --install              Install NovaShield and dependencies
+  --install --non-interactive  Install without prompting for user creation
   --start                Start all services (monitors + web dashboard)
   --stop                 Stop all running services
   --status               Show service status and information
@@ -12997,7 +13020,12 @@ load_config_file
 
 case "${1:-}" in
   --help|-h) usage; exit 0;;
-  --install) install_all;;
+  --install) 
+    if [ "${2:-}" = "--non-interactive" ]; then
+      NS_NON_INTERACTIVE=1 install_all
+    else
+      install_all
+    fi;;
   --start) start_all;;
   --stop) stop_all;;
   --restart-monitors) restart_monitors;;
