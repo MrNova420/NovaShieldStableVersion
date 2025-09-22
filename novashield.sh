@@ -48,7 +48,7 @@ elif command -v readlink >/dev/null 2>&1; then
   NS_SELF="$(readlink -f "${NS_SELF}" 2>/dev/null || echo "${NS_SELF}")"
 fi
 
-RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[0;33m'; BLUE='\033[0;34m'; NC='\033[0m'
+RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[0;33m'; NC='\033[0m'
 
 ns_now() { date '+%Y-%m-%d %H:%M:%S'; }
 
@@ -100,7 +100,8 @@ audit(){
 alert(){
   local level="$1"; shift
   local msg="$*"
-  local line="$(ns_now) [$level] $msg"
+  local line
+  line="$(ns_now) [$level] $msg"
   mkdir -p "$(dirname "$NS_ALERTS")" 2>/dev/null
   _rotate_log "$NS_ALERTS" 3000
   echo "$line" | tee -a "$NS_ALERTS" >&2
@@ -113,7 +114,8 @@ alert(){
       ;;
     *)
       # Only log security-relevant events to security.log based on keywords
-      local msg_lower="$(echo "$msg" | tr '[:upper:]' '[:lower:]')"
+      local msg_lower
+      msg_lower="$(echo "$msg" | tr '[:upper:]' '[:lower:]')"
       case "$msg_lower" in
         *intrusion*|*auth*|*unauthorized*|*csrf*|*brute*|*attack*|*forbidden*|*blocked*|*command*|*traversal*|*ban*|*"rate limit"*|*login*|*breach*|*suspicious*)
           # This is a real security event
@@ -221,9 +223,22 @@ write_file(){
 }
 
 append_file(){ local path="$1"; shift; cat >>"$path"; }
-slurp(){ [ -f "$1" ] && cat "$1" || true; }
+slurp(){ 
+  if [ -f "$1" ]; then 
+    cat "$1"
+  else 
+    true
+  fi
+}
 is_int(){ [[ "$1" =~ ^[0-9]+$ ]]; }
-ensure_int(){ local v="$1" d="$2"; is_int "$v" && echo "$v" || echo "$d"; }
+ensure_int(){ 
+  local v="$1" d="$2"
+  if is_int "$v"; then 
+    echo "$v"
+  else 
+    echo "$d"
+  fi
+}
 
 # Safer YAML value extraction for nested keys (handles both single-line and multi-line formats)
 # Usage: yaml_get "section" "key" "default_value" 
@@ -406,11 +421,11 @@ ensure_dirs(){
 write_default_config(){
   if [ -f "$NS_CONF" ]; then return 0; fi
   ns_log "Writing default config to $NS_CONF"
-  write_file "$NS_CONF" 600 <<'YAML'
+  write_file "$NS_CONF" 600 <<YAML
 version: "3.1.0"
 http:
-  host: 127.0.0.1
-  port: 8765
+  host: ${NS_DEFAULT_HOST}
+  port: ${NS_DEFAULT_PORT}
   allow_lan: false
 
 security:
@@ -1308,7 +1323,6 @@ _monitor_integrity(){
     
     local total_files=0
     local total_changes=0
-    local recent_changes=[]
     
     for p in $list; do
       p=$(echo "$p" | tr -d '"' | tr -d ' ')
@@ -4948,12 +4962,12 @@ class Handler(SimpleHTTPRequestHandler):
             if parsed.path == '/api/status':
                 if not require_auth(self): return
                 sess = get_session(self) or {}
-            
-            # Helper function to check monitor enabled state using NS_CTRL flags
-            def monitor_enabled(name):
-                return not os.path.exists(os.path.join(NS_CTRL, f'{name}.disabled'))
-            
-            data = {
+                
+                # Helper function to check monitor enabled state using NS_CTRL flags
+                def monitor_enabled(name):
+                    return not os.path.exists(os.path.join(NS_CTRL, f'{name}.disabled'))
+                
+                data = {
                 'ts': time.strftime('%Y-%m-%d %H:%M:%S'),
                 'cpu':   read_json(os.path.join(NS_LOGS, 'cpu.json'), {}),
                 'memory':read_json(os.path.join(NS_LOGS, 'memory.json'), {}),
@@ -4988,8 +5002,8 @@ class Handler(SimpleHTTPRequestHandler):
                 'suspicious_count': len(read_json(os.path.join(NS_LOGS,'process.json'), {}).get('suspicious', [])),
                 'active_sessions': len([s for s in (users_db() or {}).values() if s.get('expires', 0) > int(time.time())]),
                 'uptime': read_uptime()
-            }
-            self._set_headers(200); self.wfile.write(json.dumps(data).encode('utf-8')); return
+                }
+                self._set_headers(200); self.wfile.write(json.dumps(data).encode('utf-8')); return
 
             if parsed.path == '/api/whoami':
                 info = {
@@ -5217,48 +5231,48 @@ class Handler(SimpleHTTPRequestHandler):
                     user = ''
                     pwd = ''
                     otp = ''
-            
-            # Log all login attempts regardless of success/failure
-            security_log_path = os.path.join(NS_LOGS, 'security.log')
-            try:
-                Path(os.path.dirname(security_log_path)).mkdir(parents=True, exist_ok=True)
-                with open(security_log_path, 'a', encoding='utf-8') as f:
-                    f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} [LOGIN_ATTEMPT] IP={ip} User={user} UserAgent='{user_agent[:100]}'\n")
-            except Exception: pass
-            
-            if not user or not pwd:
-                # Log invalid login attempts with missing credentials
+                
+                # Log all login attempts regardless of success/failure
+                security_log_path = os.path.join(NS_LOGS, 'security.log')
                 try:
+                    Path(os.path.dirname(security_log_path)).mkdir(parents=True, exist_ok=True)
                     with open(security_log_path, 'a', encoding='utf-8') as f:
-                        f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} [LOGIN_INVALID] IP={ip} Reason=missing_credentials UserAgent='{user_agent[:100]}'\n")
+                        f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} [LOGIN_ATTEMPT] IP={ip} User={user} UserAgent='{user_agent[:100]}'\n")
                 except Exception: pass
-                self._set_headers(400); self.wfile.write(b'{"ok":false}'); return
                 
-            if check_login(user, pwd):
-                sec = user_2fa_secret(user)
-                if require_2fa() or sec:
-                    now = totp_now(sec)
-                    if not otp or otp != now:
-                        login_fail(self)
-                        # Enhanced 2FA failure logging
-                        try:
-                            with open(security_log_path, 'a', encoding='utf-8') as f:
-                                f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} [2FA_FAIL] IP={ip} User={user} UserAgent='{user_agent[:100]}'\n")
-                        except Exception: pass
-                        self._set_headers(401); self.wfile.write(b'{"ok":false,"need_2fa":true}'); return
-                
-                # Create session after all authentication checks pass (moved outside 2FA block)
-                token, csrf = new_session(user)
-                login_ok(self)
-                py_alert('INFO', f'LOGIN OK user={user} ip={ip}')
-                audit(f'LOGIN OK user={user} ip={ip} user_agent={user_agent[:50]}')
-                self._set_headers(200, 'application/json', {'Set-Cookie': f'NSSESS={token}; Path=/; HttpOnly; SameSite=Lax'})
-                self.wfile.write(json.dumps({'ok':True,'csrf':csrf}).encode('utf-8')); return
-                
-            login_fail(self); 
-            py_alert('WARN', f'LOGIN FAIL user={user} ip={ip}')
-            audit(f'LOGIN FAIL user={user} ip={ip} user_agent={user_agent[:50]}')
-            self._set_headers(401); self.wfile.write(b'{"ok":false}'); return
+                if not user or not pwd:
+                    # Log invalid login attempts with missing credentials
+                    try:
+                        with open(security_log_path, 'a', encoding='utf-8') as f:
+                            f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} [LOGIN_INVALID] IP={ip} Reason=missing_credentials UserAgent='{user_agent[:100]}'\n")
+                    except Exception: pass
+                    self._set_headers(400); self.wfile.write(b'{"ok":false}'); return
+                    
+                if check_login(user, pwd):
+                    sec = user_2fa_secret(user)
+                    if require_2fa() or sec:
+                        now = totp_now(sec)
+                        if not otp or otp != now:
+                            login_fail(self)
+                            # Enhanced 2FA failure logging
+                            try:
+                                with open(security_log_path, 'a', encoding='utf-8') as f:
+                                    f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} [2FA_FAIL] IP={ip} User={user} UserAgent='{user_agent[:100]}'\n")
+                            except Exception: pass
+                            self._set_headers(401); self.wfile.write(b'{"ok":false,"need_2fa":true}'); return
+                    
+                    # Create session after all authentication checks pass (moved outside 2FA block)
+                    token, csrf = new_session(user)
+                    login_ok(self)
+                    py_alert('INFO', f'LOGIN OK user={user} ip={ip}')
+                    audit(f'LOGIN OK user={user} ip={ip} user_agent={user_agent[:50]}')
+                    self._set_headers(200, 'application/json', {'Set-Cookie': f'NSSESS={token}; Path=/; HttpOnly; SameSite=Lax'})
+                    self.wfile.write(json.dumps({'ok':True,'csrf':csrf}).encode('utf-8')); return
+                    
+                login_fail(self); 
+                py_alert('WARN', f'LOGIN FAIL user={user} ip={ip}')
+                audit(f'LOGIN FAIL user={user} ip={ip} user_agent={user_agent[:50]}')
+                self._set_headers(401); self.wfile.write(b'{"ok":false}'); return
 
             if not require_auth(self): return
 
@@ -5269,47 +5283,47 @@ class Handler(SimpleHTTPRequestHandler):
                     data = {}
                 action = data.get('action','')
                 target = data.get('target','')
-            flag = os.path.join(NS_CTRL, f'{target}.disabled')
-            if action == 'enable' and target:
-                try:
-                    if os.path.exists(flag): os.remove(flag)
-                    audit(f'MONITOR ENABLE {target} ip={self.client_address[0]}')
-                    self._set_headers(200); self.wfile.write(json.dumps({'ok':True}).encode('utf-8')); return
-                except Exception: pass
-            if action == 'disable' and target:
-                try:
-                    open(flag,'w').close()
-                    audit(f'MONITOR DISABLE {target} ip={self.client_address[0]}')
-                    self._set_headers(200); self.wfile.write(json.dumps({'ok':True}).encode('utf-8')); return
-                except Exception: pass
-            self_path = read_text(SELF_PATH_FILE).strip() or os.path.join(NS_HOME, 'bin', 'novashield.sh')
-            if action in ('backup','version','restart_monitors','clear_logs','maintenance'):
-                try:
-                    if action=='backup': os.system(f'\"{self_path}\" --backup >/dev/null 2>&1 &')
-                    if action=='version': os.system(f'\"{self_path}\" --version-snapshot >/dev/null 2>&1 &')
-                    if action=='restart_monitors': os.system(f'\"{self_path}\" --restart-monitors >/dev/null 2>&1 &')
-                    if action=='maintenance': os.system(f'\"{self_path}\" --maintenance >/dev/null 2>&1 &')
-                    if action=='clear_logs':
-                        # Clear old log entries (keep last 100 lines of each log)
-                        log_files = [
-                            os.path.join(NS_LOGS, 'audit.log'),
-                            os.path.join(NS_LOGS, 'alerts.log'),
-                            os.path.join(NS_HOME, 'session.log')
-                        ]
-                        for log_file in log_files:
-                            if os.path.exists(log_file):
-                                try:
-                                    with open(log_file, 'r', encoding='utf-8') as f:
-                                        lines = f.readlines()
-                                    if len(lines) > 100:
-                                        with open(log_file, 'w', encoding='utf-8') as f:
-                                            f.writelines(lines[-100:])
-                                except Exception as e:
-                                    print(f"Error clearing {log_file}: {e}")
-                    audit(f'CONTROL {action} ip={self.client_address[0]}')
-                    self._set_headers(200); self.wfile.write(json.dumps({'ok':True}).encode('utf-8')); return
-                except Exception: pass
-            self._set_headers(400); self.wfile.write(b'{"ok":false}'); return
+                flag = os.path.join(NS_CTRL, f'{target}.disabled')
+                if action == 'enable' and target:
+                    try:
+                        if os.path.exists(flag): os.remove(flag)
+                        audit(f'MONITOR ENABLE {target} ip={self.client_address[0]}')
+                        self._set_headers(200); self.wfile.write(json.dumps({'ok':True}).encode('utf-8')); return
+                    except Exception: pass
+                if action == 'disable' and target:
+                    try:
+                        open(flag,'w').close()
+                        audit(f'MONITOR DISABLE {target} ip={self.client_address[0]}')
+                        self._set_headers(200); self.wfile.write(json.dumps({'ok':True}).encode('utf-8')); return
+                    except Exception: pass
+                self_path = read_text(SELF_PATH_FILE).strip() or os.path.join(NS_HOME, 'bin', 'novashield.sh')
+                if action in ('backup','version','restart_monitors','clear_logs','maintenance'):
+                    try:
+                        if action=='backup': os.system(f'\"{self_path}\" --backup >/dev/null 2>&1 &')
+                        if action=='version': os.system(f'\"{self_path}\" --version-snapshot >/dev/null 2>&1 &')
+                        if action=='restart_monitors': os.system(f'\"{self_path}\" --restart-monitors >/dev/null 2>&1 &')
+                        if action=='maintenance': os.system(f'\"{self_path}\" --maintenance >/dev/null 2>&1 &')
+                        if action=='clear_logs':
+                            # Clear old log entries (keep last 100 lines of each log)
+                            log_files = [
+                                os.path.join(NS_LOGS, 'audit.log'),
+                                os.path.join(NS_LOGS, 'alerts.log'),
+                                os.path.join(NS_HOME, 'session.log')
+                            ]
+                            for log_file in log_files:
+                                if os.path.exists(log_file):
+                                    try:
+                                        with open(log_file, 'r', encoding='utf-8') as f:
+                                            lines = f.readlines()
+                                        if len(lines) > 100:
+                                            with open(log_file, 'w', encoding='utf-8') as f:
+                                                f.writelines(lines[-100:])
+                                    except Exception as e:
+                                        print(f"Error clearing {log_file}: {e}")
+                        audit(f'CONTROL {action} ip={self.client_address[0]}')
+                        self._set_headers(200); self.wfile.write(json.dumps({'ok':True}).encode('utf-8')); return
+                    except Exception: pass
+                self._set_headers(400); self.wfile.write(b'{"ok":false}'); return
 
             if parsed.path == '/api/chat':
                 if not require_auth(self): return
@@ -12862,6 +12876,13 @@ print('yes' if len(ud)>0 else 'no')
 PY
 )
   if [ "$have_user" = "yes" ]; then return 0; fi
+  
+  # Handle non-interactive mode
+  if [ "${NS_NON_INTERACTIVE:-}" = "1" ]; then
+    ns_warn "Non-interactive mode: Skipping user creation. You can add users later with --add-user"
+    return 0
+  fi
+  
   echo
   ns_warn "No web users found but auth_enabled is true. Creating the first user."
   add_user
@@ -12887,6 +12908,7 @@ Usage: $0 [OPTION]
 
 Core Commands:
   --install              Install NovaShield and dependencies
+  --install --non-interactive  Install without prompting for user creation
   --start                Start all services (monitors + web dashboard)
   --stop                 Stop all running services
   --status               Show service status and information
@@ -12997,7 +13019,12 @@ load_config_file
 
 case "${1:-}" in
   --help|-h) usage; exit 0;;
-  --install) install_all;;
+  --install) 
+    if [ "${2:-}" = "--non-interactive" ]; then
+      NS_NON_INTERACTIVE=1 install_all
+    else
+      install_all
+    fi;;
   --start) start_all;;
   --stop) stop_all;;
   --restart-monitors) restart_monitors;;
