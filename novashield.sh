@@ -48,7 +48,7 @@ elif command -v readlink >/dev/null 2>&1; then
   NS_SELF="$(readlink -f "${NS_SELF}" 2>/dev/null || echo "${NS_SELF}")"
 fi
 
-RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[0;33m'; BLUE='\033[0;34m'; NC='\033[0m'
+RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[0;33m'; NC='\033[0m'
 
 ns_now() { date '+%Y-%m-%d %H:%M:%S'; }
 
@@ -421,11 +421,11 @@ ensure_dirs(){
 write_default_config(){
   if [ -f "$NS_CONF" ]; then return 0; fi
   ns_log "Writing default config to $NS_CONF"
-  write_file "$NS_CONF" 600 <<'YAML'
+  write_file "$NS_CONF" 600 <<YAML
 version: "3.1.0"
 http:
-  host: 127.0.0.1
-  port: 8765
+  host: ${NS_DEFAULT_HOST}
+  port: ${NS_DEFAULT_PORT}
   allow_lan: false
 
 security:
@@ -1323,7 +1323,6 @@ _monitor_integrity(){
     
     local total_files=0
     local total_changes=0
-    local recent_changes=[]
     
     for p in $list; do
       p=$(echo "$p" | tr -d '"' | tr -d ' ')
@@ -4963,12 +4962,12 @@ class Handler(SimpleHTTPRequestHandler):
             if parsed.path == '/api/status':
                 if not require_auth(self): return
                 sess = get_session(self) or {}
-            
-            # Helper function to check monitor enabled state using NS_CTRL flags
-            def monitor_enabled(name):
-                return not os.path.exists(os.path.join(NS_CTRL, f'{name}.disabled'))
-            
-            data = {
+                
+                # Helper function to check monitor enabled state using NS_CTRL flags
+                def monitor_enabled(name):
+                    return not os.path.exists(os.path.join(NS_CTRL, f'{name}.disabled'))
+                
+                data = {
                 'ts': time.strftime('%Y-%m-%d %H:%M:%S'),
                 'cpu':   read_json(os.path.join(NS_LOGS, 'cpu.json'), {}),
                 'memory':read_json(os.path.join(NS_LOGS, 'memory.json'), {}),
@@ -5003,8 +5002,8 @@ class Handler(SimpleHTTPRequestHandler):
                 'suspicious_count': len(read_json(os.path.join(NS_LOGS,'process.json'), {}).get('suspicious', [])),
                 'active_sessions': len([s for s in (users_db() or {}).values() if s.get('expires', 0) > int(time.time())]),
                 'uptime': read_uptime()
-            }
-            self._set_headers(200); self.wfile.write(json.dumps(data).encode('utf-8')); return
+                }
+                self._set_headers(200); self.wfile.write(json.dumps(data).encode('utf-8')); return
 
             if parsed.path == '/api/whoami':
                 info = {
