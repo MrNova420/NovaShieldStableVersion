@@ -5284,47 +5284,47 @@ class Handler(SimpleHTTPRequestHandler):
                     data = {}
                 action = data.get('action','')
                 target = data.get('target','')
-            flag = os.path.join(NS_CTRL, f'{target}.disabled')
-            if action == 'enable' and target:
-                try:
-                    if os.path.exists(flag): os.remove(flag)
-                    audit(f'MONITOR ENABLE {target} ip={self.client_address[0]}')
-                    self._set_headers(200); self.wfile.write(json.dumps({'ok':True}).encode('utf-8')); return
-                except Exception: pass
-            if action == 'disable' and target:
-                try:
-                    open(flag,'w').close()
-                    audit(f'MONITOR DISABLE {target} ip={self.client_address[0]}')
-                    self._set_headers(200); self.wfile.write(json.dumps({'ok':True}).encode('utf-8')); return
-                except Exception: pass
-            self_path = read_text(SELF_PATH_FILE).strip() or os.path.join(NS_HOME, 'bin', 'novashield.sh')
-            if action in ('backup','version','restart_monitors','clear_logs','maintenance'):
-                try:
-                    if action=='backup': os.system(f'\"{self_path}\" --backup >/dev/null 2>&1 &')
-                    if action=='version': os.system(f'\"{self_path}\" --version-snapshot >/dev/null 2>&1 &')
-                    if action=='restart_monitors': os.system(f'\"{self_path}\" --restart-monitors >/dev/null 2>&1 &')
-                    if action=='maintenance': os.system(f'\"{self_path}\" --maintenance >/dev/null 2>&1 &')
-                    if action=='clear_logs':
-                        # Clear old log entries (keep last 100 lines of each log)
-                        log_files = [
-                            os.path.join(NS_LOGS, 'audit.log'),
-                            os.path.join(NS_LOGS, 'alerts.log'),
-                            os.path.join(NS_HOME, 'session.log')
-                        ]
-                        for log_file in log_files:
-                            if os.path.exists(log_file):
-                                try:
-                                    with open(log_file, 'r', encoding='utf-8') as f:
-                                        lines = f.readlines()
-                                    if len(lines) > 100:
-                                        with open(log_file, 'w', encoding='utf-8') as f:
-                                            f.writelines(lines[-100:])
-                                except Exception as e:
-                                    print(f"Error clearing {log_file}: {e}")
-                    audit(f'CONTROL {action} ip={self.client_address[0]}')
-                    self._set_headers(200); self.wfile.write(json.dumps({'ok':True}).encode('utf-8')); return
-                except Exception: pass
-            self._set_headers(400); self.wfile.write(b'{"ok":false}'); return
+                flag = os.path.join(NS_CTRL, f'{target}.disabled')
+                if action == 'enable' and target:
+                    try:
+                        if os.path.exists(flag): os.remove(flag)
+                        audit(f'MONITOR ENABLE {target} ip={self.client_address[0]}')
+                        self._set_headers(200); self.wfile.write(json.dumps({'ok':True}).encode('utf-8')); return
+                    except Exception: pass
+                if action == 'disable' and target:
+                    try:
+                        open(flag,'w').close()
+                        audit(f'MONITOR DISABLE {target} ip={self.client_address[0]}')
+                        self._set_headers(200); self.wfile.write(json.dumps({'ok':True}).encode('utf-8')); return
+                    except Exception: pass
+                self_path = read_text(SELF_PATH_FILE).strip() or os.path.join(NS_HOME, 'bin', 'novashield.sh')
+                if action in ('backup','version','restart_monitors','clear_logs','maintenance'):
+                    try:
+                        if action=='backup': os.system(f'\"{self_path}\" --backup >/dev/null 2>&1 &')
+                        if action=='version': os.system(f'\"{self_path}\" --version-snapshot >/dev/null 2>&1 &')
+                        if action=='restart_monitors': os.system(f'\"{self_path}\" --restart-monitors >/dev/null 2>&1 &')
+                        if action=='maintenance': os.system(f'\"{self_path}\" --maintenance >/dev/null 2>&1 &')
+                        if action=='clear_logs':
+                            # Clear old log entries (keep last 100 lines of each log)
+                            log_files = [
+                                os.path.join(NS_LOGS, 'audit.log'),
+                                os.path.join(NS_LOGS, 'alerts.log'),
+                                os.path.join(NS_HOME, 'session.log')
+                            ]
+                            for log_file in log_files:
+                                if os.path.exists(log_file):
+                                    try:
+                                        with open(log_file, 'r', encoding='utf-8') as f:
+                                            lines = f.readlines()
+                                        if len(lines) > 100:
+                                            with open(log_file, 'w', encoding='utf-8') as f:
+                                                f.writelines(lines[-100:])
+                                    except Exception as e:
+                                        print(f"Error clearing {log_file}: {e}")
+                        audit(f'CONTROL {action} ip={self.client_address[0]}')
+                        self._set_headers(200); self.wfile.write(json.dumps({'ok':True}).encode('utf-8')); return
+                    except Exception: pass
+                self._set_headers(400); self.wfile.write(b'{"ok":false}'); return
 
             if parsed.path == '/api/chat':
                 if not require_auth(self): return
