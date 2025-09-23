@@ -1,0 +1,374 @@
+name: Ultimate Universal Analyzer
+
+permissions:
+  contents: write
+  pull-requests: write
+  security-events: write
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    types: [opened, synchronize, reopened]
+  workflow_dispatch:
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    outputs:
+      languages: ${{ steps.detect.outputs.languages }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Detect languages in repo
+        id: detect
+        shell: bash
+        run: |
+          langs=""
+          if ls *.py 1>/dev/null 2>&1 || [ -f requirements.txt ] || [ -f pyproject.toml ]; then langs="$langs python"; fi
+          if [ -f package.json ]; then langs="$langs node"; fi
+          if ls *.cpp *.c *.h 1>/dev/null 2>&1 || [ -f Makefile ] || [ -f CMakeLists.txt ]; then langs="$langs cpp"; fi
+          if [ -f go.mod ]; then langs="$langs go"; fi
+          if [ -f Cargo.toml ]; then langs="$langs rust"; fi
+          if [ -f pom.xml ] || [ -f build.gradle ]; then langs="$langs java"; fi
+          if [ -f composer.json ]; then langs="$langs php"; fi
+          if [ -f Gemfile ]; then langs="$langs ruby"; fi
+          if [ -f pubspec.yaml ]; then langs="$langs dart"; fi
+          if ls *.sh 1>/dev/null 2>&1; then langs="$langs shell"; fi
+          if ls *.yml *.yaml 1>/dev/null 2>&1; then langs="$langs yaml"; fi
+          if ls *.json 1>/dev/null 2>&1; then langs="$langs json"; fi
+          if ls *.toml 1>/dev/null 2>&1; then langs="$langs toml"; fi
+          echo "languages=$langs" >> $GITHUB_OUTPUT
+
+  analyze:
+    needs: setup
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # -------- PYTHON --------
+      - name: Set up Python
+        if: contains(needs.setup.outputs.languages, 'python')
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Install Python tools
+        if: contains(needs.setup.outputs.languages, 'python')
+        continue-on-error: true
+        run: |
+          pip install --upgrade pip || true
+          pip install black flake8 bandit pytest coverage radon safety || true
+
+      - name: Python lint, static analysis, tests, coverage, security, complexity
+        if: contains(needs.setup.outputs.languages, 'python')
+        continue-on-error: true
+        run: |
+          black --check . | tee python_black.log || true
+          flake8 . | tee python_flake8.log || true
+          bandit -r . | tee python_bandit.log || true
+          pytest --maxfail=5 --disable-warnings --tb=short | tee python_pytest.log || true
+          coverage run -m pytest || true
+          coverage report | tee python_coverage.log || true
+          radon cc -s -a . | tee python_radon.log || true
+          safety check -r requirements.txt | tee python_safety.log || true || echo "No requirements.txt for safety check"
+
+      # -------- NODE/JS/TS --------
+      - name: Set up Node.js
+        if: contains(needs.setup.outputs.languages, 'node')
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20.x'
+
+      - name: Install Node tools
+        if: contains(needs.setup.outputs.languages, 'node')
+        continue-on-error: true
+        run: |
+          npm ci || npm install || true
+          npm install --save-dev eslint prettier jest nyc || true
+
+      - name: Node lint, tests, coverage, security
+        if: contains(needs.setup.outputs.languages, 'node')
+        continue-on-error: true
+        run: |
+          npx eslint . | tee node_eslint.log || true
+          npx prettier --check . | tee node_prettier.log || true
+          npx jest --ci --maxWorkers=2 --reporters=default --reporters=jest-junit | tee node_jest.log || true
+          npx nyc npm test || true
+          npx npm audit --json | tee node_audit.log || true
+
+      # -------- C/C++ --------
+      - name: Install C/C++ tools
+        if: contains(needs.setup.outputs.languages, 'cpp')
+        continue-on-error: true
+        run: |
+          sudo apt-get update || true
+          sudo apt-get install -y clang gcc cppcheck valgrind cmake make || true
+
+      - name: C/C++ lint, static analysis, build, test, memory check
+        if: contains(needs.setup.outputs.languages, 'cpp')
+        continue-on-error: true
+        run: |
+          cppcheck . 2>&1 | tee cpp_cppcheck.log || true
+          if [ -f Makefile ]; then make | tee cpp_make.log || true; fi
+          if [ -f CMakeLists.txt ]; then cmake . && make | tee cpp_cmake.log || true; fi
+          for exe in $(find . -maxdepth 2 -type f -executable); do
+            valgrind --leak-check=full $exe | tee -a cpp_valgrind.log || true
+          done
+
+      # -------- GO --------
+      - name: Set up Go
+        if: contains(needs.setup.outputs.languages, 'go')
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+
+      - name: Go vet, test, coverage, security
+        if: contains(needs.setup.outputs.languages, 'go')
+        continue-on-error: true
+        run: |
+          go vet ./... | tee go_vet.log || true
+          go test -v -coverprofile=go_coverage.out ./... | tee go_test.log || true
+          go install github.com/securego/gosec/v2/cmd/gosec@latest || true
+          gosec ./... | tee go_gosec.log || true
+
+      # -------- RUST --------
+      - name: Set up Rust
+        if: contains(needs.setup.outputs.languages, 'rust')
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
+
+      - name: Rust clippy, test, audit
+        if: contains(needs.setup.outputs.languages, 'rust')
+        continue-on-error: true
+        run: |
+          cargo check | tee rust_cargo_check.log || true
+          cargo clippy --all-targets --all-features -- -D warnings | tee rust_clippy.log || true
+          cargo test | tee rust_test.log || true
+          cargo audit | tee rust_audit.log || true
+
+      # -------- JAVA --------
+      - name: Set up Java
+        if: contains(needs.setup.outputs.languages, 'java')
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Java build, test, lint, security
+        if: contains(needs.setup.outputs.languages, 'java')
+        continue-on-error: true
+        run: |
+          if [ -f pom.xml ]; then mvn verify | tee java_mvn.log || true; fi
+          if [ -f build.gradle ]; then ./gradlew check | tee java_gradle.log || true; fi
+          curl -sL https://github.com/pmd/pmd/releases/download/pmd_releases%2F7.0.0-rc4/pmd-bin-7.0.0-rc4.zip -o pmd.zip && unzip -q pmd.zip || true
+          ./pmd-bin-7.0.0-rc4/bin/run.sh pmd -d . -R category/java/bestpractices.xml -f text | tee java_pmd.log || true
+
+      # -------- PHP --------
+      - name: Set up PHP
+        if: contains(needs.setup.outputs.languages, 'php')
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+
+      - name: PHP lint, static analysis, security
+        if: contains(needs.setup.outputs.languages, 'php')
+        continue-on-error: true
+        run: |
+          composer install || true
+          vendor/bin/phpstan analyse | tee php_phpstan.log || true
+          vendor/bin/phpunit | tee php_phpunit.log || true
+          composer require --dev enlightn/security-checker || true
+          vendor/bin/security-checker security:check | tee php_security.log || true
+
+      # -------- RUBY --------
+      - name: Set up Ruby
+        if: contains(needs.setup.outputs.languages, 'ruby')
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.2'
+
+      - name: Ruby lint, static analysis, security
+        if: contains(needs.setup.outputs.languages, 'ruby')
+        continue-on-error: true
+        run: |
+          bundle install || true
+          bundle exec rubocop . | tee ruby_rubocop.log || true
+          bundle exec brakeman -o ruby_brakeman.log || true
+          bundle exec rspec | tee ruby_rspec.log || true
+
+      # -------- DART --------
+      - name: Set up Dart
+        if: contains(needs.setup.outputs.languages, 'dart')
+        uses: dart-lang/setup-dart@v1
+
+      - name: Dart analyze & test
+        if: contains(needs.setup.outputs.languages, 'dart')
+        continue-on-error: true
+        run: |
+          dart pub get || true
+          dart analyze . | tee dart_analyze.log || true
+          dart test | tee dart_test.log || true
+
+      # -------- SHELL --------
+      - name: ShellCheck
+        if: contains(needs.setup.outputs.languages, 'shell')
+        uses: ludeeus/action-shellcheck@master
+        continue-on-error: true
+
+      # -------- YAML/JSON/TOML --------
+      - name: YAML Lint
+        if: contains(needs.setup.outputs.languages, 'yaml')
+        uses: ibiqlik/action-yamllint@v3
+        continue-on-error: true
+
+      - name: JSON Lint
+        if: contains(needs.setup.outputs.languages, 'json')
+        continue-on-error: true
+        run: |
+          for f in $(find . -type f -name "*.json"); do
+            echo "Linting $f"
+            python -m json.tool < "$f" > /dev/null || echo "Invalid JSON: $f" | tee -a json_lint.log
+          done
+
+      - name: TOML Lint
+        if: contains(needs.setup.outputs.languages, 'toml')
+        continue-on-error: true
+        run: |
+          pip install toml-lint || true
+          for f in $(find . -type f -name "*.toml"); do
+            toml-lint "$f" || true
+          done
+
+      # -------- DOCKER --------
+      - name: Install Hadolint
+        continue-on-error: true
+        run: |
+          curl -sL https://github.com/hadolint/hadolint/releases/download/v2.12.0/hadolint-Linux-x86_64 -o /usr/local/bin/hadolint || true
+          chmod +x /usr/local/bin/hadolint || true
+
+      - name: Hadolint Dockerfile
+        continue-on-error: true
+        run: |
+          if [ -f Dockerfile ]; then hadolint Dockerfile | tee docker_hadolint.log || true; else echo "No Dockerfile found."; fi
+
+      # -------- SECURITY/DEPENDENCY/SECRETS --------
+      - name: Install Trivy
+        continue-on-error: true
+        run: |
+          sudo apt-get update || true
+          sudo apt-get install -y wget rpm || true
+          wget https://github.com/aquasecurity/trivy/releases/latest/download/trivy_0.50.2_Linux-64bit.deb || true
+          sudo dpkg -i trivy_0.50.2_Linux-64bit.deb || true
+
+      - name: Run Trivy Scan
+        continue-on-error: true
+        run: |
+          trivy fs --exit-code 1 --severity HIGH,CRITICAL . | tee trivy_fs.log || true
+          trivy config --exit-code 1 --severity HIGH,CRITICAL . | tee trivy_config.log || true
+
+      - name: Gitleaks secret scan
+        uses: gitleaks/gitleaks-action@v2
+        continue-on-error: true
+
+      # --- Prepare CodeQL Supported Languages ---
+      - name: Prepare languages for CodeQL
+        id: codeql-langs
+        run: |
+          langs="${{ needs.setup.outputs.languages }}"
+          filtered=""
+          for lang in $langs; do
+            case $lang in
+              cpp|csharp|go|java|javascript|python|ruby) filtered="$filtered $lang";;
+            esac
+          done
+          echo "filtered_languages=$filtered" >> $GITHUB_OUTPUT
+
+      - name: Run GitHub CodeQL scan
+        uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ steps.codeql-langs.outputs.filtered_languages }}
+        continue-on-error: true
+      - uses: github/codeql-action/analyze@v3
+        continue-on-error: true
+
+      # -------- GENERATE SUMMARY --------
+      - name: Aggregate and summarize findings
+        if: always()
+        continue-on-error: true
+        run: |
+          echo "# Copilot Universal Analyzer Report" > copilot_summary.md
+          echo "## Problems and Action Items" >> copilot_summary.md
+          for file in *.log */*.log; do
+            if [ -f "$file" ]; then
+              echo "### $file" >> copilot_summary.md
+              tail -n 50 "$file" >> copilot_summary.md
+              echo "" >> copilot_summary.md
+            fi
+          done
+          echo "" >> copilot_summary.md
+          echo "## Recommended Actions" >> copilot_summary.md
+          echo "- [ ] Review and address all errors, warnings, and failed checks listed above." >> copilot_summary.md
+          echo "- [ ] Run 'autofix' tools or consult Copilot Chat for code suggestions." >> copilot_summary.md
+          echo "- [ ] Review code coverage and improve where possible." >> copilot_summary.md
+          echo "- [ ] Fix security and dependency vulnerabilities before merging." >> copilot_summary.md
+          echo "" >> copilot_summary.md
+          echo "### For detailed logs and HTML reports, download the workflow artifacts." >> copilot_summary.md
+
+      - name: Ensure at least one artifact exists
+        if: always()
+        run: |
+          files=$(find . -maxdepth 2 -name "*.log" -o -name "go_coverage.out")
+          if [ -z "$files" ]; then
+            echo "No analyzer logs found, creating dummy artifact." > dummy.log
+          fi
+
+      - name: Upload all logs and coverage as artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: analyzer-logs
+          path: |
+            *.log
+            */*.log
+            go_coverage.out
+            dummy.log
+
+      # --- AUTOMATIC PULL REQUEST WITH RESULTS ---
+      - name: Set up Git user
+        if: always()
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Create results branch
+        if: always() && github.ref != 'refs/heads/main'
+        run: |
+          git fetch origin
+          git checkout -B copilot-analyzer-results
+          git add copilot_summary.md || true
+          git commit -m "Add Copilot Analyzer summary [bot]" || echo "Nothing to commit"
+          git push --force --set-upstream origin copilot-analyzer-results || echo "Branch already exists"
+
+      - name: Create Pull Request with Analyzer Results
+        if: always() && github.ref != 'refs/heads/main'
+        uses: peter-evans/create-pull-request@v6
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: "Add Copilot Analyzer summary [bot]"
+          branch: copilot-analyzer-results
+          base: main
+          title: "[Copilot Analyzer] Automated analysis results and suggestions"
+          body: |
+            ## Automated Analyzer Results
+
+            This PR contains the aggregated results of all code quality, security, and dependency checks run automatically on this repository.
+
+            - Review the `copilot_summary.md` file for details, errors, warnings, and remediation steps.
+            - Copilot and maintainers can use this to triage and fix issues.
