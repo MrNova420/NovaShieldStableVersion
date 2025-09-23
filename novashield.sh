@@ -10913,7 +10913,7 @@ if (originalTabHandling) {
 // Initialize the application
 checkAuth(); 
 refresh(); 
-setInterval(refresh, 5000);
+setInterval(refresh, 10000); // Reduced frequency to minimize auto-save noise
 
 // Auto-refresh security logs every 30 seconds when security tab is active
 setInterval(() => {
@@ -11817,9 +11817,8 @@ async function initializeNovaShield() {
       scheduleAutoSave();
     }
     
-    // Initialize refresh interval
+    // Initialize refresh interval - removed duplicate to prevent excessive auto-save
     refresh();
-    setInterval(refresh, 2000);
     
     // Load initial data
     loadAlerts();
