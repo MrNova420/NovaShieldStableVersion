@@ -6,7 +6,7 @@
 # and more. It installs everything needed, configures services, and starts the dashboard.
 # Run on Termux (Android terminal). Requires storage permission: termux-setup-storage
 # WARNING: Use responsibly. This is for personal testing/security only. May require root for full VPN server.
-
+# test to see how grok does ,does not work #
 set -e  # Exit on error
 
 echo "=== Starting Ultimate Security Dashboard Setup ==="
