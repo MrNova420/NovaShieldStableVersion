@@ -5333,106 +5333,105 @@ class Handler(SimpleHTTPRequestHandler):
                     py_alert('WARN', f'Chat API invalid JSON from {self.client_address[0]}')
                     self._set_headers(400); self.wfile.write(json.dumps({'ok':False,'error':'invalid json'}).encode('utf-8')); return
                 
-            prompt = data.get('prompt','')
-            if not prompt.strip():
-                self._set_headers(400); self.wfile.write(json.dumps({'ok':False,'error':'empty prompt'}).encode('utf-8')); return
-                
-            # Get session and username instead of just IP
-            sess = get_session(self)
-            username = sess.get('user', 'public') if sess else 'public'
-            user_ip = self.client_address[0]
-            
-            try:
-                # Load user memory and save the user prompt for learning
-                user_memory = load_user_memory(username)
-                
-                # Save user prompt to memory
-                now = time.strftime('%Y-%m-%d %H:%M:%S')
-                user_memory["history"].append({
-                    "timestamp": now,
-                    "type": "user",
-                    "user": username,
-                    "prompt": prompt,
-                    "context": {
-                        "ip": user_ip,
-                        "prompt_length": len(prompt)
-                    }
-                })
-                
-                # Keep conversation history manageable
-                memory_size = int(cfg_get('jarvis.memory_size', 50))
-                if len(user_memory["history"]) > memory_size * 2:  # *2 for user+AI pairs
-                    user_memory["history"] = user_memory["history"][-memory_size * 2:]
-                
-                # Generate AI reply
-                reply = ai_reply(prompt, username, user_ip)
-                voice_enabled = cfg_get('jarvis.voice_enabled', True)
-                
-                # Check if reply contains action payload
-                action = None
-                reply_text = reply
-                
-                if isinstance(reply, dict) and 'text' in reply:
-                    reply_text = reply['text']
-                    action = reply.get('action')
-                
-                # Log to chat.log with username
-                try: 
-                    open(CHATLOG,'a',encoding='utf-8').write(f'{time.strftime("%Y-%m-%d %H:%M:%S")} User:{username} IP:{user_ip} Q:{prompt} A:{reply_text}\n')
-                except Exception: 
-                    py_alert('WARN', f'Failed to write chat log for {username}@{user_ip}')
-                
-                # Save AI reply to user memory for learning
-                user_memory["history"].append({
-                    "timestamp": now,
-                    "type": "ai",
-                    "user": username,
-                    "reply": reply_text,
-                    "context": {
-                        "response_length": len(reply_text),
-                        "prompt_analyzed": prompt
-                    }
-                })
-                
-                # Enhanced learning from both prompt and reply
-                enhanced_jarvis_learning(username, prompt, {"reply": reply_text, "action": action})
-                
-                # Save updated memory after AI reply
-                save_user_memory(username, user_memory)
+                prompt = data.get('prompt','')
+                if not prompt.strip():
+                    self._set_headers(400); self.wfile.write(json.dumps({'ok':False,'error':'empty prompt'}).encode('utf-8')); return
                     
-                response_data = {'ok': True, 'reply': reply_text}
-                if voice_enabled:
-                    response_data['speak'] = True
-                if action:
-                    response_data['action'] = action
+                # Get session and username instead of just IP
+                sess = get_session(self)
+                username = sess.get('user', 'public') if sess else 'public'
+                user_ip = self.client_address[0]
+                
+                try:
+                    # Load user memory and save the user prompt for learning
+                    user_memory = load_user_memory(username)
                     
-                self._set_headers(200); self.wfile.write(json.dumps(response_data).encode('utf-8')); return
-            except Exception as e:
-                py_alert('ERROR', f'Chat AI error for {user_ip}: {str(e)}')
-                self._set_headers(500); self.wfile.write(json.dumps({'ok':False,'error':'ai error'}).encode('utf-8')); return
-        
-        # Enhanced Jarvis AI memory management
+                    # Save user prompt to memory
+                    now = time.strftime('%Y-%m-%d %H:%M:%S')
+                    user_memory["history"].append({
+                        "timestamp": now,
+                        "type": "user",
+                        "user": username,
+                        "prompt": prompt,
+                        "context": {
+                            "ip": user_ip,
+                            "prompt_length": len(prompt)
+                        }
+                    })
+                    
+                    # Keep conversation history manageable
+                    memory_size = int(cfg_get('jarvis.memory_size', 50))
+                    if len(user_memory["history"]) > memory_size * 2:  # *2 for user+AI pairs
+                        user_memory["history"] = user_memory["history"][-memory_size * 2:]
+                    
+                    # Generate AI reply
+                    reply = ai_reply(prompt, username, user_ip)
+                    voice_enabled = cfg_get('jarvis.voice_enabled', True)
+                    
+                    # Check if reply contains action payload
+                    action = None
+                    reply_text = reply
+                    
+                    if isinstance(reply, dict) and 'text' in reply:
+                        reply_text = reply['text']
+                        action = reply.get('action')
+                    
+                    # Log to chat.log with username
+                    try: 
+                        open(CHATLOG,'a',encoding='utf-8').write(f'{time.strftime("%Y-%m-%d %H:%M:%S")} User:{username} IP:{user_ip} Q:{prompt} A:{reply_text}\n')
+                    except Exception: 
+                        py_alert('WARN', f'Failed to write chat log for {username}@{user_ip}')
+                    
+                    # Save AI reply to user memory for learning
+                    user_memory["history"].append({
+                        "timestamp": now,
+                        "type": "ai",
+                        "user": username,
+                        "reply": reply_text,
+                        "context": {
+                            "response_length": len(reply_text),
+                            "prompt_analyzed": prompt
+                        }
+                    })
+                    
+                    # Enhanced learning from both prompt and reply
+                    enhanced_jarvis_learning(username, prompt, {"reply": reply_text, "action": action})
+                    
+                    # Save updated memory after AI reply
+                    save_user_memory(username, user_memory)
+                        
+                    response_data = {'ok': True, 'reply': reply_text}
+                    if voice_enabled:
+                        response_data['speak'] = True
+                    if action:
+                        response_data['action'] = action
+                        
+                    self._set_headers(200); self.wfile.write(json.dumps(response_data).encode('utf-8')); return
+                except Exception as e:
+                    py_alert('ERROR', f'Chat AI error for {user_ip}: {str(e)}')
+                    self._set_headers(500); self.wfile.write(json.dumps({'ok':False,'error':'ai error'}).encode('utf-8')); return
+            # Enhanced Jarvis AI memory management
             if parsed.path == '/api/jarvis/memory':
                 if not require_auth(self): return
                 sess = get_session(self)
                 username = sess.get('user', 'public') if sess else 'public'
             
-            # Save user's encrypted memory
+                # Save user's encrypted memory
                 try:
                     data = json.loads(body or '{}')
                 
-                # Load existing memory or start with default
+                    # Load existing memory or start with default
                     user_memory = load_user_memory(username)
                 
-                # Update user's memory with new data
+                    # Update user's memory with new data
                     user_memory['memory'] = data.get('memory', {})
                     user_memory['preferences'] = data.get('preferences', {})
-                # Use 'conversations' instead of 'history' for consistency with ai_reply
+                    # Use 'conversations' instead of 'history' for consistency with ai_reply
                     user_memory['history'] = data.get('history', [])
                     user_memory['last_updated'] = time.time()
                     user_memory['last_seen'] = time.strftime('%Y-%m-%d %H:%M:%S')
                 
-                # Save encrypted memory
+                    # Save encrypted memory
                     save_user_memory(username, user_memory)
                 
                     self._set_headers(200)
@@ -5441,22 +5440,22 @@ class Handler(SimpleHTTPRequestHandler):
                     py_alert('ERROR', f'Failed to save memory for {username}: {str(e)}')
                     self._set_headers(500)
                     self.wfile.write(json.dumps({'ok': False, 'error': str(e)}).encode('utf-8'))
-            return
+                return
         
-        # Tools management API
+            # Tools management API
             if parsed.path == '/api/tools/scan':
                 if not require_auth(self): return
                 try:
                     tools_info = scan_system_tools()
                     self._set_headers(200)
                     self.wfile.write(json.dumps({
-                    'ok': True,
-                    'tools': tools_info
+                        'ok': True,
+                        'tools': tools_info
                     }).encode('utf-8'))
                 except Exception as e:
                     self._set_headers(500)
                     self.wfile.write(json.dumps({'ok': False, 'error': str(e)}).encode('utf-8'))
-            return
+                return
         
             if parsed.path == '/api/tools/install':
                 if not require_auth(self): return
@@ -10914,7 +10913,7 @@ if (originalTabHandling) {
 // Initialize the application
 checkAuth(); 
 refresh(); 
-setInterval(refresh, 5000);
+setInterval(refresh, 10000); // Reduced frequency to minimize auto-save noise
 
 // Auto-refresh security logs every 30 seconds when security tab is active
 setInterval(() => {
@@ -11818,9 +11817,8 @@ async function initializeNovaShield() {
       scheduleAutoSave();
     }
     
-    // Initialize refresh interval
+    // Initialize refresh interval - removed duplicate to prevent excessive auto-save
     refresh();
-    setInterval(refresh, 2000);
     
     // Load initial data
     loadAlerts();
