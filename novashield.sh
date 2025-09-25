@@ -15551,6 +15551,26 @@ case "${1:-}" in
         echo "❌ Some enhanced features are missing!"
         exit 1
     fi;;
+  --comprehensive-website-enhancement)
+    echo "🚀 Starting comprehensive website and backend enhancement..."
+    enhanced_comprehensive_website_update
+    ;;
+  --advanced-backend-apis)
+    echo "🔧 Implementing advanced backend APIs..."
+    enhanced_backend_api_system
+    ;;
+  --enhanced-security-hardening)
+    echo "🛡️ Applying enhanced security hardening..."
+    enhanced_comprehensive_security_hardening
+    ;;
+  --advanced-css-ui-upgrade)
+    echo "🎨 Upgrading CSS and UI systems..."
+    enhanced_advanced_css_ui_system
+    ;;
+  --connection-optimization)
+    echo "🌐 Optimizing connections and networking..."
+    enhanced_connection_optimization
+    ;;
   --menu) menu;;
   *) usage; exit 1;;
 esac
