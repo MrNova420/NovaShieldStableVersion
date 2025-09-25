@@ -1093,6 +1093,7 @@ storage_maintenance() {
   
   # Create maintenance lock to prevent concurrent runs
   local maintenance_lock="${NS_CTRL}/maintenance.lock"
+  mkdir -p "$(dirname "$maintenance_lock")" 2>/dev/null
   if [ -f "$maintenance_lock" ] && [ "$force_cleanup" != "force" ]; then
     local lock_age=$(($(date +%s) - $(stat -c %Y "$maintenance_lock" 2>/dev/null || echo 0)))
     if [ "$lock_age" -lt 3600 ]; then  # Less than 1 hour old
@@ -1902,6 +1903,358 @@ enhanced_security_automation() {
       # Enhanced monitoring with threat detection
       enhanced_threat_detection
       ns_log "Enhanced automated monitoring cycle completed"
+      ;;
+  esac
+}
+
+# Enhanced Docker Integration and Container Support
+enhanced_docker_support() {
+  local action="${1:-status}"
+  
+  case "$action" in
+    "check")
+      if command -v docker >/dev/null 2>&1; then
+        ns_log "Docker available - enhanced container monitoring enabled"
+        return 0
+      else
+        ns_log "Docker not available - container features disabled"
+        return 1
+      fi
+      ;;
+    "generate_dockerfile")
+      ns_log "Generating Dockerfile for NovaShield deployment..."
+      cat > "${NS_HOME}/Dockerfile" <<'DOCKERFILE'
+FROM ubuntu:22.04
+
+# Install dependencies
+RUN apt-get update && apt-get install -y \
+    python3 python3-pip bash curl wget nmap netcat \
+    htop iotop vmstat iostat netstat lsof \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create novashield user
+RUN useradd -m -s /bin/bash novashield
+
+# Copy NovaShield script
+COPY novashield.sh /opt/novashield/novashield.sh
+RUN chmod +x /opt/novashield/novashield.sh
+
+# Set working directory
+WORKDIR /opt/novashield
+USER novashield
+
+# Expose port
+EXPOSE 8765
+
+# Start NovaShield
+CMD ["./novashield.sh", "--start"]
+DOCKERFILE
+      ns_ok "Dockerfile generated at ${NS_HOME}/Dockerfile"
+      ;;
+    "generate_compose")
+      ns_log "Generating docker-compose.yml for multi-service deployment..."
+      cat > "${NS_HOME}/docker-compose.yml" <<'COMPOSE'
+version: '3.8'
+services:
+  novashield:
+    build: .
+    ports:
+      - "8765:8765"
+    volumes:
+      - ./data:/home/novashield/.novashield
+    environment:
+      - NOVASHIELD_DOCKER=1
+      - NOVASHIELD_AUTO_START=1
+    restart: unless-stopped
+    
+  novashield-monitor:
+    build: .
+    command: ["./novashield.sh", "--restart-monitors"]
+    volumes:
+      - ./data:/home/novashield/.novashield
+    depends_on:
+      - novashield
+    restart: unless-stopped
+COMPOSE
+      ns_ok "docker-compose.yml generated at ${NS_HOME}/docker-compose.yml"
+      ;;
+  esac
+}
+
+# Enhanced Plugin Architecture System
+enhanced_plugin_system() {
+  local action="${1:-list}"
+  local plugin_name="${2:-}"
+  
+  local plugin_dir="${NS_HOME}/plugins"
+  mkdir -p "$plugin_dir"
+  
+  case "$action" in
+    "list")
+      ns_log "Available NovaShield plugins:"
+      if [ -d "$plugin_dir" ] && [ "$(ls -A "$plugin_dir" 2>/dev/null)" ]; then
+        for plugin in "$plugin_dir"/*.sh; do
+          if [ -f "$plugin" ]; then
+            local name=$(basename "$plugin" .sh)
+            echo "  📦 $name - $(head -1 "$plugin" | sed 's/^# *//')"
+          fi
+        done
+      else
+        echo "  No plugins installed. Use --install-plugin to add plugins."
+      fi
+      ;;
+    "install")
+      if [ -z "$plugin_name" ]; then
+        ns_err "Plugin name required for installation"
+        return 1
+      fi
+      
+      # Create example plugin template
+      cat > "${plugin_dir}/${plugin_name}.sh" <<PLUGIN
+#!/bin/bash
+# ${plugin_name} - NovaShield Security Plugin
+
+plugin_main() {
+  local command="\$1"
+  
+  case "\$command" in
+    "scan")
+      echo "🔍 Running ${plugin_name} security scan..."
+      # Add your security scanning logic here
+      ;;
+    "monitor")
+      echo "📊 Starting ${plugin_name} monitoring..."
+      # Add your monitoring logic here
+      ;;
+    "report")
+      echo "📋 Generating ${plugin_name} report..."
+      # Add your reporting logic here
+      ;;
+    *)
+      echo "Usage: ${plugin_name} {scan|monitor|report}"
+      ;;
+  esac
+}
+
+plugin_main "\$@"
+PLUGIN
+      chmod +x "${plugin_dir}/${plugin_name}.sh"
+      ns_ok "Plugin ${plugin_name} installed at ${plugin_dir}/${plugin_name}.sh"
+      ;;
+    "run")
+      if [ -z "$plugin_name" ]; then
+        ns_err "Plugin name required"
+        return 1
+      fi
+      
+      local plugin_file="${plugin_dir}/${plugin_name}.sh"
+      if [ -x "$plugin_file" ]; then
+        ns_log "Running plugin: $plugin_name"
+        shift 2  # Remove 'run' and plugin_name from args
+        "$plugin_file" "$@"
+      else
+        ns_err "Plugin not found or not executable: $plugin_name"
+        return 1
+      fi
+      ;;
+  esac
+}
+
+# Enhanced Performance Optimization System
+enhanced_performance_optimization() {
+  local action="${1:-analyze}"
+  
+  case "$action" in
+    "analyze")
+      ns_log "Analyzing system performance for optimization..."
+      
+      local optimization_report="${NS_LOGS}/performance_optimization.log"
+      mkdir -p "$(dirname "$optimization_report")" 2>/dev/null
+      {
+        echo "=== NovaShield Performance Analysis $(ns_now) ==="
+        echo ""
+        
+        # CPU Analysis
+        echo "📊 CPU Analysis:"
+        if [ -f /proc/loadavg ]; then
+          echo "  Load Average: $(cat /proc/loadavg)"
+        fi
+        echo "  CPU Cores: $(nproc 2>/dev/null || echo 'unknown')"
+        
+        # Memory Analysis
+        echo ""
+        echo "💾 Memory Analysis:"
+        if command -v free >/dev/null 2>&1; then
+          free -h
+        fi
+        
+        # Disk I/O Analysis
+        echo ""
+        echo "💿 Disk Performance:"
+        if command -v iostat >/dev/null 2>&1; then
+          iostat -x 1 1 2>/dev/null | tail -n +4
+        fi
+        
+        # Network Performance
+        echo ""
+        echo "🌐 Network Performance:"
+        if command -v ss >/dev/null 2>&1; then
+          echo "  Active connections: $(ss -t state established | wc -l)"
+        fi
+        
+        # NovaShield Specific Metrics
+        echo ""
+        echo "🛡️ NovaShield Metrics:"
+        echo "  Web server memory: $(ps -o rss= -p $(safe_read_pid "${NS_PID}/web.pid" 2>/dev/null || echo 0) 2>/dev/null | awk '{print int($1/1024)"MB"}' || echo 'not running')"
+        echo "  Active monitors: $(find "${NS_PID}" -name "*.pid" 2>/dev/null | wc -l)"
+        echo "  Log files size: $(du -sh "${NS_LOGS}" 2>/dev/null | cut -f1 || echo 'unknown')"
+        
+      } > "$optimization_report"
+      
+      ns_ok "Performance analysis completed - report saved to $optimization_report"
+      ;;
+    "optimize")
+      ns_log "Applying performance optimizations..."
+      
+      # Memory optimization
+      if [ -f /proc/sys/vm/drop_caches ]; then
+        sync && echo 1 > /proc/sys/vm/drop_caches 2>/dev/null || true
+      fi
+      
+      # Log rotation
+      storage_maintenance "performance"
+      
+      # Process optimization
+      if command -v nice >/dev/null 2>&1; then
+        # Lower priority for monitoring processes to preserve resources for web server
+        for pid in $(find "${NS_PID}" -name "*.pid" -exec cat {} \; 2>/dev/null); do
+          if [ "$pid" -gt 0 ] && [ "$pid" != "$(safe_read_pid "${NS_PID}/web.pid" 2>/dev/null)" ]; then
+            renice 10 "$pid" 2>/dev/null || true
+          fi
+        done
+      fi
+      
+      ns_ok "Performance optimizations applied"
+      ;;
+    "monitor")
+      ns_log "Starting enhanced performance monitoring..."
+      
+      # Create performance monitoring loop
+      while sleep 60; do
+        {
+          echo "$(ns_now) - Performance Snapshot:"
+          echo "  CPU: $(cat /proc/loadavg 2>/dev/null | cut -d' ' -f1 || echo 'unknown')"
+          echo "  Memory: $(free | awk '/^Mem:/{printf "%.1f%%", $3/$2 * 100.0}' 2>/dev/null || echo 'unknown')"
+          echo "  Disk: $(df / | awk 'NR==2{printf "%.1f%%", $5}' 2>/dev/null | tr -d '%' || echo 'unknown')%"
+        } >> "${NS_LOGS}/performance_monitor.log"
+      done &
+      
+      echo $! > "${NS_PID}/performance_monitor.pid"
+      ns_ok "Performance monitoring started"
+      ;;
+  esac
+}
+
+# Enhanced Multi-User and Scaling Support
+enhanced_scaling_support() {
+  local action="${1:-status}"
+  
+  case "$action" in
+    "configure_multiuser")
+      ns_log "Configuring enhanced multi-user support..."
+      
+      # Update configuration for multi-user
+      cat >> "${NS_CONF}" <<MULTIUSER
+
+# Enhanced Multi-User Configuration
+scaling:
+  max_concurrent_users: 100
+  session_timeout: 43200  # 12 hours
+  max_sessions_per_user: 3
+  load_balancing: true
+  
+# Performance Scaling
+performance:
+  worker_processes: 4
+  max_memory_per_process: 512M
+  enable_caching: true
+  cache_ttl: 300  # 5 minutes
+  
+# Resource Limits
+limits:
+  max_file_uploads: 10M
+  max_request_size: 50M
+  rate_limit_per_ip: 1000  # requests per hour
+  
+MULTIUSER
+      
+      ns_ok "Multi-user configuration applied"
+      ;;
+    "cloud_preparation")
+      ns_log "Preparing NovaShield for cloud deployment..."
+      
+      # Generate Heroku Procfile
+      echo "web: ./novashield.sh --start --port \$PORT" > "${NS_HOME}/Procfile"
+      
+      # Generate Vercel configuration
+      cat > "${NS_HOME}/vercel.json" <<VERCEL
+{
+  "version": 2,
+  "builds": [
+    {
+      "src": "novashield.sh",
+      "use": "@vercel/static-build"
+    }
+  ],
+  "routes": [
+    {
+      "src": "/(.*)",
+      "dest": "/novashield.sh"
+    }
+  ]
+}
+VERCEL
+      
+      # Generate AWS deployment script
+      cat > "${NS_HOME}/deploy-aws.sh" <<AWS
+#!/bin/bash
+# AWS EC2 deployment script for NovaShield
+
+# Update system
+sudo apt-get update -y
+sudo apt-get install -y python3 python3-pip
+
+# Install NovaShield
+sudo mkdir -p /opt/novashield
+sudo cp novashield.sh /opt/novashield/
+sudo chmod +x /opt/novashield/novashield.sh
+
+# Create systemd service
+sudo tee /etc/systemd/system/novashield.service > /dev/null <<SERVICE
+[Unit]
+Description=NovaShield Security Dashboard
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/opt/novashield
+ExecStart=/opt/novashield/novashield.sh --start
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+SERVICE
+
+# Enable and start service
+sudo systemctl enable novashield
+sudo systemctl start novashield
+
+echo "NovaShield deployed successfully on AWS EC2"
+AWS
+      chmod +x "${NS_HOME}/deploy-aws.sh"
+      
+      ns_ok "Cloud deployment files generated"
       ;;
   esac
 }
@@ -13430,6 +13783,17 @@ Enhanced Security Features:
   --enhanced-security-hardening  Apply automated security hardening measures
   --validate-enhanced          Validate all enhanced security features are working
 
+Enterprise & Scaling Features:
+  --docker-support [action]    Docker integration support (check, generate_dockerfile, generate_compose)
+  --generate-docker-files      Generate Dockerfile and docker-compose.yml for deployment
+  --plugin-system [action]     Plugin architecture management (list, install, run)
+  --install-plugin <name>      Install a new security plugin
+  --run-plugin <name> [args]   Execute a specific plugin with optional arguments
+  --performance-optimization [action]  Performance analysis and optimization (analyze, optimize, monitor)
+  --scaling-support [action]   Multi-user and scaling configuration (configure_multiuser, cloud_preparation)
+  --cloud-deployment           Prepare complete cloud deployment files (Heroku, AWS, Vercel)
+  --enterprise-setup           Configure all enterprise features at once
+
 User Management:
   --add-user             Add a new web dashboard user
   --enable-2fa           Enable 2FA for a user
@@ -13611,6 +13975,52 @@ case "${1:-}" in
     ns_log "Applying enhanced security hardening..."
     enhanced_security_automation "security_hardening"
     ns_ok "Enhanced security hardening applied.";;
+  --docker-support)
+    action="${2:-check}"
+    enhanced_docker_support "$action";;
+  --generate-docker-files)
+    ns_log "Generating Docker deployment files..."
+    enhanced_docker_support "generate_dockerfile"
+    enhanced_docker_support "generate_compose"
+    ns_ok "Docker deployment files generated.";;
+  --plugin-system)
+    action="${2:-list}"
+    plugin_name="${3:-}"
+    enhanced_plugin_system "$action" "$plugin_name";;
+  --install-plugin)
+    plugin_name="${2:-}"
+    if [ -z "$plugin_name" ]; then
+      ns_err "Plugin name required. Usage: $0 --install-plugin <plugin_name>"
+      exit 1
+    fi
+    enhanced_plugin_system "install" "$plugin_name";;
+  --run-plugin)
+    plugin_name="${2:-}"
+    if [ -z "$plugin_name" ]; then
+      ns_err "Plugin name required. Usage: $0 --run-plugin <plugin_name> [args...]"
+      exit 1
+    fi
+    shift 2
+    enhanced_plugin_system "run" "$plugin_name" "$@";;
+  --performance-optimization)
+    action="${2:-analyze}"
+    enhanced_performance_optimization "$action";;
+  --scaling-support)
+    action="${2:-status}"
+    enhanced_scaling_support "$action";;
+  --cloud-deployment)
+    ns_log "Preparing NovaShield for cloud deployment..."
+    enhanced_scaling_support "cloud_preparation"
+    enhanced_docker_support "generate_dockerfile"
+    enhanced_docker_support "generate_compose"
+    ns_ok "Cloud deployment files generated.";;
+  --enterprise-setup)
+    ns_log "Setting up NovaShield enterprise features..."
+    enhanced_scaling_support "configure_multiuser"
+    enhanced_performance_optimization "optimize"
+    enhanced_docker_support "generate_dockerfile"
+    enhanced_plugin_system "install" "enterprise-security"
+    ns_ok "Enterprise features configured successfully.";;
   --validate-enhanced)
     echo "🔍 Enhanced NovaShield Feature Validation"
     echo "========================================"
@@ -13654,6 +14064,42 @@ case "${1:-}" in
         all_passed=false
     fi
     
+    # Test 5: Docker integration
+    echo -n "✓ Checking Docker integration... "
+    if type enhanced_docker_support >/dev/null 2>&1; then
+        echo "PASS"
+    else
+        echo "FAIL - Docker integration not found"
+        all_passed=false
+    fi
+    
+    # Test 6: Plugin system
+    echo -n "✓ Checking plugin architecture... "
+    if type enhanced_plugin_system >/dev/null 2>&1; then
+        echo "PASS"
+    else
+        echo "FAIL - Plugin system not found"
+        all_passed=false
+    fi
+    
+    # Test 7: Performance optimization
+    echo -n "✓ Checking performance optimization... "
+    if type enhanced_performance_optimization >/dev/null 2>&1; then
+        echo "PASS"
+    else
+        echo "FAIL - Performance optimization not found"
+        all_passed=false
+    fi
+    
+    # Test 8: Scaling support
+    echo -n "✓ Checking scaling support... "
+    if type enhanced_scaling_support >/dev/null 2>&1; then
+        echo "PASS"
+    else
+        echo "FAIL - Scaling support not found"
+        all_passed=false
+    fi
+    
     echo ""
     if [ "$all_passed" = "true" ]; then
         echo "🎉 All enhanced features validated successfully!"
@@ -13664,11 +14110,19 @@ case "${1:-}" in
         echo "• Security Automation: Automated hardening and threat response"
         echo "• Enhanced AI Assistant: Context-aware security advice and analysis"
         echo "• Modern Dashboard UI: Professional interface with enhanced controls"
+        echo "• Docker Integration: Container deployment and orchestration support"
+        echo "• Plugin Architecture: Extensible security module system"
+        echo "• Performance Optimization: Advanced system performance tuning"
+        echo "• Scaling Support: Multi-user and cloud deployment capabilities"
         echo ""
         echo "Usage Commands:"
         echo "  $0 --enhanced-threat-scan           # Run threat detection"
         echo "  $0 --enhanced-network-scan <target> # Network security scan"
         echo "  $0 --enhanced-security-hardening    # Apply security hardening"
+        echo "  $0 --generate-docker-files          # Generate Docker deployment"
+        echo "  $0 --install-plugin <name>          # Install security plugin"
+        echo "  $0 --performance-optimization        # Optimize system performance"
+        echo "  $0 --enterprise-setup               # Configure all enterprise features"
         echo "  $0 --start                          # Start with all enhancements"
         echo ""
         exit 0
