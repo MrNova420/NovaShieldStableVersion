@@ -11,7 +11,7 @@
 set -Eeuo pipefail
 IFS=$'\n\t'
 
-NS_VERSION="3.2.0-Enhanced"
+NS_VERSION="3.3.0-Enterprise"
 
 NS_HOME="${HOME}/.novashield"
 NS_BIN="${NS_HOME}/bin"
@@ -7590,14 +7590,18 @@ write_dashboard(){
 
   <nav class="tabs" aria-label="Main">
     <button data-tab="ai" class="active" type="button">🤖 Jarvis AI</button>
-    <button data-tab="alerts" type="button">Alerts</button>
-    <button data-tab="status" type="button">Status</button>
-    <button data-tab="security" type="button">Security</button>
-    <button data-tab="tools" type="button">Tools</button>
-    <button data-tab="files" type="button">Files</button>
-    <button data-tab="terminal" type="button">Terminal</button>
-    <button data-tab="webgen" type="button">Web Builder</button>
-    <button data-tab="config" type="button">Config</button>
+    <button data-tab="dashboard" type="button">📊 Dashboard</button>
+    <button data-tab="alerts" type="button">🚨 Alerts</button>
+    <button data-tab="status" type="button">📈 Status</button>
+    <button data-tab="security" type="button">🛡️ Security</button>
+    <button data-tab="intelligence" type="button">🔍 Intelligence</button>
+    <button data-tab="tools" type="button">🔧 Tools</button>
+    <button data-tab="files" type="button">📁 Files</button>
+    <button data-tab="terminal" type="button">💻 Terminal</button>
+    <button data-tab="network" type="button">🌐 Network</button>
+    <button data-tab="analytics" type="button">📈 Analytics</button>
+    <button data-tab="webgen" type="button">🌐 Web Builder</button>
+    <button data-tab="config" type="button">⚙️ Config</button>
     <button data-tab="results" type="button">Results</button>
   </nav>
 
@@ -8172,6 +8176,158 @@ write_dashboard(){
       </div>
     </section>
 
+    <!-- NEW ENHANCED DASHBOARD TAB -->
+    <section id="tab-dashboard" class="tab" aria-labelledby="Enhanced Dashboard">
+      <h2>📊 Enterprise Dashboard</h2>
+      <p class="section-description">Comprehensive enterprise-grade dashboard with real-time metrics, advanced analytics, threat monitoring, and system intelligence. Features AI-powered insights and professional data visualization.</p>
+      
+      <!-- Real-time Status Overview -->
+      <div class="dashboard-overview">
+        <div class="overview-card threat-status">
+          <div class="card-icon">🛡️</div>
+          <div class="card-content">
+            <h3>Threat Status</h3>
+            <div class="status-indicator" id="threat-status">SECURE</div>
+            <div class="metric-value" id="threat-count">0 Threats</div>
+          </div>
+        </div>
+        
+        <div class="overview-card system-health">
+          <div class="card-icon">💊</div>
+          <div class="card-content">
+            <h3>System Health</h3>
+            <div class="status-indicator" id="system-health">OPTIMAL</div>
+            <div class="metric-value" id="health-score">98% Health</div>
+          </div>
+        </div>
+        
+        <div class="overview-card network-status">
+          <div class="card-icon">🌐</div>
+          <div class="card-content">
+            <h3>Network Status</h3>
+            <div class="status-indicator" id="network-status">CONNECTED</div>
+            <div class="metric-value" id="network-latency">12ms Latency</div>
+          </div>
+        </div>
+        
+        <div class="overview-card ai-status">
+          <div class="card-icon">🤖</div>
+          <div class="card-content">
+            <h3>AI Assistant</h3>
+            <div class="status-indicator" id="ai-dashboard-status">ACTIVE</div>
+            <div class="metric-value" id="ai-responses">47 Responses</div>
+          </div>
+        </div>
+      </div>
+      
+      <!-- Quick Actions Panel -->
+      <div class="dashboard-actions">
+        <h3>⚡ Quick Actions</h3>
+        <div class="action-grid">
+          <button class="action-btn security" onclick="runThreatScan()" title="Run comprehensive threat scan">
+            <div class="action-icon">🔍</div>
+            <div class="action-label">Threat Scan</div>
+          </button>
+          <button class="action-btn network" onclick="runNetworkScan()" title="Perform network security scan">
+            <div class="action-icon">🌐</div>
+            <div class="action-label">Network Scan</div>
+          </button>
+          <button class="action-btn system" onclick="generateReport()" title="Generate system report">
+            <div class="action-icon">📊</div>
+            <div class="action-label">Generate Report</div>
+          </button>
+          <button class="action-btn ai" onclick="askJarvis('system status')" title="Ask JARVIS for system status">
+            <div class="action-icon">🤖</div>
+            <div class="action-label">Ask JARVIS</div>
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <section id="tab-intelligence" class="tab" aria-labelledby="Intelligence Gathering">
+      <h2>🔍 Intelligence Gathering</h2>
+      <p class="section-description">Advanced multi-source intelligence gathering and analysis platform. Perform comprehensive scans on emails, domains, IPs, phone numbers, and usernames with professional-grade tools and AI-powered insights.</p>
+      
+      <!-- Intelligence Scanner -->
+      <div class="intelligence-scanner">
+        <h3>🎯 Multi-Source Intelligence Scanner</h3>
+        <div class="scanner-controls">
+          <div class="input-group">
+            <input type="text" id="intel-target" placeholder="Enter target (email, domain, IP, phone, username)" title="Target for intelligence gathering">
+            <select id="intel-type" title="Type of intelligence scan to perform">
+              <option value="auto">Auto-Detect</option>
+              <option value="email">Email</option>
+              <option value="domain">Domain</option>
+              <option value="ip">IP Address</option>
+              <option value="phone">Phone Number</option>
+              <option value="username">Username</option>
+              <option value="comprehensive">Comprehensive</option>
+            </select>
+            <select id="intel-depth" title="Depth of intelligence gathering">
+              <option value="basic">Basic</option>
+              <option value="standard">Standard</option>
+              <option value="deep">Deep Analysis</option>
+            </select>
+            <button id="start-intel-scan" onclick="startIntelScan()" title="Start intelligence gathering scan">🔍 Start Scan</button>
+          </div>
+        </div>
+        
+        <!-- Scan Results -->
+        <div class="scan-results" id="intel-results" style="display:none;">
+          <h4>📊 Intelligence Results</h4>
+          <div class="results-content" id="results-content"></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="tab-network" class="tab" aria-labelledby="Network Monitoring">
+      <h2>🌐 Network Monitoring & Analysis</h2>
+      <p class="section-description">Advanced network monitoring, security analysis, and traffic inspection tools. Monitor network connections, analyze traffic patterns, detect threats, and manage network security policies.</p>
+      
+      <!-- Network Tools -->
+      <div class="network-tools">
+        <h3>🔧 Network Tools</h3>
+        <div class="tool-grid">
+          <button class="network-tool" onclick="runNetstat()" title="Show network connections">
+            <div class="tool-icon">🔗</div>
+            <div class="tool-label">Netstat</div>
+          </button>
+          <button class="network-tool" onclick="runPortScan()" title="Scan for open ports">
+            <div class="tool-icon">🔍</div>
+            <div class="tool-label">Port Scan</div>
+          </button>
+          <button class="network-tool" onclick="runPingTest()" title="Test network connectivity">
+            <div class="tool-icon">📡</div>
+            <div class="tool-label">Ping Test</div>
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <section id="tab-analytics" class="tab" aria-labelledby="Analytics & Reports">
+      <h2>📈 Analytics & Business Intelligence</h2>
+      <p class="section-description">Comprehensive analytics dashboard with business intelligence, user metrics, system performance analysis, and detailed reporting capabilities.</p>
+      
+      <!-- Analytics Overview -->
+      <div class="analytics-overview">
+        <div class="analytics-card">
+          <div class="card-icon">👥</div>
+          <div class="card-content">
+            <h3>Active Users</h3>
+            <div class="metric-value" id="analytics-users">1</div>
+          </div>
+        </div>
+        
+        <div class="analytics-card">
+          <div class="card-icon">📊</div>
+          <div class="card-content">
+            <h3>System Usage</h3>
+            <div class="metric-value" id="analytics-usage">98%</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
     <section id="tab-webgen" class="tab" aria-labelledby="Web Builder">
       <div class="panel">
         <h3>Webpage Builder</h3>
@@ -8470,6 +8626,334 @@ textarea#wcontent{width:100%;height:160px;background:#0b1830;color:#d7e3ff;borde
     margin: 4px 0;
     display: flex;
     gap: 8px;
+}
+
+/* Enhanced Dashboard Styles */
+.dashboard-overview {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 16px;
+    margin-bottom: 24px;
+}
+
+.overview-card {
+    background: var(--card);
+    border: 1px solid #143055;
+    border-radius: 12px;
+    padding: 20px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    transition: all 0.3s ease;
+    position: relative;
+    overflow: hidden;
+}
+
+.overview-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 3px;
+    background: linear-gradient(90deg, var(--accent), var(--ring));
+}
+
+.overview-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 25px rgba(0, 196, 247, 0.15);
+    border-color: var(--accent);
+}
+
+.card-icon {
+    font-size: 2.5rem;
+    opacity: 0.8;
+}
+
+.card-content h3 {
+    margin: 0 0 8px 0;
+    color: var(--text);
+    font-size: 16px;
+    font-weight: 600;
+}
+
+.status-indicator {
+    font-size: 14px;
+    font-weight: 700;
+    padding: 4px 12px;
+    border-radius: 20px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.status-indicator:contains("SECURE"), .status-indicator:contains("OPTIMAL"), .status-indicator:contains("CONNECTED"), .status-indicator:contains("ACTIVE") {
+    background: rgba(16, 185, 129, 0.2);
+    color: var(--ok);
+    border: 1px solid var(--ok);
+}
+
+.metric-value {
+    color: var(--muted);
+    font-size: 13px;
+    margin-top: 4px;
+}
+
+.dashboard-actions {
+    background: var(--card);
+    border: 1px solid #143055;
+    border-radius: 12px;
+    padding: 20px;
+    margin-bottom: 24px;
+}
+
+.dashboard-actions h3 {
+    margin: 0 0 16px 0;
+    color: var(--accent);
+    font-size: 18px;
+}
+
+.action-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 12px;
+}
+
+.action-btn {
+    background: #0a1426;
+    border: 1px solid #143055;
+    border-radius: 10px;
+    padding: 16px 12px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    text-align: center;
+    color: var(--text);
+}
+
+.action-btn:hover {
+    background: #0e1726;
+    border-color: var(--accent);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(0, 196, 247, 0.1);
+}
+
+.action-icon {
+    font-size: 1.8rem;
+    margin-bottom: 8px;
+}
+
+.action-label {
+    font-size: 13px;
+    font-weight: 500;
+}
+
+/* Intelligence Gathering Styles */
+.intelligence-scanner {
+    background: var(--card);
+    border: 1px solid #143055;
+    border-radius: 12px;
+    padding: 20px;
+    margin-bottom: 24px;
+}
+
+.intelligence-scanner h3 {
+    margin: 0 0 16px 0;
+    color: var(--accent);
+    font-size: 18px;
+}
+
+.scanner-controls {
+    margin-bottom: 20px;
+}
+
+.input-group {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.input-group input {
+    flex: 2;
+    min-width: 200px;
+    padding: 10px 14px;
+    border: 1px solid #143055;
+    border-radius: 8px;
+    background: #0b1830;
+    color: var(--text);
+    font-size: 14px;
+}
+
+.input-group select {
+    padding: 10px 14px;
+    border: 1px solid #143055;
+    border-radius: 8px;
+    background: #0b1830;
+    color: var(--text);
+    font-size: 14px;
+    min-width: 120px;
+}
+
+.input-group button {
+    padding: 10px 20px;
+    border: 1px solid var(--accent);
+    border-radius: 8px;
+    background: var(--accent);
+    color: #000;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+
+.input-group button:hover {
+    background: transparent;
+    color: var(--accent);
+}
+
+.scan-results {
+    background: #0a1426;
+    border: 1px solid #143055;
+    border-radius: 8px;
+    padding: 16px;
+    margin-top: 16px;
+}
+
+.scan-results h4 {
+    margin: 0 0 12px 0;
+    color: var(--accent);
+}
+
+/* Network Tools Styles */
+.network-tools {
+    background: var(--card);
+    border: 1px solid #143055;
+    border-radius: 12px;
+    padding: 20px;
+    margin-bottom: 24px;
+}
+
+.network-tools h3 {
+    margin: 0 0 16px 0;
+    color: var(--accent);
+    font-size: 18px;
+}
+
+.tool-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+    gap: 12px;
+}
+
+.network-tool {
+    background: #0a1426;
+    border: 1px solid #143055;
+    border-radius: 10px;
+    padding: 16px 12px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    text-align: center;
+    color: var(--text);
+}
+
+.network-tool:hover {
+    background: #0e1726;
+    border-color: var(--accent);
+    transform: translateY(-1px);
+}
+
+.tool-icon {
+    font-size: 1.5rem;
+    margin-bottom: 8px;
+}
+
+.tool-label {
+    font-size: 12px;
+    font-weight: 500;
+}
+
+/* Analytics Styles */
+.analytics-overview {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 16px;
+    margin-bottom: 24px;
+}
+
+.analytics-card {
+    background: var(--card);
+    border: 1px solid #143055;
+    border-radius: 12px;
+    padding: 20px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    transition: all 0.3s ease;
+}
+
+.analytics-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 25px rgba(0, 196, 247, 0.15);
+}
+
+/* Section descriptions */
+.section-description {
+    color: var(--muted);
+    font-size: 14px;
+    line-height: 1.5;
+    margin-bottom: 24px;
+    padding: 12px 16px;
+    background: rgba(13, 35, 57, 0.3);
+    border-radius: 8px;
+    border-left: 3px solid var(--accent);
+}
+
+/* Responsive design improvements */
+@media (max-width: 768px) {
+    .dashboard-overview {
+        grid-template-columns: 1fr;
+    }
+    
+    .action-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+    
+    .tool-grid {
+        grid-template-columns: repeat(3, 1fr);
+    }
+    
+    .input-group {
+        flex-direction: column;
+    }
+    
+    .input-group input,
+    .input-group select,
+    .input-group button {
+        width: 100%;
+        min-width: auto;
+    }
+}
+
+/* Enhanced tab styling */
+.tabs button {
+    background: #0a1426;
+    border: 1px solid #173764;
+    border-radius: 8px;
+    color: #cfe6ff;
+    padding: 10px 14px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    font-size: 13px;
+    font-weight: 500;
+}
+
+.tabs button:hover {
+    background: #0e1726;
+    border-color: var(--accent);
+    color: var(--text);
+}
+
+.tabs button.active {
+    outline: 2px solid var(--accent);
+    color: #fff;
+    background: rgba(0, 196, 247, 0.1);
 }
 
 .detail-item strong {
