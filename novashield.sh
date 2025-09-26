@@ -963,7 +963,8 @@ ns_warn(){
   # Create directory only once, with better error handling
   if [ ! -d "${NS_HOME}" ]; then
     mkdir -p "${NS_HOME}" 2>/dev/null || {
-      local fallback_dir="/tmp/novashield-$(whoami)"
+      local fallback_dir
+      fallback_dir="/tmp/novashield-$(whoami)"
       mkdir -p "$fallback_dir" 2>/dev/null || return 0
       echo -e "${YELLOW}$(ns_now) [WARN ] $*${NC}" | tee -a "$fallback_dir/launcher.log" >&2 2>/dev/null || echo -e "${YELLOW}$(ns_now) [WARN ] $*${NC}" >&2
       return 0
@@ -977,7 +978,8 @@ ns_err() {
   # Create directory only once, with better error handling
   if [ ! -d "${NS_HOME}" ]; then
     mkdir -p "${NS_HOME}" 2>/dev/null || {
-      local fallback_dir="/tmp/novashield-$(whoami)"
+      local fallback_dir
+      fallback_dir="/tmp/novashield-$(whoami)"
       mkdir -p "$fallback_dir" 2>/dev/null || return 0
       echo -e "${RED}$(ns_now) [ERROR] $*${NC}" | tee -a "$fallback_dir/launcher.log" >&2 2>/dev/null || echo -e "${RED}$(ns_now) [ERROR] $*${NC}" >&2
       return 0
@@ -1366,7 +1368,8 @@ ensure_dirs(){
   )
   
   # SECURITY: Set secure umask before creating files/directories
-  local old_umask=$(umask)
+  local old_umask
+  old_umask=$(umask)
   umask 077
   
   # Create directories in batches to avoid memory pressure
@@ -1379,7 +1382,8 @@ ensure_dirs(){
       ns_warn "⚠️  Failed to create directory: $dir (possible memory/permission issue)"
       # Try alternative location if NS_HOME creation fails
       if [[ "$dir" == *"$NS_HOME"* ]]; then
-        local alt_dir="/tmp/novashield-$(whoami)${dir#"$NS_HOME"}"
+        local alt_dir
+        alt_dir="/tmp/novashield-$(whoami)${dir#"$NS_HOME"}"
         mkdir -p "$alt_dir" 2>/dev/null || continue
         ns_warn "📁 Using alternative directory: $alt_dir"
       fi
@@ -1409,13 +1413,19 @@ ensure_dirs(){
   
   # Create essential files with secure permissions (more conservatively)
   if [ -d "$(dirname "$NS_ALERTS")" ]; then
-    : >"$NS_ALERTS" && chmod 640 "$NS_ALERTS" 2>/dev/null || true
+    if : >"$NS_ALERTS"; then
+      chmod 640 "$NS_ALERTS" 2>/dev/null || true
+    fi
   fi
   if [ -d "$(dirname "$NS_CHATLOG")" ]; then
-    : >"$NS_CHATLOG" && chmod 640 "$NS_CHATLOG" 2>/dev/null || true
+    if : >"$NS_CHATLOG"; then
+      chmod 640 "$NS_CHATLOG" 2>/dev/null || true
+    fi
   fi
   if [ -d "$(dirname "$NS_AUDIT")" ]; then
-    : >"$NS_AUDIT" && chmod 600 "$NS_AUDIT" 2>/dev/null || true  # Most sensitive
+    if : >"$NS_AUDIT"; then
+      chmod 600 "$NS_AUDIT" 2>/dev/null || true  # Most sensitive
+    fi
   fi
   
   # Create JSON files with secure permissions (with existence check)
@@ -1966,10 +1976,39 @@ generate_self_signed_tls(){
 }
 
 aes_key_path(){ yaml_get "security" "aes_key_file" "keys/aes.key"; }
-enc_file(){ local in="$1"; local out="$2"; local key="${NS_HOME}/$(aes_key_path)"; openssl enc -aes-256-cbc -salt -pbkdf2 -in "$in" -out "$out" -pass file:"$key"; }
-dec_file(){ local in="$1"; local out="$2"; local key="${NS_HOME}/$(aes_key_path)"; openssl enc -d -aes-256-cbc -pbkdf2 -in "$in" -out "$out" -pass file:"$key"; }
-enc_dir(){ local dir="$1"; local out="$2"; local tmp="${NS_TMP}/tmp-$(date +%s).tar.gz"; tar -C "$dir" -czf "$tmp" . || tar -czf "$tmp" "$dir"; enc_file "$tmp" "$out"; rm -f "$tmp"; }
-dec_dir(){ local in="$1"; local outdir="$2"; local tmp="${NS_TMP}/tmp-$(date +%s).tar.gz"; dec_file "$in" "$tmp"; mkdir -p "$outdir"; tar -C "$outdir" -xzf "$tmp"; rm -f "$tmp"; }
+enc_file(){ 
+  local in="$1"
+  local out="$2"
+  local key
+  key="${NS_HOME}/$(aes_key_path)"
+  openssl enc -aes-256-cbc -salt -pbkdf2 -in "$in" -out "$out" -pass file:"$key"
+}
+dec_file(){ 
+  local in="$1"
+  local out="$2"
+  local key
+  key="${NS_HOME}/$(aes_key_path)"
+  openssl enc -d -aes-256-cbc -pbkdf2 -in "$in" -out "$out" -pass file:"$key"
+}
+enc_dir(){ 
+  local dir="$1"
+  local out="$2"
+  local tmp
+  tmp="${NS_TMP}/tmp-$(date +%s).tar.gz"
+  tar -C "$dir" -czf "$tmp" . || tar -czf "$tmp" "$dir"
+  enc_file "$tmp" "$out"
+  rm -f "$tmp"
+}
+dec_dir(){ 
+  local in="$1"
+  local outdir="$2"
+  local tmp
+  tmp="${NS_TMP}/tmp-$(date +%s).tar.gz"
+  dec_file "$in" "$tmp"
+  mkdir -p "$outdir"
+  tar -C "$outdir" -xzf "$tmp"
+  rm -f "$tmp"
+}
 
 write_notify_py(){
   write_file "${NS_BIN}/notify.py" 700 <<'PY'
