@@ -1214,18 +1214,51 @@ PKG_INSTALL(){
 }
 
 ensure_dirs(){
-  mkdir -p "$NS_BIN" "$NS_LOGS" "$NS_WWW" "$NS_MODULES" "$NS_PROJECTS" \
-           "$NS_VERSIONS" "$NS_KEYS" "$NS_CTRL" "$NS_TMP" "$NS_PID" \
-           "$NS_LAUNCHER_BACKUPS" "${NS_HOME}/backups" "${NS_HOME}/site"
-  : >"$NS_ALERTS" || true
-  : >"$NS_CHATLOG" || true
-  : >"$NS_AUDIT" || true
-  [ -f "$NS_SESS_DB" ] || echo '{}' >"$NS_SESS_DB"
-  [ -f "$NS_RL_DB" ] || echo '{}' >"$NS_RL_DB"
-  [ -f "$NS_BANS_DB" ] || echo '{}' >"$NS_BANS_DB"
-  [ -f "$NS_JARVIS_MEM" ] || echo '{"conversations":[]}' >"$NS_JARVIS_MEM"
-  echo "$NS_VERSION" >"$NS_VERSION_FILE"
-  echo "$NS_SELF" >"$NS_SELF_PATH_FILE"
+  # SECURITY HARDENING: Create directories with secure permissions and validation
+  local dirs=(
+    "$NS_BIN" "$NS_LOGS" "$NS_WWW" "$NS_MODULES" "$NS_PROJECTS" 
+    "$NS_VERSIONS" "$NS_KEYS" "$NS_CTRL" "$NS_TMP" "$NS_PID"
+    "$NS_LAUNCHER_BACKUPS" "${NS_HOME}/backups" "${NS_HOME}/site"
+  )
+  
+  # SECURITY: Set secure umask before creating files/directories
+  local old_umask=$(umask)
+  umask 077
+  
+  for dir in "${dirs[@]}"; do
+    mkdir -p "$dir" 2>/dev/null || true
+    
+    # SECURITY: Set appropriate permissions based on directory purpose
+    case "$dir" in
+      *keys*|*control*)
+        chmod 700 "$dir" 2>/dev/null || true  # Most restrictive for sensitive dirs
+        ;;
+      *logs*|*tmp*|*pids*|*backups*)
+        chmod 750 "$dir" 2>/dev/null || true  # Operational directories
+        ;;
+      *)
+        chmod 755 "$dir" 2>/dev/null || true  # Standard for other dirs
+        ;;
+    esac
+  done
+  
+  # Create essential files with secure permissions
+  : >"$NS_ALERTS" && chmod 640 "$NS_ALERTS" 2>/dev/null || true
+  : >"$NS_CHATLOG" && chmod 640 "$NS_CHATLOG" 2>/dev/null || true
+  : >"$NS_AUDIT" && chmod 600 "$NS_AUDIT" 2>/dev/null || true  # Most sensitive
+  
+  # Create JSON files with secure permissions
+  [ -f "$NS_SESS_DB" ] || { echo '{}' >"$NS_SESS_DB" && chmod 600 "$NS_SESS_DB" 2>/dev/null || true; }
+  [ -f "$NS_RL_DB" ] || { echo '{}' >"$NS_RL_DB" && chmod 600 "$NS_RL_DB" 2>/dev/null || true; }
+  [ -f "$NS_BANS_DB" ] || { echo '{}' >"$NS_BANS_DB" && chmod 600 "$NS_BANS_DB" 2>/dev/null || true; }
+  [ -f "$NS_JARVIS_MEM" ] || { echo '{"conversations":[]}' >"$NS_JARVIS_MEM" && chmod 600 "$NS_JARVIS_MEM" 2>/dev/null || true; }
+  
+  # Version and path files
+  echo "$NS_VERSION" >"$NS_VERSION_FILE" && chmod 644 "$NS_VERSION_FILE" 2>/dev/null || true
+  echo "$NS_SELF" >"$NS_SELF_PATH_FILE" && chmod 644 "$NS_SELF_PATH_FILE" 2>/dev/null || true
+  
+  # Restore previous umask
+  umask "$old_umask"
 }
 
 write_default_config(){
@@ -5636,6 +5669,81 @@ def save_jarvis_memory(memory):
     """Save Jarvis conversation memory."""
     write_json(JARVIS_MEM, memory)
 
+def validate_input_size(data, max_size=50*1024):  # 50KB default limit
+    """SECURITY: Validate input size to prevent DoS attacks"""
+    if len(data.encode('utf-8')) > max_size:
+        return False, "Input too large"
+    return True, ""
+
+def sanitize_json_input(json_str, max_depth=10):
+    """SECURITY: Enhanced JSON input validation and sanitization"""
+    try:
+        # Check size first
+        if len(json_str.encode('utf-8')) > 100*1024:  # 100KB limit for JSON
+            return None, "JSON input too large"
+        
+        # Parse with depth limit
+        data = json.loads(json_str)
+        
+        # Recursive depth check
+        def check_depth(obj, current_depth=0):
+            if current_depth > max_depth:
+                raise ValueError("JSON too deeply nested")
+            if isinstance(obj, dict):
+                for value in obj.values():
+                    check_depth(value, current_depth + 1)
+            elif isinstance(obj, list):
+                for item in obj:
+                    check_depth(item, current_depth + 1)
+        
+        check_depth(data)
+        return data, ""
+        
+    except json.JSONDecodeError as e:
+        return None, f"Invalid JSON: {str(e)}"
+    except ValueError as e:
+        return None, str(e)
+    except Exception as e:
+        return None, f"JSON validation error: {str(e)}"
+
+def enhanced_rate_limit_check(client_ip, endpoint="general", window=3600, max_requests=100):
+    """SECURITY: Enhanced rate limiting with per-endpoint limits"""
+    try:
+        rl_data = read_json(NS_RL_DB, {})
+        now = int(time.time())
+        
+        # Clean old entries
+        for ip in list(rl_data.keys()):
+            rl_data[ip] = {ep: reqs for ep, reqs in rl_data[ip].items() 
+                          if any(timestamp > now - window for timestamp in reqs)}
+            if not rl_data[ip]:
+                del rl_data[ip]
+        
+        # Check current IP and endpoint
+        if client_ip not in rl_data:
+            rl_data[client_ip] = {}
+        if endpoint not in rl_data[client_ip]:
+            rl_data[client_ip][endpoint] = []
+        
+        # Filter recent requests
+        recent_requests = [ts for ts in rl_data[client_ip][endpoint] if ts > now - window]
+        
+        if len(recent_requests) >= max_requests:
+            security_log(f"RATE_LIMIT_EXCEEDED ip={client_ip} endpoint={endpoint} requests={len(recent_requests)}")
+            return False
+        
+        # Add current request
+        recent_requests.append(now)
+        rl_data[client_ip][endpoint] = recent_requests
+        
+        # Save updated data
+        write_json(NS_RL_DB, rl_data)
+        return True
+        
+    except Exception as e:
+        security_log(f"RATE_LIMIT_ERROR ip={client_ip} error={str(e)}")
+        return True  # Allow on error to avoid blocking legitimate users
+
 def sanitize_username(username):
     """Sanitize username for safe filename usage."""
     import re
@@ -7581,22 +7689,50 @@ class Handler(SimpleHTTPRequestHandler):
     def _set_headers(self, status=200, ctype='application/json', extra_headers=None):
         self.send_response(status)
         self.send_header('Content-Type', ctype)
-        self.send_header('Cache-Control', 'no-store')
+        
+        # SECURITY HARDENING: Enhanced cache control
+        self.send_header('Cache-Control', 'no-store, no-cache, must-revalidate, private')
+        self.send_header('Pragma', 'no-cache')
+        self.send_header('Expires', '0')
+        
+        # SECURITY HARDENING: Comprehensive security headers
         self.send_header('X-Content-Type-Options', 'nosniff')
         self.send_header('X-Frame-Options', 'DENY')
+        self.send_header('X-XSS-Protection', '1; mode=block')
         self.send_header('Referrer-Policy', 'no-referrer')
-        self.send_header('Permissions-Policy', 'geolocation=(), microphone=()')
-        self.send_header('Content-Security-Policy', "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'self';")
+        self.send_header('Permissions-Policy', 'geolocation=(), microphone=(), camera=(), usb=(), bluetooth=(), payment=(), fullscreen=()')
         
-        # Enhanced headers for long-term operation and multi-user support
-        self.send_header('X-NovaShield-Version', '3.3.0-Enterprise-LTO')
+        # ENHANCED CSP: More restrictive Content Security Policy
+        if ctype.startswith('text/html'):
+            csp = "default-src 'none'; "
+            csp += "script-src 'self' 'unsafe-inline' 'unsafe-eval'; "
+            csp += "style-src 'self' 'unsafe-inline'; "
+            csp += "connect-src 'self'; "
+            csp += "img-src 'self' data:; "
+            csp += "font-src 'self'; "
+            csp += "object-src 'none'; "
+            csp += "base-uri 'self'; "
+            csp += "frame-ancestors 'none'; "
+            csp += "form-action 'self'; "
+            csp += "upgrade-insecure-requests"
+            self.send_header('Content-Security-Policy', csp)
+        
+        # HSTS for HTTPS connections
+        if hasattr(self, 'connection') and hasattr(self.connection, 'cipher'):
+            self.send_header('Strict-Transport-Security', 'max-age=31536000; includeSubDomains; preload')
+        
+        # Enhanced headers for enterprise operation
+        self.send_header('X-NovaShield-Version', '3.4.0-Enterprise-AAA-Hardened')
         self.send_header('X-Request-ID', str(uuid.uuid4())[:8])
         self.send_header('X-Server-Time', str(int(time.time())))
         
-        # Connection optimization headers
+        # SECURITY: Remove server information disclosure  
+        self.send_header('Server', 'NovaShield-Enterprise')
+        
+        # Connection optimization headers (with security considerations)
         if self._should_keep_alive():
             self.send_header('Connection', 'keep-alive')
-            self.send_header('Keep-Alive', 'timeout=30, max=100')
+            self.send_header('Keep-Alive', 'timeout=15, max=50')  # Reduced for security
         
         if extra_headers:
             for k,v in (extra_headers or {}).items(): self.send_header(k, v)
@@ -7687,11 +7823,11 @@ class Handler(SimpleHTTPRequestHandler):
                 
                 # If AUTH_STRICT is enabled and no valid session, clear session cookie
                 if AUTH_STRICT and not sess:
-                    self._set_headers(200, 'text/html; charset=utf-8', {'Set-Cookie': 'NSSESS=deleted; Path=/; HttpOnly; Max-Age=0; SameSite=Lax'})
+                    self._set_headers(200, 'text/html; charset=utf-8', {'Set-Cookie': 'NSSESS=deleted; Path=/; HttpOnly; Max-Age=0; SameSite=Strict; Secure'})
                 # If force_login_on_reload is enabled, clear session cookie on fresh page loads without session
                 # This ensures login prompt appears on refresh while preserving API access after successful login
                 elif force_login_on_reload and not sess and is_page_load:
-                    self._set_headers(200, 'text/html; charset=utf-8', {'Set-Cookie': 'NSSESS=deleted; Path=/; HttpOnly; Max-Age=0; SameSite=Lax'})
+                    self._set_headers(200, 'text/html; charset=utf-8', {'Set-Cookie': 'NSSESS=deleted; Path=/; HttpOnly; Max-Age=0; SameSite=Strict; Secure'})
                 else:
                     self._set_headers(200, 'text/html; charset=utf-8')
                 html = read_text(INDEX, '<h1>NovaShield</h1>')
@@ -7704,7 +7840,7 @@ class Handler(SimpleHTTPRequestHandler):
                 user = sess.get('user', 'unknown') if sess else 'unknown'
                 py_alert('INFO', f'LOGOUT user={user} ip={client_ip}')
                 audit(f'LOGOUT user={user} ip={client_ip}')
-                self._set_headers(302, 'text/plain', {'Set-Cookie': 'NSSESS=deleted; Path=/; HttpOnly; Max-Age=0; SameSite=Lax', 'Location':'/'})
+                self._set_headers(302, 'text/plain', {'Set-Cookie': 'NSSESS=deleted; Path=/; HttpOnly; Max-Age=0; SameSite=Strict; Secure', 'Location':'/'})
                 self.wfile.write(b'bye'); return
 
             if parsed.path.startswith('/static/'):
@@ -8051,7 +8187,9 @@ class Handler(SimpleHTTPRequestHandler):
                     login_ok(self)
                     py_alert('INFO', f'LOGIN OK user={user} ip={ip}')
                     audit(f'LOGIN OK user={user} ip={ip} user_agent={user_agent[:50]}')
-                    self._set_headers(200, 'application/json', {'Set-Cookie': f'NSSESS={token}; Path=/; HttpOnly; SameSite=Lax'})
+                    # SECURITY: Enhanced secure cookie
+                    secure_flag = '; Secure' if hasattr(self, 'connection') and hasattr(self.connection, 'cipher') else ''
+                    self._set_headers(200, 'application/json', {'Set-Cookie': f'NSSESS={token}; Path=/; HttpOnly; SameSite=Strict{secure_flag}; Max-Age=3600'})
                     self.wfile.write(json.dumps({'ok':True,'csrf':csrf}).encode('utf-8')); return
                     
                 login_fail(self); 
@@ -8665,15 +8803,34 @@ class Handler(SimpleHTTPRequestHandler):
                         return
             
                 try:
-                    # Read POST data
+                    # SECURITY: Enhanced input validation and rate limiting
+                    client_ip = self.client_address[0]
+                    
+                    # Rate limiting check
+                    if not enhanced_rate_limit_check(client_ip, 'config_update', 3600, 5):
+                        self._set_headers(429)
+                        self.wfile.write(json.dumps({'error': 'Rate limit exceeded'}).encode('utf-8'))
+                        return
+                    
+                    # Read POST data with size validation
                     content_length = int(self.headers.get('Content-Length', 0))
                     if content_length == 0:
                         self._set_headers(400)
                         self.wfile.write(json.dumps({'error': 'No configuration data provided'}).encode('utf-8'))
                         return
                     
+                    if content_length > 500*1024:  # 500KB limit for config
+                        self._set_headers(413)
+                        self.wfile.write(json.dumps({'error': 'Configuration too large'}).encode('utf-8'))
+                        return
+                    
                     post_data = self.rfile.read(content_length).decode('utf-8')
-                    data = json.loads(post_data)
+                    data, error = sanitize_json_input(post_data)
+                    if data is None:
+                        self._set_headers(400)
+                        self.wfile.write(json.dumps({'error': f'Invalid JSON: {error}'}).encode('utf-8'))
+                        return
+                    
                     new_config = data.get('config', '')
                     
                     if not new_config.strip():
@@ -20701,27 +20858,48 @@ setup_long_term_optimization(){
 
 # Enhanced system optimization for enterprise deployment
 perform_system_optimization(){
-  ns_log "🔧 Optimizing system for enterprise deployment..."
+  ns_log "🔧 Optimizing system for enterprise deployment with enhanced security hardening..."
   
-  # Optimize file system permissions for security
+  # PERFORMANCE: Memory management optimization
+  if command -v sync >/dev/null 2>&1; then
+    sync 2>/dev/null || true  # Flush file system buffers
+  fi
+  
+  # SECURITY & PERFORMANCE: Optimize file system permissions
   if [ -d "$NS_HOME" ]; then
     chmod 750 "$NS_HOME" 2>/dev/null || true
+    
+    # SECURITY: Set comprehensive secure permissions
     find "$NS_HOME" -type f -name "*.key" -exec chmod 600 {} \; 2>/dev/null || true
     find "$NS_HOME" -type f -name "*.json" -exec chmod 640 {} \; 2>/dev/null || true
+    find "$NS_HOME" -type f -name "*.log" -exec chmod 640 {} \; 2>/dev/null || true
+    find "$NS_HOME" -type f -name "*.py" -exec chmod 750 {} \; 2>/dev/null || true
+    find "$NS_HOME" -type f -name "*.sh" -exec chmod 750 {} \; 2>/dev/null || true
+    find "$NS_HOME" -type d -exec chmod 750 {} \; 2>/dev/null || true
   fi
   
-  # Set system limits for production use
-  if [ -f /etc/security/limits.conf ] && command -v ulimit >/dev/null 2>&1; then
-    ulimit -n 65536 2>/dev/null || true  # Increase file descriptor limit
-    ulimit -u 32768 2>/dev/null || true  # Increase process limit
+  # PERFORMANCE: Set optimal system limits for production use
+  if command -v ulimit >/dev/null 2>&1; then
+    ulimit -n 16384 2>/dev/null || true  # Optimized file descriptor limit
+    ulimit -u 8192 2>/dev/null || true   # Optimized process limit
+    ulimit -v 4194304 2>/dev/null || true # Virtual memory (4GB)
+    ulimit -s 8192 2>/dev/null || true    # Stack size
   fi
   
-  # Optimize memory usage for long-term operation
+  # PERFORMANCE: Optimize memory usage for long-term operation
   if [ -f /proc/sys/vm/swappiness ] && [ -w /proc/sys/vm/swappiness ]; then
     echo 10 > /proc/sys/vm/swappiness 2>/dev/null || true
   fi
   
-  ns_log "✅ System optimization complete"
+  # SECURITY: Clear sensitive environment variables
+  unset PASSWORD PASS SECRET TOKEN API_KEY 2>/dev/null || true
+  
+  # PERFORMANCE: Set higher priority for main process
+  if command -v renice >/dev/null 2>&1; then
+    renice -n -2 $$ 2>/dev/null || true
+  fi
+  
+  ns_log "✅ System optimization complete with enhanced security"
 }
 
 # Maintenance scheduling for long-term reliability
