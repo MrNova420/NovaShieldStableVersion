@@ -1773,21 +1773,40 @@ generate_self_signed_tls(){
     return 0
   fi
   
-  ns_log "Generating self-signed TLS certificates for HTTPS"
+  ns_log "Generating advanced self-signed TLS certificates for HTTPS"
   
   # Ensure keys directory exists
   mkdir -p "$NS_HOME/keys"
   
-  # Generate the certificates
-  if (cd "$NS_HOME/keys" && \
-    openssl req -x509 -newkey rsa:2048 -nodes -keyout tls.key -out tls.crt -days 825 \
-      -subj "/CN=localhost/O=NovaShield/OU=SelfSigned" 2>/dev/null); then
-    ns_log "✓ TLS certificates generated successfully"
-    # Set proper permissions
-    chmod 600 "$NS_HOME/keys/tls.key" 2>/dev/null || true
-    chmod 644 "$NS_HOME/keys/tls.crt" 2>/dev/null || true
+  # Generate strong TLS certificates with modern security
+  # Using RSA 4096 for enhanced security, ECC option available
+  if command -v openssl >/dev/null 2>&1; then
+    if (cd "$NS_HOME/keys" && \
+      openssl req -x509 -newkey rsa:4096 -sha256 -nodes -keyout tls.key -out tls.crt -days 365 \
+        -subj "/CN=localhost/O=NovaShield/OU=SecureMonitoring/C=US" \
+        -addext "subjectAltName=DNS:localhost,DNS:127.0.0.1,IP:127.0.0.1" \
+        -addext "keyUsage=critical,digitalSignature,keyEncipherment" \
+        -addext "extendedKeyUsage=serverAuth" 2>/dev/null); then
+      ns_log "✓ Advanced TLS certificates generated successfully (RSA 4096-bit, SHA-256)"
+      # Set proper permissions
+      chmod 600 "$NS_HOME/keys/tls.key" 2>/dev/null || true
+      chmod 644 "$NS_HOME/keys/tls.crt" 2>/dev/null || true
+    else
+      # Fallback to basic certificate if advanced options fail
+      ns_warn "Advanced certificate generation failed, using standard method..."
+      if (cd "$NS_HOME/keys" && \
+        openssl req -x509 -newkey rsa:2048 -nodes -keyout tls.key -out tls.crt -days 365 \
+          -subj "/CN=localhost/O=NovaShield/OU=SelfSigned" 2>/dev/null); then
+        ns_log "✓ Standard TLS certificates generated successfully"
+        chmod 600 "$NS_HOME/keys/tls.key" 2>/dev/null || true
+        chmod 644 "$NS_HOME/keys/tls.crt" 2>/dev/null || true
+      else
+        ns_warn "TLS certificate generation failed - HTTPS will not be available"
+        return 1
+      fi
+    fi
   else
-    ns_warn "TLS certificate generation failed - HTTPS will not be available"
+    ns_warn "OpenSSL not available - TLS certificate generation failed"
     return 1
   fi
 }
@@ -2799,8 +2818,8 @@ web_health_check() {
     port=$(yaml_get "http" "port" "8765")
     
     if command -v curl >/dev/null 2>&1; then
-      if ! curl -sf "http://${host}:${port}/" -m 5 >/dev/null 2>&1; then
-        alert WARN "Web server not responding on http://${host}:${port}/ (PID: $web_pid exists but not serving)"
+      if ! curl -sf "https://${host}:${port}/" -k -m 5 >/dev/null 2>&1; then
+        alert WARN "Web server not responding on https://${host}:${port}/ (PID: $web_pid exists but not serving)"
         # Log detailed health check failure
         mkdir -p "${NS_LOGS}" 2>/dev/null
         _rotate_log "${NS_LOGS}/health_checks.log" 1000
@@ -7540,8 +7559,8 @@ def execute_tool(tool_name):
         'ss': ['ss', '-tuln'],
         'iptables': ['iptables', '-L', '-n'],
         'ping': ['ping', '-c', '4', '8.8.8.8'],
-        'curl': ['curl', '-I', 'http://httpbin.org/ip'],
-        'wget': ['wget', '--spider', 'http://httpbin.org/ip'],
+        'curl': ['curl', '-I', 'https://httpbin.org/ip'],
+        'wget': ['wget', '--spider', 'https://httpbin.org/ip'],
         'dig': ['dig', 'google.com'],
         'traceroute': ['traceroute', 'google.com'],
         'htop': ['htop', '--version'],  # Safe non-interactive version
@@ -7905,6 +7924,10 @@ class Handler(SimpleHTTPRequestHandler):
         self.send_header('X-XSS-Protection', '1; mode=block')
         self.send_header('Referrer-Policy', 'no-referrer')
         self.send_header('Permissions-Policy', 'geolocation=(), microphone=(), camera=(), usb=(), bluetooth=(), payment=(), fullscreen=()')
+        
+        # ENHANCED HTTPS SECURITY: Force HTTPS and secure transport
+        self.send_header('Strict-Transport-Security', 'max-age=31536000; includeSubDomains; preload')
+        self.send_header('Upgrade-Insecure-Requests', '1')
         
         # ENHANCED CSP: More restrictive Content Security Policy
         if ctype.startswith('text/html'):
@@ -9269,7 +9292,25 @@ if __name__ == '__main__':
             try:
                 httpd = HTTPServer((h, port), Handler)
                 if crt_key:
+                    # Enhanced TLS/SSL security configuration
                     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+                    
+                    # Modern TLS security settings
+                    ctx.minimum_version = ssl.TLSVersion.TLSv1_2  # Minimum TLS 1.2
+                    ctx.maximum_version = ssl.TLSVersion.TLSv1_3  # Allow TLS 1.3 if available
+                    
+                    # Secure cipher configuration
+                    ctx.set_ciphers('ECDHE+AESGCM:ECDHE+CHACHA20:DHE+AESGCM:DHE+CHACHA20:!aNULL:!MD5:!DSS')
+                    
+                    # Enhanced security options
+                    ctx.options |= ssl.OP_NO_SSLv2
+                    ctx.options |= ssl.OP_NO_SSLv3
+                    ctx.options |= ssl.OP_NO_TLSv1
+                    ctx.options |= ssl.OP_NO_TLSv1_1
+                    ctx.options |= ssl.OP_SINGLE_DH_USE
+                    ctx.options |= ssl.OP_SINGLE_ECDH_USE
+                    
+                    # Load certificate chain
                     ctx.load_cert_chain(crt_key[0], crt_key[1])
                     httpd.socket = ctx.wrap_socket(httpd.socket, server_side=True)
                     scheme='https'
@@ -23072,7 +23113,7 @@ Examples:
   $0 --encrypt /important/data    # Encrypt directory
   $0 --backup                     # Create backup
 
-The web dashboard will be available at http://127.0.0.1:8765 after starting.
+The web dashboard will be available at https://127.0.0.1:8765 after starting.
 For Android/Termux users: All features are optimized for mobile terminal use.
 USG
 }
@@ -23121,7 +23162,7 @@ menu(){
       10) enable_2fa;;
       11) reset_auth;;
       12) python3 "${NS_BIN}/notify.py" "WARN" "NovaShield Test" "This is a test notification";;
-      13) h=$(awk -F': ' '/host:/ {print $2}' "$NS_CONF" | head -n1 | tr -d '" '); prt=$(awk -F': ' '/port:/ {print $2}' "$NS_CONF" | head -n1 | tr -d '" '); [ -z "$h" ] && h="127.0.0.1"; [ -z "$prt" ] && prt=8765; echo "Open: http://${h}:${prt}";;
+      13) h=$(awk -F': ' '/host:/ {print $2}' "$NS_CONF" | head -n1 | tr -d '" '); prt=$(awk -F': ' '/port:/ {print $2}' "$NS_CONF" | head -n1 | tr -d '" '); [ -z "$h" ] && h="127.0.0.1"; [ -z "$prt" ] && prt=8765; echo "Open: https://${h}:${prt}";;
       14) break;;
       *) echo "?";;
     esac
