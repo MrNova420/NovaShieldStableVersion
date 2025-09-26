@@ -20611,16 +20611,10 @@ stop_web(){
 }
 
 install_all(){
-  # Load modular installation system
-  local install_dir="${BASH_SOURCE[0]%/*}/install"
-  if [ -f "${install_dir}/core.sh" ]; then
-    source "${install_dir}/core.sh"
-    install_all  # Call the modular version
-  else
-    # Fallback to embedded installation for backward compatibility
-    ns_log "Using embedded installation (modular files not found)"
-    install_all_embedded
-  fi
+  # Use only the embedded all-in-one installation system
+  # Everything is centralized in this single script
+  ns_log "Using all-in-one embedded installation system"
+  install_all_embedded
 }
 
 # Renamed original function for backward compatibility
