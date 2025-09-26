@@ -4392,7 +4392,13 @@ def load_user_memory(username):
             "last_active_tab": "ai",
             "auto_save": True,
             "learning_mode": "enhanced",
-            "conversation_memory_size": 50
+            "conversation_memory_size": 50,
+            # Default JARVIS voice settings - ensuring male Iron Man voice is default
+            "voice_gender": "male",
+            "voice_rate": 0.85,      # Measured, authoritative pace
+            "voice_pitch": 0.8,      # Deep, commanding tone
+            "voice_volume": 0.9,     # Clear, confident delivery
+            "tts_enabled": True      # Voice enabled by default
         },
         "last_seen": time.strftime('%Y-%m-%d %H:%M:%S'),
         "user_profile": {
@@ -6289,7 +6295,7 @@ class Handler(SimpleHTTPRequestHandler):
                 html = read_text(INDEX, '<h1>NovaShield</h1>')
                 self.wfile.write(html.encode('utf-8')); return
 
-            if parsed.path == '/':
+            if parsed.path == '/logout':
                 # Log logout event
                 client_ip = self.client_address[0]
                 sess = get_session(self)
@@ -6309,30 +6315,6 @@ class Handler(SimpleHTTPRequestHandler):
                     if p.endswith('.html'): ctype='text/html; charset=utf-8'
                     self._set_headers(200, ctype); self.wfile.write(read_text(p).encode('utf-8')); return
                 self._set_headers(404); self.wfile.write(b'{}'); return
-
-                # Keep-alive endpoint to prevent session expiration
-                if not auth_enabled():
-                    # If auth is disabled, always return success
-                    self._set_headers(200)
-                    self.wfile.write(json.dumps({'status': 'ok', 'auth': 'disabled'}).encode('utf-8'))
-                    return
-                
-                sess = get_session(self)
-                if not sess:
-                    self._set_headers(401)
-                    self.wfile.write(json.dumps({'error': 'unauthorized'}).encode('utf-8'))
-                    return
-                    
-                # Session is valid, return success with basic info
-                data = {
-                    'status': 'ok',
-                    'user': sess.get('user', 'unknown'),
-                    'timestamp': time.strftime('%Y-%m-%d %H:%M:%S'),
-                    'session_valid': True
-                }
-                self._set_headers(200)
-                self.wfile.write(json.dumps(data).encode('utf-8'))
-                return
 
             if parsed.path == '/api/ping':
                 # Keep-alive endpoint to prevent session expiration
@@ -10869,27 +10851,7 @@ async function refresh(){
     // If we got here successfully, ensure login overlay is off
     hideLogin();
     
-    // Apply theme from config unless user has set a preference in Jarvis memory
-    if (j.ui_theme && !jarvisMemory?.preferences?.theme) {
-      const root = document.documentElement;
-      const btn = $('#btn-420-theme');
-      
-      if (j.ui_theme === 'theme-420' || j.ui_theme === '420') {
-        root.classList.add('theme-420');
-        if (btn) {
-          btn.textContent = '🌿 Classic Mode';
-          btn.classList.add('active');
-        }
-      } else {
-        root.classList.remove('theme-420');
-        if (btn) {
-          btn.textContent = '🌿 420 Mode';
-          btn.classList.remove('active');
-        }
-      }
-    }
-    
-    // Enhanced Jarvis memory loading and auto-sync on every refresh
+    // Enhanced Jarvis memory loading FIRST to get user preferences
     try {
       console.log('🔄 Loading Jarvis memory during refresh...');
       await loadJarvisMemory();
@@ -10914,7 +10876,13 @@ async function refresh(){
           preferences: { 
             theme: 'jarvis-dark',
             auto_save: true,
-            learning_mode: 'enhanced'
+            learning_mode: 'enhanced',
+            // Enhanced Jarvis voice settings
+            voice_gender: 'male',
+            voice_rate: 0.85,   // Optimal Jarvis pace
+            voice_pitch: 0.8,   // Lower pitch for authority
+            voice_volume: 0.9,  // Clear and audible
+            tts_enabled: true   // Voice enabled by default
           },
           history: [],
           last_seen: new Date().toISOString(),
@@ -10923,9 +10891,32 @@ async function refresh(){
             total_sessions: 1
           }
         };
-        console.log('🔧 Created fallback memory structure');
+        
+        // Save the default memory structure
+        await saveJarvisMemory();
+        console.log('✅ Default Jarvis memory created and saved');
       } catch (fallbackError) {
-        console.error('Failed to create fallback memory:', fallbackError);
+        console.error('❌ Failed to create default Jarvis memory:', fallbackError);
+      }
+    }
+    
+    // Apply theme from config ONLY if user has NO preference in Jarvis memory
+    if (j.ui_theme && !jarvisMemory?.preferences?.theme) {
+      const root = document.documentElement;
+      const btn = $('#btn-420-theme');
+      
+      if (j.ui_theme === 'theme-420' || j.ui_theme === '420') {
+        root.classList.add('theme-420');
+        if (btn) {
+          btn.textContent = '🌿 Classic Mode';
+          btn.classList.add('active');
+        }
+      } else {
+        root.classList.remove('theme-420');
+        if (btn) {
+          btn.textContent = '🌿 420 Mode';
+          btn.classList.remove('active');
+        }
       }
     }
 
