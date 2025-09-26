@@ -2374,7 +2374,11 @@ _monitor_cpu(){
     local load1; load1=$(awk '{print $1}' /proc/loadavg 2>/dev/null || echo 0)
     local lvl; lvl=$(awk -v l="$load1" -v w="$warn" -v c="$crit" 'BEGIN{ if(l>=c){print "CRIT"} else if(l>=w){print "WARN"} else {print "OK"} }')
     write_json "${NS_LOGS}/cpu.json" "{\"ts\":\"$(ns_now)\",\"load1\":${load1},\"warn\":${warn},\"crit\":${crit},\"level\":\"${lvl}\"}"
-    [ "$lvl" = "CRIT" ] && alert CRIT "CPU load high: $load1" || { [ "$lvl" = "WARN" ] && alert WARN "CPU load elevated: $load1"; }
+    if [ "$lvl" = "CRIT" ]; then
+      alert CRIT "CPU load high: $load1"
+    elif [ "$lvl" = "WARN" ]; then
+      alert WARN "CPU load elevated: $load1"
+    fi
     sleep "$interval"
   done
 }
@@ -2432,9 +2436,18 @@ _monitor_mem(){
       fi
     done
     
-    local lvl="OK"; [ "$pct" -ge "$crit" ] && lvl="CRIT" || { [ "$pct" -ge "$warn" ] && lvl="WARN"; }
+    local lvl="OK"
+    if [ "$pct" -ge "$crit" ]; then
+      lvl="CRIT"
+    elif [ "$pct" -ge "$warn" ]; then
+      lvl="WARN"
+    fi
     write_json "${NS_LOGS}/memory.json" "{\"ts\":\"$(ns_now)\",\"used_pct\":${pct},\"warn\":${warn},\"crit\":${crit},\"level\":\"${lvl}\",\"web_mem_mb\":${web_mem},\"monitor_total_mb\":${total_monitor_mem}}"
-    [ "$lvl" = "CRIT" ] && alert CRIT "Memory high: ${pct}%" || { [ "$lvl" = "WARN" ] && alert WARN "Memory elevated: ${pct}%"; }
+    if [ "$lvl" = "CRIT" ]; then
+      alert CRIT "Memory high: ${pct}%"
+    elif [ "$lvl" = "WARN" ]; then
+      alert WARN "Memory elevated: ${pct}%"
+    fi
     sleep "$interval"
   done
 }
@@ -2684,7 +2697,8 @@ _monitor_integrity(){
     for p in $list; do
       p=$(echo "$p" | tr -d '"' | tr -d ' ')
       [ -d "$p" ] || continue
-      local sumfile="${NS_LOGS}/integrity.$(echo "$p" | tr '/' '_').sha"
+      local sumfile
+      sumfile="${NS_LOGS}/integrity.$(echo "$p" | tr '/' '_').sha"
       local file_count=0
       local changes=0
       
@@ -2931,12 +2945,14 @@ except:
       if [ "$wpid" -eq 0 ] || ! kill -0 "$wpid" 2>/dev/null; then
         if check_restart_limit "web"; then
           # Enhanced logging for web server restarts
-          local crash_time=$(date '+%Y-%m-%d %H:%M:%S')
+          local crash_time
+          crash_time=$(date '+%Y-%m-%d %H:%M:%S')
           local crash_reason="Process not running"
           
           # Check if it was a crash or clean shutdown
           if [ -f "${NS_HOME}/web.log" ]; then
-            local last_log=$(tail -1 "${NS_HOME}/web.log" 2>/dev/null || echo "")
+            local last_log
+            last_log=$(tail -1 "${NS_HOME}/web.log" 2>/dev/null || echo "")
             if echo "$last_log" | grep -qi "error\|exception\|crash\|traceback"; then
               crash_reason="Application error detected"
             fi
@@ -2988,10 +3004,13 @@ _monitor_scheduler(){
   : >"$NS_SCHED_STATE" || true
   while true; do
     monitor_enabled scheduler || { sleep "$interval"; continue; }
-    local now_hm; now_hm=$(date +%H:%M)
-    local ran_today_key="$(date +%Y-%m-%d)"
+    local now_hm
+    now_hm=$(date +%H:%M)
+    local ran_today_key
+    ran_today_key="$(date +%Y-%m-%d)"
     awk '/scheduler:/,/tasks:/{print}' "$NS_CONF" >/dev/null 2>&1 || { sleep "$interval"; continue; }
-    local names; names=$(awk '/tasks:/,0{if($1=="-"){print $0}}' "$NS_CONF" 2>/dev/null || true)
+    local names
+    names=$(awk '/tasks:/,0{if($1=="-"){print $0}}' "$NS_CONF" 2>/dev/null || true)
     local IFS=$'\n'
     for line in $names; do
       local name action time every
@@ -3031,7 +3050,8 @@ scheduler_run_action(){
 
 # Comprehensive web server health check for long-term stability
 web_health_check() {
-  local web_pid=$(safe_read_pid "${NS_PID}/web.pid" 2>/dev/null || echo 0)
+  local web_pid
+  web_pid=$(safe_read_pid "${NS_PID}/web.pid" 2>/dev/null || echo 0)
   if [ "$web_pid" -gt 0 ] && kill -0 "$web_pid" 2>/dev/null; then
     # Check if web server is responsive
     local host port
@@ -3051,7 +3071,8 @@ web_health_check() {
     # Check for error log growth
     local error_log="${NS_LOGS}/server.error.log"
     if [ -f "$error_log" ]; then
-      local error_lines=$(wc -l < "$error_log" 2>/dev/null || echo 0)
+      local error_lines
+      error_lines=$(wc -l < "$error_log" 2>/dev/null || echo 0)
       if [ "$error_lines" -gt 100 ]; then
         alert WARN "Web server error log growing: $error_lines lines - check for recurring errors"
         _rotate_log "$error_log" 200
@@ -3071,8 +3092,10 @@ health_check_system() {
     echo "=== System Health Check $(date) ==="
     
     # Check available disk space on NovaShield directory
-    local ns_disk_usage=$(du -sh "${NS_HOME}" 2>/dev/null || echo "unknown")
-    local root_avail=$(df -h "${NS_HOME}" | awk 'NR==2 {print $4}' || echo "unknown")
+    local ns_disk_usage
+    ns_disk_usage=$(du -sh "${NS_HOME}" 2>/dev/null || echo "unknown")
+    local root_avail
+    root_avail=$(df -h "${NS_HOME}" | awk 'NR==2 {print $4}' || echo "unknown")
     echo "NovaShield directory size: $ns_disk_usage"
     echo "Available disk space: $root_avail"
     
@@ -3088,7 +3111,8 @@ health_check_system() {
       printf "  %-12s: %s\n" "$monitor" "$status"
     done
     
-    local web_pid=$(safe_read_pid "${NS_PID}/web.pid" 2>/dev/null || echo 0)
+    local web_pid
+    web_pid=$(safe_read_pid "${NS_PID}/web.pid" 2>/dev/null || echo 0)
     if [ "$web_pid" -gt 0 ] && kill -0 "$web_pid" 2>/dev/null; then
       local web_mem=$(ps -o rss= -p "$web_pid" 2>/dev/null | awk '{print int($1/1024)}' || echo 0)
       echo "  Web server   : running (${web_mem}MB)"
