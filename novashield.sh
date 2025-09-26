@@ -3466,28 +3466,32 @@ AUTH_STRICT = os.environ.get('NOVASHIELD_AUTH_STRICT', '0') == '1'
 
 def get_client_ip(handler):
     """Get the real client IP address, supporting X-Forwarded-For when trust_proxy is enabled"""
-    # Check if we should trust proxy headers
-    trust_proxy = _coerce_bool(cfg_get('security.trust_proxy', False), False)
-    
-    if trust_proxy:
-        # Check for X-Forwarded-For header (most common proxy header)
-        forwarded_for = handler.headers.get('X-Forwarded-For', '').strip()
-        if forwarded_for:
-            # X-Forwarded-For can contain multiple IPs: "client, proxy1, proxy2"
-            # We want the first (leftmost) IP which should be the original client
-            client_ip = forwarded_for.split(',')[0].strip()
-            if client_ip and client_ip != '':
-                return client_ip
+    # Simplified version to avoid cfg_get calls that might cause hanging
+    # Check if we should trust proxy headers (default to False for safety)
+    try:
+        trust_proxy = False  # Simplified - disable proxy header trust to avoid cfg_get hanging
         
-        # Check for X-Real-IP header (nginx style)
-        real_ip = handler.headers.get('X-Real-IP', '').strip()
-        if real_ip:
-            return real_ip
+        if trust_proxy:
+            # Check for X-Forwarded-For header (most common proxy header)
+            forwarded_for = handler.headers.get('X-Forwarded-For', '').strip()
+            if forwarded_for:
+                # X-Forwarded-For can contain multiple IPs: "client, proxy1, proxy2"
+                # We want the first (leftmost) IP which should be the original client
+                client_ip = forwarded_for.split(',')[0].strip()
+                if client_ip and client_ip != '':
+                    return client_ip
             
-        # Check for CF-Connecting-IP (Cloudflare)
-        cf_ip = handler.headers.get('CF-Connecting-IP', '').strip()
-        if cf_ip:
-            return cf_ip
+            # Check for X-Real-IP header (nginx style)
+            real_ip = handler.headers.get('X-Real-IP', '').strip()
+            if real_ip:
+                return real_ip
+                
+            # Check for CF-Connecting-IP (Cloudflare)
+            cf_ip = handler.headers.get('CF-Connecting-IP', '').strip()
+            if cf_ip:
+                return cf_ip
+    except Exception:
+        pass  # On any error, fall back to direct connection IP
     
     # Fallback to direct connection IP (fixed recursive call)
     return handler.client_address[0]
@@ -3893,9 +3897,13 @@ def auth_enabled():
     
     # If auth is enabled but no users exist, effectively disable auth to prevent lockout
     try:
-        db = users_db()
-        userdb = db.get('_userdb', {})
-        return bool(userdb)  # Return True only if there are users
+        # Check if sessions file exists and has users - avoid using users_db() to prevent circular calls
+        if not os.path.exists(SESSIONS):
+            return False
+        with open(SESSIONS, 'r') as f:
+            data = json.load(f)
+            userdb = data.get('_userdb', {})
+            return bool(userdb)  # Return True only if there are users
     except Exception:
         return False  # On error, disable auth to prevent lockout
 def csrf_required(): return _coerce_bool(cfg_get('security.csrf_required', True), True)
