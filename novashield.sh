@@ -9,8 +9,29 @@
 # OPTIMIZED: 99.9% Uptime, Storage Efficiency, Multi-User Support, Long-Term Reliability
 # ==============================================================================
 
-set -Eeuo pipefail
+# Use less aggressive error handling during initialization to prevent memory-related failures
+set -Eeu
 IFS=$'\n\t'
+
+# Function to enable stricter error handling after initialization
+enable_strict_mode() {
+  set -o pipefail 2>/dev/null || true
+}
+
+# Function to check if we have sufficient resources for operations
+check_system_resources() {
+  local min_memory_mb=50
+  local available_memory=0
+  
+  if command -v free >/dev/null 2>&1; then
+    available_memory=$(free -m 2>/dev/null | awk 'NR==2{print $7}' 2>/dev/null || echo 0)
+    if [ "$available_memory" -lt "$min_memory_mb" ]; then
+      echo "WARNING: Low memory detected (${available_memory}MB available, ${min_memory_mb}MB minimum recommended)" >&2
+      return 1
+    fi
+  fi
+  return 0
+}
 
 NS_VERSION="3.4.0-Enterprise-AAA-JARVIS-Centralized"  # JARVIS-Centralized System
 
@@ -67,7 +88,8 @@ _rotate_log() {
     
     local timestamp
     timestamp=$(date '+%Y%m%d_%H%M%S')
-    local archive_file="${archive_dir}/$(basename "$logfile")_${timestamp}.gz"
+    local archive_file
+    archive_file="${archive_dir}/$(basename "$logfile")_${timestamp}.gz"
     
     # Keep last 40% of lines, compress and archive the rest
     local keep_lines=$((max_lines * 40 / 100))
@@ -89,50 +111,71 @@ _rotate_log() {
 
 # Enhanced memory management for long-term operation with advanced optimization
 _optimize_memory() {
-  local memory_threshold=80  # Percentage threshold for memory optimization
+  # Prevent excessive memory optimization calls
+  local last_optimize_file="${NS_TMP}/last_memory_optimize"
+  local current_time
+  current_time=$(date +%s 2>/dev/null || echo 0)
+  
+  # Only run memory optimization every 5 minutes to prevent resource exhaustion
+  if [ -f "$last_optimize_file" ]; then
+    local last_optimize
+    last_optimize=$(cat "$last_optimize_file" 2>/dev/null || echo 0)
+    if [ $((current_time - last_optimize)) -lt 300 ]; then
+      return 0  # Skip optimization if ran recently
+    fi
+  fi
+  
+  local memory_threshold=85  # Increased threshold to be less aggressive
   local current_memory_usage
   
-  # Get current memory usage percentage
+  # Get current memory usage percentage with better error handling
   if command -v free >/dev/null 2>&1; then
-    current_memory_usage=$(free | awk 'NR==2{printf "%.0f", $3*100/$2}')
+    current_memory_usage=$(free 2>/dev/null | awk 'NR==2{printf "%.0f", $3*100/$2}' 2>/dev/null || echo "0")
     
-    # Only optimize if memory usage is above threshold
-    if [ "$current_memory_usage" -gt "$memory_threshold" ]; then
-      ns_log "Memory usage at ${current_memory_usage}%, optimizing..."
+    # Only optimize if memory usage is above threshold and we have valid data
+    if [ "$current_memory_usage" -gt "$memory_threshold" ] && [ "$current_memory_usage" -lt 100 ]; then
+      ns_log "Memory usage at ${current_memory_usage}%, optimizing (threshold: ${memory_threshold}%)"
       
-      # Clear system caches periodically (if we have permissions)
-      if [ -w "/proc/sys/vm/drop_caches" ] 2>/dev/null; then
-        sync && echo 1 > /proc/sys/vm/drop_caches 2>/dev/null || true
+      # Less aggressive cache clearing - only if safe
+      if [ -w "/proc/sys/vm/drop_caches" ] 2>/dev/null && command -v sync >/dev/null 2>&1; then
+        if sync 2>/dev/null; then
+          echo 1 > /proc/sys/vm/drop_caches 2>/dev/null || true
+        fi
       fi
       
-      # Clear bash history cache
+      # Clear bash history cache safely
       history -c 2>/dev/null || true
       
-      # Force garbage collection in background processes
-      kill -USR1 $$ 2>/dev/null || true
+      # Skip aggressive signal handling that might cause issues
+      # kill -USR1 $$ 2>/dev/null || true  # Commented out as it can cause instability
       
-      # Advanced memory optimization
-      # Clear DNS cache if available
+      # Clear DNS cache if available (less aggressive)
       if command -v systemd-resolve >/dev/null 2>&1; then
         systemd-resolve --flush-caches 2>/dev/null || true
       fi
       
-      # Optimize shared memory
+      # Optimize shared memory more conservatively  
       if [ -d "/dev/shm" ]; then
-        find /dev/shm -user "$(whoami)" -type f -mtime +1 -delete 2>/dev/null || true
+        find /dev/shm -user "$(whoami)" -type f -mtime +7 -delete 2>/dev/null || true
       fi
       
-      # Memory compaction
-      if [ -w "/proc/sys/vm/compact_memory" ] 2>/dev/null; then
-        echo 1 > /proc/sys/vm/compact_memory 2>/dev/null || true
-      fi
+      # Skip memory compaction as it can be resource-intensive
+      # if [ -w "/proc/sys/vm/compact_memory" ] 2>/dev/null; then
+      #   echo 1 > /proc/sys/vm/compact_memory 2>/dev/null || true
+      # fi
       
       ns_log "✅ Memory optimization completed"
     fi
   fi
   
-  # Memory leak detection and prevention
-  _detect_memory_leaks
+  # Update last optimization timestamp
+  mkdir -p "$(dirname "$last_optimize_file")" 2>/dev/null || true
+  echo "$current_time" > "$last_optimize_file" 2>/dev/null || true
+  
+  # Memory leak detection and prevention (less frequent)
+  if [ $((current_time % 600)) -eq 0 ]; then  # Every 10 minutes
+    _detect_memory_leaks
+  fi
 }
 
 # Advanced memory leak detection and prevention
@@ -144,13 +187,15 @@ _detect_memory_leaks() {
   if [ "$process_count" -gt 10 ]; then
     ns_warn "⚠️  Potential memory leak: $process_count NovaShield processes detected"
     # Calculate memory footprint for monitoring
-    local memory_footprint=$(ps -C novashield -o rss= 2>/dev/null | awk '{sum+=$1} END {print sum ? sum"KB" : "0KB"}')
+    local memory_footprint
+    memory_footprint=$(ps -C novashield -o rss= 2>/dev/null | awk '{sum+=$1} END {print sum ? sum"KB" : "0KB"}')
     ns_log "🔍 Total memory footprint: $memory_footprint"
     
     # Kill orphaned processes older than 1 hour
     for pid in $(pgrep -f "novashield" 2>/dev/null || true); do
       if [ -n "$pid" ] && [ "$pid" != "$$" ]; then
-        local process_age=$(ps -o etime= -p "$pid" 2>/dev/null | tr -d ' ' || echo "")
+        local process_age
+        process_age=$(ps -o etime= -p "$pid" 2>/dev/null | tr -d ' ' || echo "")
         if [[ "$process_age" =~ ^[0-9]+-[0-9]+:[0-9]+:[0-9]+$ ]]; then
           # Process older than 1 hour, potential leak
           kill -TERM "$pid" 2>/dev/null || true
@@ -170,7 +215,8 @@ _cleanup_storage() {
   ns_log "🧹 Optimizing storage: $cleanup_dir (max age: ${max_age_days} days)"
   
   # Advanced storage optimization
-  local initial_size=$(du -sh "$cleanup_dir" 2>/dev/null | cut -f1 || echo "unknown")
+  local initial_size
+  initial_size=$(du -sh "$cleanup_dir" 2>/dev/null | cut -f1 || echo "unknown")
   
   # Clean files older than max_age_days
   find "$cleanup_dir" -type f -mtime +"$max_age_days" -delete 2>/dev/null || true
@@ -199,7 +245,8 @@ _cleanup_storage() {
   # Storage compression for archives
   _compress_old_files "$cleanup_dir"
   
-  local final_size=$(du -sh "$cleanup_dir" 2>/dev/null | cut -f1 || echo "unknown")
+  local final_size
+  final_size=$(du -sh "$cleanup_dir" 2>/dev/null | cut -f1 || echo "unknown")
   ns_log "✅ Storage optimization: $initial_size → $final_size"
 }
 
@@ -259,7 +306,8 @@ _close_idle_connections() {
   
   # Clean up zombie connections
   if [ -f "$NS_PID/web_server.pid" ]; then
-    local web_pid=$(cat "$NS_PID/web_server.pid" 2>/dev/null || echo "")
+    local web_pid
+    web_pid=$(cat "$NS_PID/web_server.pid" 2>/dev/null || echo "")
     if [ -n "$web_pid" ] && kill -0 "$web_pid" 2>/dev/null; then
       # Send signal to web server to clean up connections
       kill -USR2 "$web_pid" 2>/dev/null || true
@@ -322,7 +370,8 @@ _clean_stale_pids() {
   for pid_file in "$pid_dir"/*.pid; do
     [ -f "$pid_file" ] || continue
     
-    local pid=$(cat "$pid_file" 2>/dev/null || echo "")
+    local pid
+    pid=$(cat "$pid_file" 2>/dev/null || echo "")
     if [ -n "$pid" ]; then
       if ! kill -0 "$pid" 2>/dev/null; then
         # Process no longer exists, remove stale PID file
@@ -338,13 +387,29 @@ _clean_stale_pids() {
 
 # Optimize process limits and resource usage
 _optimize_process_limits() {
-  # Set optimal ulimits for the current shell
-  ulimit -n 4096 2>/dev/null || true  # Max open files
-  ulimit -u 2048 2>/dev/null || true  # Max processes
-  ulimit -v 1048576 2>/dev/null || true  # Virtual memory (1GB)
+  # Check available memory before setting aggressive limits
+  local available_memory=0
+  if command -v free >/dev/null 2>&1; then
+    available_memory=$(free -m 2>/dev/null | awk 'NR==2{print $7}' 2>/dev/null || echo 0)
+  fi
   
-  # CPU niceness for background processes
-  renice +5 $$ 2>/dev/null || true
+  # Set optimal ulimits for the current shell based on available resources
+  if [ "$available_memory" -gt 200 ]; then
+    # Higher limits for systems with adequate memory
+    ulimit -n 4096 2>/dev/null || ulimit -n 1024 2>/dev/null || true  # Max open files
+    ulimit -u 2048 2>/dev/null || ulimit -u 512 2>/dev/null || true   # Max processes
+    ulimit -v 1048576 2>/dev/null || true # Virtual memory (1GB)
+  else
+    # Conservative limits for low memory systems
+    ulimit -n 1024 2>/dev/null || true
+    ulimit -u 512 2>/dev/null || true
+    ulimit -v 524288 2>/dev/null || true # Virtual memory (512MB)
+  fi
+  
+  # CPU niceness for background processes (less aggressive)
+  if [ "$available_memory" -gt 100 ]; then
+    renice +5 $$ 2>/dev/null || true
+  fi
 }
 
 # Process monitoring and health checks
@@ -354,11 +419,14 @@ _monitor_processes() {
   for process in $critical_processes; do
     local pid_file="$NS_PID/${process}.pid"
     if [ -f "$pid_file" ]; then
-      local pid=$(cat "$pid_file" 2>/dev/null || echo "")
+      local pid
+      pid=$(cat "$pid_file" 2>/dev/null || echo "")
       if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
         # Process is running, check health
-        local cpu_usage=$(ps -p "$pid" -o %cpu= 2>/dev/null | tr -d ' ' || echo "0")
-        local mem_usage=$(ps -p "$pid" -o %mem= 2>/dev/null | tr -d ' ' || echo "0")
+        local cpu_usage
+        cpu_usage=$(ps -p "$pid" -o %cpu= 2>/dev/null | tr -d ' ' || echo "0")
+        local mem_usage
+        mem_usage=$(ps -p "$pid" -o %mem= 2>/dev/null | tr -d ' ' || echo "0")
         
         # Alert if process is using excessive resources
         if [ "${cpu_usage%.*}" -gt 80 ]; then
@@ -407,7 +475,8 @@ _setup_api_connection_pools() {
 # Optimize rate limiting for better performance
 _optimize_rate_limiting() {
   # Dynamic rate limiting based on system load
-  local system_load=$(uptime | awk -F'load average:' '{print $2}' | awk '{print $1}' | sed 's/,//' || echo "0")
+  local system_load
+  system_load=$(uptime | awk -F'load average:' '{print $2}' | awk '{print $1}' | sed 's/,//' || echo "0")
   local load_threshold=2.0
   
   if command -v bc >/dev/null 2>&1; then
@@ -498,12 +567,17 @@ _optimize_system_resources() {
 
 # Optimize file descriptor usage
 _optimize_file_descriptors() {
-  # Close unused file descriptors
-  for fd in $(ls /proc/$$/fd/ 2>/dev/null); do
-    if [ "$fd" -gt 10 ] && [ ! -t "$fd" ]; then
-      exec {fd}>&- 2>/dev/null || true
-    fi
-  done
+  # Close unused file descriptors using safer glob pattern
+  if [ -d "/proc/$$/fd/" ]; then
+    for fd_path in "/proc/$$/fd/"*; do
+      [ -e "$fd_path" ] || continue
+      local fd
+      fd=$(basename "$fd_path")
+      if [[ "$fd" =~ ^[0-9]+$ ]] && [ "$fd" -gt 10 ] && [ ! -t "$fd" ]; then
+        exec {fd}>&- 2>/dev/null || true
+      fi
+    done
+  fi
   
   # Set optimal file descriptor limits
   ulimit -n 4096 2>/dev/null || true
@@ -573,7 +647,8 @@ enhanced_system_diagnostics() {
   local issues_found=()
   
   # CPU Analysis with AI predictions
-  local cpu_usage=$(top -bn1 | grep "Cpu(s)" | awk '{print $2}' | cut -d'%' -f1)
+  local cpu_usage
+  cpu_usage=$(top -bn1 | grep "Cpu(s)" | awk '{print $2}' | cut -d'%' -f1)
   if (( $(echo "$cpu_usage > 80" | bc -l 2>/dev/null || echo "0") )); then
     issues_found+=("HIGH_CPU_USAGE")
     health_score=$((health_score - 20))
@@ -581,7 +656,8 @@ enhanced_system_diagnostics() {
   fi
   
   # Memory Analysis with leak detection
-  local mem_usage=$(free | grep Mem | awk '{printf("%.1f", $3/$2 * 100.0)}')
+  local mem_usage
+  mem_usage=$(free | grep Mem | awk '{printf("%.1f", $3/$2 * 100.0)}')
   if (( $(echo "$mem_usage > 85" | bc -l 2>/dev/null || echo "0") )); then
     issues_found+=("HIGH_MEMORY_USAGE")
     health_score=$((health_score - 25))
@@ -589,7 +665,8 @@ enhanced_system_diagnostics() {
   fi
   
   # Disk Analysis with predictive failure detection
-  local disk_usage=$(df -h / | awk 'NR==2 {print $5}' | cut -d'%' -f1)
+  local disk_usage
+  disk_usage=$(df -h / | awk 'NR==2 {print $5}' | cut -d'%' -f1)
   if [ "$disk_usage" -gt 85 ]; then
     issues_found+=("HIGH_DISK_USAGE")
     health_score=$((health_score - 15))
@@ -764,7 +841,8 @@ enhanced_protocol_operations() {
 long_term_backup_system() {
   local backup_type="${1:-full}"
   local backup_dir="${NS_HOME}/backups"
-  local timestamp=$(date +%Y%m%d_%H%M%S)
+  local timestamp
+  timestamp=$(date +%Y%m%d_%H%M%S)
   
   mkdir -p "$backup_dir"
   
@@ -780,7 +858,8 @@ long_term_backup_system() {
       ;;
     "incremental")
       # Incremental backup since last full backup
-      local last_full=$(find "$backup_dir" -name "full_backup_*.tar.gz" -type f | sort | tail -1)
+      local last_full
+      last_full=$(find "$backup_dir" -name "full_backup_*.tar.gz" -type f | sort | tail -1)
       if [ -n "$last_full" ]; then
         ns_log "Creating incremental backup since $(basename "$last_full")..."
         find "$NS_HOME" -newer "$last_full" -type f | \
@@ -803,7 +882,8 @@ long_term_backup_system() {
   find "$backup_dir" -name "*.tar.gz" -type f -mtime +30 -delete 2>/dev/null || true
   
   # Verify backup integrity
-  local latest_backup=$(find "$backup_dir" -name "*backup_${timestamp}.tar.gz" -type f | head -1)
+  local latest_backup
+  latest_backup=$(find "$backup_dir" -name "*backup_${timestamp}.tar.gz" -type f | head -1)
   if [ -n "$latest_backup" ] && tar -tzf "$latest_backup" >/dev/null 2>&1; then
     ns_log "✅ Backup verified: $(basename "$latest_backup")"
     return 0
@@ -857,22 +937,57 @@ optimize_storage_for_uptime() {
 }
 
 ns_log() { 
-  mkdir -p "${NS_HOME}" 2>/dev/null
-  _rotate_log "${NS_HOME}/launcher.log" 4000  # Optimized for storage
-  echo -e "$(ns_now) [INFO ] $*" | tee -a "${NS_HOME}/launcher.log" >&2
+  # Create directory only once, cache result to avoid repeated mkdir calls
+  if [ ! -d "${NS_HOME}" ]; then
+    mkdir -p "${NS_HOME}" 2>/dev/null || {
+      # Fallback to system temp if NS_HOME creation fails
+      local fallback_dir
+      fallback_dir="/tmp/novashield-$(whoami)"
+      mkdir -p "$fallback_dir" 2>/dev/null || return 0
+      echo -e "$(ns_now) [INFO ] $*" | tee -a "$fallback_dir/launcher.log" >&2 2>/dev/null || echo -e "$(ns_now) [INFO ] $*" >&2
+      return 0
+    }
+  fi
   
-  # Periodic memory optimization (every 100 log entries)
-  [ $(($(wc -l < "${NS_HOME}/launcher.log" 2>/dev/null || echo 0) % 100)) -eq 0 ] && _optimize_memory &
+  _rotate_log "${NS_HOME}/launcher.log" 4000  # Optimized for storage
+  echo -e "$(ns_now) [INFO ] $*" | tee -a "${NS_HOME}/launcher.log" >&2 2>/dev/null || echo -e "$(ns_now) [INFO ] $*" >&2
+  
+  # Less frequent memory optimization (every 500 log entries instead of 100)
+  local log_count
+  log_count=$(wc -l < "${NS_HOME}/launcher.log" 2>/dev/null || echo 0)
+  if [ $((log_count % 500)) -eq 0 ] && [ "$log_count" -gt 0 ]; then
+    _optimize_memory &
+  fi
 }
 ns_warn(){ 
-  mkdir -p "${NS_HOME}" 2>/dev/null
+  # Create directory only once, with better error handling
+  if [ ! -d "${NS_HOME}" ]; then
+    mkdir -p "${NS_HOME}" 2>/dev/null || {
+      local fallback_dir
+      fallback_dir="/tmp/novashield-$(whoami)"
+      mkdir -p "$fallback_dir" 2>/dev/null || return 0
+      echo -e "${YELLOW}$(ns_now) [WARN ] $*${NC}" | tee -a "$fallback_dir/launcher.log" >&2 2>/dev/null || echo -e "${YELLOW}$(ns_now) [WARN ] $*${NC}" >&2
+      return 0
+    }
+  fi
+  
   _rotate_log "${NS_HOME}/launcher.log" 4000
-  echo -e "${YELLOW}$(ns_now) [WARN ] $*${NC}" | tee -a "${NS_HOME}/launcher.log" >&2
+  echo -e "${YELLOW}$(ns_now) [WARN ] $*${NC}" | tee -a "${NS_HOME}/launcher.log" >&2 2>/dev/null || echo -e "${YELLOW}$(ns_now) [WARN ] $*${NC}" >&2
 }
 ns_err() { 
-  mkdir -p "${NS_HOME}" 2>/dev/null
+  # Create directory only once, with better error handling
+  if [ ! -d "${NS_HOME}" ]; then
+    mkdir -p "${NS_HOME}" 2>/dev/null || {
+      local fallback_dir
+      fallback_dir="/tmp/novashield-$(whoami)"
+      mkdir -p "$fallback_dir" 2>/dev/null || return 0
+      echo -e "${RED}$(ns_now) [ERROR] $*${NC}" | tee -a "$fallback_dir/launcher.log" >&2 2>/dev/null || echo -e "${RED}$(ns_now) [ERROR] $*${NC}" >&2
+      return 0
+    }
+  fi
+  
   _rotate_log "${NS_HOME}/launcher.log" 4000
-  echo -e "${RED}$(ns_now) [ERROR] $*${NC}" | tee -a "${NS_HOME}/launcher.log" >&2
+  echo -e "${RED}$(ns_now) [ERROR] $*${NC}" | tee -a "${NS_HOME}/launcher.log" >&2 2>/dev/null || echo -e "${RED}$(ns_now) [ERROR] $*${NC}" >&2
 }
 ns_ok()  { echo -e "${GREEN}✓ $*${NC}"; }
 
@@ -909,10 +1024,12 @@ _security_alert_handler() {
   
   # Store in high-priority security database for long-term analysis
   local security_db="${NS_CTRL}/security_events.json"
-  local timestamp=$(date '+%s')
+  local timestamp
+  timestamp=$(date '+%s')
   
   # Create JSON entry with enhanced metadata
-  local json_entry="{\"timestamp\":$timestamp,\"level\":\"$alert_level\",\"event\":\"$event\",\"source\":\"NovaShield\",\"node\":\"$(hostname 2>/dev/null || echo unknown)\"}"
+  local json_entry
+  json_entry="{\"timestamp\":$timestamp,\"level\":\"$alert_level\",\"event\":\"$event\",\"source\":\"NovaShield\",\"node\":\"$(hostname 2>/dev/null || echo unknown)\"}"
   
   # Atomic append to security database
   (
@@ -922,7 +1039,11 @@ _security_alert_handler() {
     fi
     
     # Add new entry and maintain last 1000 events for long-term analysis
-    jq --argjson entry "$json_entry" '.security_events += [$entry] | .security_events = .security_events[-1000:]' "$security_db" > "${security_db}.tmp" 2>/dev/null && mv "${security_db}.tmp" "$security_db" || true
+    if jq --argjson entry "$json_entry" '.security_events += [$entry] | .security_events = .security_events[-1000:]' "$security_db" > "${security_db}.tmp" 2>/dev/null; then
+      mv "${security_db}.tmp" "$security_db"
+    else
+      rm -f "${security_db}.tmp" 2>/dev/null
+    fi
   ) 200>"${security_db}.lock"
 }
 
@@ -1180,7 +1301,8 @@ yaml_get_array(){
 safe_read_pid(){
   local pidfile="$1"
   [ -f "$pidfile" ] || { echo "0"; return; }
-  local pid; pid=$(cat "$pidfile" 2>/dev/null | head -n1 | tr -d ' \t\n\r')
+  local pid
+  pid=$(head -n1 "$pidfile" 2>/dev/null | tr -d ' \t\n\r')
   
   # Validate PID is a number
   if ! [[ "$pid" =~ ^[0-9]+$ ]] || [ "$pid" -eq 0 ]; then
@@ -1233,6 +1355,11 @@ PKG_INSTALL(){
 }
 
 ensure_dirs(){
+  # Check system resources before creating directories
+  if ! check_system_resources; then
+    ns_warn "⚠️  Low system resources detected. Using conservative directory creation."
+  fi
+  
   # SECURITY HARDENING: Create directories with secure permissions and validation
   local dirs=(
     "$NS_BIN" "$NS_LOGS" "$NS_WWW" "$NS_MODULES" "$NS_PROJECTS" 
@@ -1241,11 +1368,27 @@ ensure_dirs(){
   )
   
   # SECURITY: Set secure umask before creating files/directories
-  local old_umask=$(umask)
+  local old_umask
+  old_umask=$(umask)
   umask 077
   
+  # Create directories in batches to avoid memory pressure
+  local batch_size=3
+  local created_count=0
+  
   for dir in "${dirs[@]}"; do
-    mkdir -p "$dir" 2>/dev/null || true
+    # Create directory with better error handling
+    if ! mkdir -p "$dir" 2>/dev/null; then
+      ns_warn "⚠️  Failed to create directory: $dir (possible memory/permission issue)"
+      # Try alternative location if NS_HOME creation fails
+      if [[ "$dir" == *"$NS_HOME"* ]]; then
+        local alt_dir
+        alt_dir="/tmp/novashield-$(whoami)${dir#"$NS_HOME"}"
+        mkdir -p "$alt_dir" 2>/dev/null || continue
+        ns_warn "📁 Using alternative directory: $alt_dir"
+      fi
+      continue
+    fi
     
     # SECURITY: Set appropriate permissions based on directory purpose
     case "$dir" in
@@ -1259,22 +1402,63 @@ ensure_dirs(){
         chmod 755 "$dir" 2>/dev/null || true  # Standard for other dirs
         ;;
     esac
+    
+    created_count=$((created_count + 1))
+    
+    # Pause every few directories to prevent memory pressure
+    if [ $((created_count % batch_size)) -eq 0 ]; then
+      sleep 0.1 2>/dev/null || true
+    fi
   done
   
-  # Create essential files with secure permissions
-  : >"$NS_ALERTS" && chmod 640 "$NS_ALERTS" 2>/dev/null || true
-  : >"$NS_CHATLOG" && chmod 640 "$NS_CHATLOG" 2>/dev/null || true
-  : >"$NS_AUDIT" && chmod 600 "$NS_AUDIT" 2>/dev/null || true  # Most sensitive
+  # Create essential files with secure permissions (more conservatively)
+  if [ -d "$(dirname "$NS_ALERTS")" ]; then
+    if : >"$NS_ALERTS"; then
+      chmod 640 "$NS_ALERTS" 2>/dev/null || true
+    fi
+  fi
+  if [ -d "$(dirname "$NS_CHATLOG")" ]; then
+    if : >"$NS_CHATLOG"; then
+      chmod 640 "$NS_CHATLOG" 2>/dev/null || true
+    fi
+  fi
+  if [ -d "$(dirname "$NS_AUDIT")" ]; then
+    if : >"$NS_AUDIT"; then
+      chmod 600 "$NS_AUDIT" 2>/dev/null || true  # Most sensitive
+    fi
+  fi
   
-  # Create JSON files with secure permissions
-  [ -f "$NS_SESS_DB" ] || { echo '{}' >"$NS_SESS_DB" && chmod 600 "$NS_SESS_DB" 2>/dev/null || true; }
-  [ -f "$NS_RL_DB" ] || { echo '{}' >"$NS_RL_DB" && chmod 600 "$NS_RL_DB" 2>/dev/null || true; }
-  [ -f "$NS_BANS_DB" ] || { echo '{}' >"$NS_BANS_DB" && chmod 600 "$NS_BANS_DB" 2>/dev/null || true; }
-  [ -f "$NS_JARVIS_MEM" ] || { echo '{"conversations":[]}' >"$NS_JARVIS_MEM" && chmod 600 "$NS_JARVIS_MEM" 2>/dev/null || true; }
+  # Create JSON files with secure permissions (with existence check)
+  if [ -d "$(dirname "$NS_SESS_DB")" ]; then
+    if [ ! -f "$NS_SESS_DB" ]; then
+      if echo '{}' >"$NS_SESS_DB"; then
+        chmod 600 "$NS_SESS_DB" 2>/dev/null || true
+      fi
+    fi
+  fi
+  if [ ! -f "$NS_RL_DB" ]; then
+    if echo '{}' >"$NS_RL_DB"; then
+      chmod 600 "$NS_RL_DB" 2>/dev/null || true
+    fi
+  fi
+  if [ ! -f "$NS_BANS_DB" ]; then
+    if echo '{}' >"$NS_BANS_DB"; then
+      chmod 600 "$NS_BANS_DB" 2>/dev/null || true
+    fi
+  fi
+  if [ ! -f "$NS_JARVIS_MEM" ]; then
+    if echo '{"conversations":[]}' >"$NS_JARVIS_MEM"; then
+      chmod 600 "$NS_JARVIS_MEM" 2>/dev/null || true
+    fi
+  fi
   
   # Version and path files
-  echo "$NS_VERSION" >"$NS_VERSION_FILE" && chmod 644 "$NS_VERSION_FILE" 2>/dev/null || true
-  echo "$NS_SELF" >"$NS_SELF_PATH_FILE" && chmod 644 "$NS_SELF_PATH_FILE" 2>/dev/null || true
+  if echo "$NS_VERSION" >"$NS_VERSION_FILE"; then
+    chmod 644 "$NS_VERSION_FILE" 2>/dev/null || true
+  fi
+  if echo "$NS_SELF" >"$NS_SELF_PATH_FILE"; then
+    chmod 644 "$NS_SELF_PATH_FILE" 2>/dev/null || true
+  fi
   
   # Restore previous umask
   umask "$old_umask"
@@ -1812,10 +1996,39 @@ generate_self_signed_tls(){
 }
 
 aes_key_path(){ yaml_get "security" "aes_key_file" "keys/aes.key"; }
-enc_file(){ local in="$1"; local out="$2"; local key="${NS_HOME}/$(aes_key_path)"; openssl enc -aes-256-cbc -salt -pbkdf2 -in "$in" -out "$out" -pass file:"$key"; }
-dec_file(){ local in="$1"; local out="$2"; local key="${NS_HOME}/$(aes_key_path)"; openssl enc -d -aes-256-cbc -pbkdf2 -in "$in" -out "$out" -pass file:"$key"; }
-enc_dir(){ local dir="$1"; local out="$2"; local tmp="${NS_TMP}/tmp-$(date +%s).tar.gz"; tar -C "$dir" -czf "$tmp" . || tar -czf "$tmp" "$dir"; enc_file "$tmp" "$out"; rm -f "$tmp"; }
-dec_dir(){ local in="$1"; local outdir="$2"; local tmp="${NS_TMP}/tmp-$(date +%s).tar.gz"; dec_file "$in" "$tmp"; mkdir -p "$outdir"; tar -C "$outdir" -xzf "$tmp"; rm -f "$tmp"; }
+enc_file(){ 
+  local in="$1"
+  local out="$2"
+  local key
+  key="${NS_HOME}/$(aes_key_path)"
+  openssl enc -aes-256-cbc -salt -pbkdf2 -in "$in" -out "$out" -pass file:"$key"
+}
+dec_file(){ 
+  local in="$1"
+  local out="$2"
+  local key
+  key="${NS_HOME}/$(aes_key_path)"
+  openssl enc -d -aes-256-cbc -pbkdf2 -in "$in" -out "$out" -pass file:"$key"
+}
+enc_dir(){ 
+  local dir="$1"
+  local out="$2"
+  local tmp
+  tmp="${NS_TMP}/tmp-$(date +%s).tar.gz"
+  tar -C "$dir" -czf "$tmp" . || tar -czf "$tmp" "$dir"
+  enc_file "$tmp" "$out"
+  rm -f "$tmp"
+}
+dec_dir(){ 
+  local in="$1"
+  local outdir="$2"
+  local tmp
+  tmp="${NS_TMP}/tmp-$(date +%s).tar.gz"
+  dec_file "$in" "$tmp"
+  mkdir -p "$outdir"
+  tar -C "$outdir" -xzf "$tmp"
+  rm -f "$tmp"
+}
 
 write_notify_py(){
   write_file "${NS_BIN}/notify.py" 700 <<'PY'
@@ -2086,7 +2299,7 @@ rotate_backups(){
   [ -d "$bdir" ] || return 0
 
   local to_delete
-  to_delete="$(ls -1t "$bdir"/backup-*.tar.gz* 2>/dev/null | tail -n +"$((max_keep+1))" || true)"
+  to_delete="$(find "$bdir" -name "backup-*.tar.gz*" -type f -printf '%T@ %p\n' 2>/dev/null | sort -nr | tail -n +"$((max_keep+1))" | cut -d' ' -f2- || true)"
   if [ -n "$to_delete" ]; then
     echo "$to_delete" | while IFS= read -r f; do
       [ -n "$f" ] || continue
@@ -2097,8 +2310,10 @@ rotate_backups(){
 }
 
 version_snapshot(){
-  local stamp="$(date '+%Y%m%d-%H%M%S')"
-  local vdir="${NS_VERSIONS}/${stamp}"; mkdir -p "$vdir"
+  local stamp
+  stamp="$(date '+%Y%m%d-%H%M%S')"
+  local vdir="${NS_VERSIONS}/${stamp}"
+  mkdir -p "$vdir"
   ns_log "Creating version snapshot: $vdir"
   cp -a "$NS_MODULES" "$vdir/modules" 2>/dev/null || true
   cp -a "$NS_PROJECTS" "$vdir/projects" 2>/dev/null || true
@@ -2159,7 +2374,11 @@ _monitor_cpu(){
     local load1; load1=$(awk '{print $1}' /proc/loadavg 2>/dev/null || echo 0)
     local lvl; lvl=$(awk -v l="$load1" -v w="$warn" -v c="$crit" 'BEGIN{ if(l>=c){print "CRIT"} else if(l>=w){print "WARN"} else {print "OK"} }')
     write_json "${NS_LOGS}/cpu.json" "{\"ts\":\"$(ns_now)\",\"load1\":${load1},\"warn\":${warn},\"crit\":${crit},\"level\":\"${lvl}\"}"
-    [ "$lvl" = "CRIT" ] && alert CRIT "CPU load high: $load1" || { [ "$lvl" = "WARN" ] && alert WARN "CPU load elevated: $load1"; }
+    if [ "$lvl" = "CRIT" ]; then
+      alert CRIT "CPU load high: $load1"
+    elif [ "$lvl" = "WARN" ]; then
+      alert WARN "CPU load elevated: $load1"
+    fi
     sleep "$interval"
   done
 }
@@ -2186,7 +2405,8 @@ _monitor_mem(){
     fi
     
     # Check NovaShield process memory usage for long-term stability
-    local web_pid=$(safe_read_pid "${NS_PID}/web.pid" 2>/dev/null || echo 0)
+    local web_pid
+    web_pid=$(safe_read_pid "${NS_PID}/web.pid" 2>/dev/null || echo 0)
     local web_mem=0
     if [ "$web_pid" -gt 0 ] && kill -0 "$web_pid" 2>/dev/null; then
       web_mem=$(ps -o rss= -p "$web_pid" 2>/dev/null | awk '{print int($1/1024)}' || echo 0)
@@ -2202,9 +2422,11 @@ _monitor_mem(){
     # Check monitor processes memory usage
     local total_monitor_mem=0
     for monitor in cpu memory disk network integrity process userlogins services logs scheduler supervisor; do
-      local monitor_pid=$(safe_read_pid "${NS_PID}/${monitor}.pid" 2>/dev/null || echo 0)
+      local monitor_pid
+      monitor_pid=$(safe_read_pid "${NS_PID}/${monitor}.pid" 2>/dev/null || echo 0)
       if [ "$monitor_pid" -gt 0 ] && kill -0 "$monitor_pid" 2>/dev/null; then
-        local monitor_mem=$(ps -o rss= -p "$monitor_pid" 2>/dev/null | awk '{print int($1/1024)}' || echo 0)
+        local monitor_mem
+        monitor_mem=$(ps -o rss= -p "$monitor_pid" 2>/dev/null | awk '{print int($1/1024)}' || echo 0)
         total_monitor_mem=$((total_monitor_mem + monitor_mem))
         
         # Alert if individual monitor uses excessive memory (potential memory leak)
@@ -2214,9 +2436,18 @@ _monitor_mem(){
       fi
     done
     
-    local lvl="OK"; [ "$pct" -ge "$crit" ] && lvl="CRIT" || { [ "$pct" -ge "$warn" ] && lvl="WARN"; }
+    local lvl="OK"
+    if [ "$pct" -ge "$crit" ]; then
+      lvl="CRIT"
+    elif [ "$pct" -ge "$warn" ]; then
+      lvl="WARN"
+    fi
     write_json "${NS_LOGS}/memory.json" "{\"ts\":\"$(ns_now)\",\"used_pct\":${pct},\"warn\":${warn},\"crit\":${crit},\"level\":\"${lvl}\",\"web_mem_mb\":${web_mem},\"monitor_total_mb\":${total_monitor_mem}}"
-    [ "$lvl" = "CRIT" ] && alert CRIT "Memory high: ${pct}%" || { [ "$lvl" = "WARN" ] && alert WARN "Memory elevated: ${pct}%"; }
+    if [ "$lvl" = "CRIT" ]; then
+      alert CRIT "Memory high: ${pct}%"
+    elif [ "$lvl" = "WARN" ]; then
+      alert WARN "Memory elevated: ${pct}%"
+    fi
     sleep "$interval"
   done
 }
@@ -2239,16 +2470,20 @@ storage_maintenance() {
   echo "$$" > "$maintenance_lock"
   trap 'rm -f "'"$maintenance_lock"'" 2>/dev/null || true' EXIT
   
-  local initial_size total_cleaned=0
+  local initial_size
+  local total_cleaned=0
   initial_size=$(du -sb "${NS_HOME}" 2>/dev/null | cut -f1 || echo 0)
   
   # 1. Clean old backup files (keep last 10)
   if [ -d "${NS_HOME}/backups" ]; then
-    local backup_count=$(ls -1 "${NS_HOME}/backups"/*.tar.gz 2>/dev/null | wc -l)
+    local backup_count
+    backup_count=$(find "${NS_HOME}/backups" -name "*.tar.gz" -type f | wc -l)
     backup_count=${backup_count:-0}
     if [ "$backup_count" -gt 10 ]; then
       ns_log "Cleaning old backups (keeping last 10 of $backup_count)"
-      cd "${NS_HOME}/backups" && ls -1t *.tar.gz 2>/dev/null | tail -n +11 | xargs rm -f || true
+      if cd "${NS_HOME}/backups"; then
+        find . -name "*.tar.gz" -type f -printf '%T@ %p\n' | sort -nr | tail -n +11 | cut -d' ' -f2- | xargs rm -f || true
+      fi
     fi
   fi
   
@@ -2353,7 +2588,11 @@ _monitor_disk(){
     fi
     
     write_json "${NS_LOGS}/disk.json" "{\"ts\":\"$(ns_now)\",\"use_pct\":${use},\"warn\":${warn},\"crit\":${crit},\"mount\":\"${mount}\",\"level\":\"${lvl}\",\"cleanup_threshold\":${cleanup_threshold}}"
-    [ "$lvl" = "CRIT" ] && alert CRIT "Disk $mount critical: ${use}% (cleanup triggered)" || { [ "$lvl" = "WARN" ] && alert WARN "Disk $mount elevated: ${use}%"; }
+    if [ "$lvl" = "CRIT" ]; then
+      alert CRIT "Disk $mount critical: ${use}% (cleanup triggered)"
+    elif [ "$lvl" = "WARN" ]; then
+      alert WARN "Disk $mount elevated: ${use}%"
+    fi
     sleep "$interval"
   done
 }
@@ -2464,7 +2703,8 @@ _monitor_integrity(){
     for p in $list; do
       p=$(echo "$p" | tr -d '"' | tr -d ' ')
       [ -d "$p" ] || continue
-      local sumfile="${NS_LOGS}/integrity.$(echo "$p" | tr '/' '_').sha"
+      local sumfile
+      sumfile="${NS_LOGS}/integrity.$(echo "$p" | tr '/' '_').sha"
       local file_count=0
       local changes=0
       
@@ -2619,7 +2859,8 @@ _supervisor(){
   fi
   
   while true; do
-    local current_hour=$(date +%Y%m%d%H)
+    local current_hour
+    current_hour=$(date +%Y%m%d%H)
     
     # Helper function to check and record restarts
     check_restart_limit() {
@@ -2710,12 +2951,14 @@ except:
       if [ "$wpid" -eq 0 ] || ! kill -0 "$wpid" 2>/dev/null; then
         if check_restart_limit "web"; then
           # Enhanced logging for web server restarts
-          local crash_time=$(date '+%Y-%m-%d %H:%M:%S')
+          local crash_time
+          crash_time=$(date '+%Y-%m-%d %H:%M:%S')
           local crash_reason="Process not running"
           
           # Check if it was a crash or clean shutdown
           if [ -f "${NS_HOME}/web.log" ]; then
-            local last_log=$(tail -1 "${NS_HOME}/web.log" 2>/dev/null || echo "")
+            local last_log
+            last_log=$(tail -1 "${NS_HOME}/web.log" 2>/dev/null || echo "")
             if echo "$last_log" | grep -qi "error\|exception\|crash\|traceback"; then
               crash_reason="Application error detected"
             fi
@@ -2767,10 +3010,13 @@ _monitor_scheduler(){
   : >"$NS_SCHED_STATE" || true
   while true; do
     monitor_enabled scheduler || { sleep "$interval"; continue; }
-    local now_hm; now_hm=$(date +%H:%M)
-    local ran_today_key="$(date +%Y-%m-%d)"
+    local now_hm
+    now_hm=$(date +%H:%M)
+    local ran_today_key
+    ran_today_key="$(date +%Y-%m-%d)"
     awk '/scheduler:/,/tasks:/{print}' "$NS_CONF" >/dev/null 2>&1 || { sleep "$interval"; continue; }
-    local names; names=$(awk '/tasks:/,0{if($1=="-"){print $0}}' "$NS_CONF" 2>/dev/null || true)
+    local names
+    names=$(awk '/tasks:/,0{if($1=="-"){print $0}}' "$NS_CONF" 2>/dev/null || true)
     local IFS=$'\n'
     for line in $names; do
       local name action time every
@@ -2810,7 +3056,8 @@ scheduler_run_action(){
 
 # Comprehensive web server health check for long-term stability
 web_health_check() {
-  local web_pid=$(safe_read_pid "${NS_PID}/web.pid" 2>/dev/null || echo 0)
+  local web_pid
+  web_pid=$(safe_read_pid "${NS_PID}/web.pid" 2>/dev/null || echo 0)
   if [ "$web_pid" -gt 0 ] && kill -0 "$web_pid" 2>/dev/null; then
     # Check if web server is responsive
     local host port
@@ -2830,7 +3077,8 @@ web_health_check() {
     # Check for error log growth
     local error_log="${NS_LOGS}/server.error.log"
     if [ -f "$error_log" ]; then
-      local error_lines=$(wc -l < "$error_log" 2>/dev/null || echo 0)
+      local error_lines
+      error_lines=$(wc -l < "$error_log" 2>/dev/null || echo 0)
       if [ "$error_lines" -gt 100 ]; then
         alert WARN "Web server error log growing: $error_lines lines - check for recurring errors"
         _rotate_log "$error_log" 200
@@ -2850,26 +3098,32 @@ health_check_system() {
     echo "=== System Health Check $(date) ==="
     
     # Check available disk space on NovaShield directory
-    local ns_disk_usage=$(du -sh "${NS_HOME}" 2>/dev/null || echo "unknown")
-    local root_avail=$(df -h "${NS_HOME}" | awk 'NR==2 {print $4}' || echo "unknown")
+    local ns_disk_usage
+    ns_disk_usage=$(du -sh "${NS_HOME}" 2>/dev/null || echo "unknown")
+    local root_avail
+    root_avail=$(df -h "${NS_HOME}" | awk 'NR==2 {print $4}' || echo "unknown")
     echo "NovaShield directory size: $ns_disk_usage"
     echo "Available disk space: $root_avail"
     
     # Check running processes
     echo "NovaShield processes:"
     for monitor in cpu memory disk network integrity process userlogins services logs scheduler supervisor; do
-      local pid=$(safe_read_pid "${NS_PID}/${monitor}.pid" 2>/dev/null || echo 0)
+      local pid
+      pid=$(safe_read_pid "${NS_PID}/${monitor}.pid" 2>/dev/null || echo 0)
       local status="stopped"
       if [ "$pid" -gt 0 ] && kill -0 "$pid" 2>/dev/null; then
-        local mem=$(ps -o rss= -p "$pid" 2>/dev/null | awk '{print int($1/1024)}' || echo 0)
+        local mem
+        mem=$(ps -o rss= -p "$pid" 2>/dev/null | awk '{print int($1/1024)}' || echo 0)
         status="running (${mem}MB)"
       fi
       printf "  %-12s: %s\n" "$monitor" "$status"
     done
     
-    local web_pid=$(safe_read_pid "${NS_PID}/web.pid" 2>/dev/null || echo 0)
+    local web_pid
+    web_pid=$(safe_read_pid "${NS_PID}/web.pid" 2>/dev/null || echo 0)
     if [ "$web_pid" -gt 0 ] && kill -0 "$web_pid" 2>/dev/null; then
-      local web_mem=$(ps -o rss= -p "$web_pid" 2>/dev/null | awk '{print int($1/1024)}' || echo 0)
+      local web_mem
+      web_mem=$(ps -o rss= -p "$web_pid" 2>/dev/null | awk '{print int($1/1024)}' || echo 0)
       echo "  Web server   : running (${web_mem}MB)"
     else
       echo "  Web server   : stopped"
@@ -2879,8 +3133,10 @@ health_check_system() {
     echo "Log files:"
     for log_file in "${NS_LOGS}"/*.log "${NS_HOME}"/*.log; do
       if [ -f "$log_file" ]; then
-        local size=$(du -sh "$log_file" 2>/dev/null | cut -f1 || echo "0")
-        local lines=$(wc -l < "$log_file" 2>/dev/null || echo 0)
+        local size
+        size=$(du -sh "$log_file" 2>/dev/null | cut -f1 || echo "0")
+        local lines
+        lines=$(wc -l < "$log_file" 2>/dev/null || echo 0)
         printf "  %-20s: %s (%s lines)\n" "$(basename "$log_file")" "$size" "$lines"
       fi
     done
@@ -2958,7 +3214,8 @@ enhanced_threat_detection() {
   
   # Check system load (simplified)
   if [ -f /proc/loadavg ]; then
-    local load_avg=$(cut -d' ' -f1 /proc/loadavg 2>/dev/null || echo "0")
+    local load_avg
+    load_avg=$(cut -d' ' -f1 /proc/loadavg 2>/dev/null || echo "0")
     if [ "${load_avg%.*}" -gt 4 ] 2>/dev/null; then
       threat_count=$((threat_count + 1))
     fi
@@ -3131,7 +3388,8 @@ enhanced_plugin_system() {
       if [ -d "$plugin_dir" ] && [ "$(ls -A "$plugin_dir" 2>/dev/null)" ]; then
         for plugin in "$plugin_dir"/*.sh; do
           if [ -f "$plugin" ]; then
-            local name=$(basename "$plugin" .sh)
+            local name
+            name=$(basename "$plugin" .sh)
             echo "  📦 $name - $(head -1 "$plugin" | sed 's/^# *//')"
           fi
         done
@@ -3254,7 +3512,9 @@ enhanced_performance_optimization() {
       
       # Memory optimization
       if [ -f /proc/sys/vm/drop_caches ] && [ -w /proc/sys/vm/drop_caches ]; then
-        sync && echo 1 > /proc/sys/vm/drop_caches 2>/dev/null || true
+        if sync; then
+          echo 1 > /proc/sys/vm/drop_caches 2>/dev/null || true
+        fi
       fi
       
       # Log rotation
@@ -3476,7 +3736,8 @@ enhanced_intelligence_scanner() {
     return 1
   fi
   
-  local scan_id=$(date +%s)_$$
+  local scan_id
+  scan_id=$(date +%s)_$$
   local scan_dir="${NS_LOGS}/intelligence_scans"
   mkdir -p "$scan_dir"
   
@@ -3565,9 +3826,11 @@ _scan_email_intelligence() {
     ns_log "Scanning email with source: $source"
     case "$source" in
       "mx_lookup")
-        local domain=$(echo "$email" | cut -d'@' -f2)
+        local domain
+        domain=$(echo "$email" | cut -d'@' -f2)
         if command -v dig >/dev/null 2>&1; then
-          local mx_records=$(dig +short MX "$domain" 2>/dev/null | head -5)
+          local mx_records
+          mx_records=$(dig +short MX "$domain" 2>/dev/null | head -5)
           if [ -n "$mx_records" ]; then
             _update_scan_results "$results_file" "$source" "MX records found" "high" "$mx_records"
           else
@@ -3578,7 +3841,8 @@ _scan_email_intelligence() {
       "disposable_check")
         # Check against common disposable email domains
         local disposable_domains="10minutemail.com temp-mail.org guerrillamail.com mailinator.com"
-        local domain=$(echo "$email" | cut -d'@' -f2)
+        local domain
+        domain=$(echo "$email" | cut -d'@' -f2)
         if echo "$disposable_domains" | grep -q "$domain"; then
           _update_scan_results "$results_file" "$source" "Disposable email detected" "high" "$domain"
         else
@@ -3593,9 +3857,11 @@ _scan_email_intelligence() {
         fi
         ;;
       "domain_analysis")
-        local domain=$(echo "$email" | cut -d'@' -f2)
+        local domain
+        domain=$(echo "$email" | cut -d'@' -f2)
         if command -v whois >/dev/null 2>&1; then
-          local whois_info=$(whois "$domain" 2>/dev/null | grep -E "(Creation Date|Registrar|Status)" | head -3)
+          local whois_info
+          whois_info=$(whois "$domain" 2>/dev/null | grep -E "(Creation Date|Registrar|Status)" | head -3)
           if [ -n "$whois_info" ]; then
             _update_scan_results "$results_file" "$source" "Domain information found" "medium" "$whois_info"
           fi
@@ -3608,53 +3874,6 @@ _scan_email_intelligence() {
   _calculate_confidence_score "$results_file" "${#sources[@]}"
 }
 
-_scan_phone_intelligence() {
-  local phone="$1"
-  local results_file="$2"
-  local depth="$3"
-  
-  local sources=("format_validation" "carrier_lookup" "location_analysis")
-  
-  if [ "$depth" = "deep" ]; then
-    sources+=("spam_analysis" "social_profiles" "business_listings")
-  fi
-  
-  for source in "${sources[@]}"; do
-    ns_log "Scanning phone with source: $source"
-    case "$source" in
-      "format_validation")
-        # Basic phone number format validation
-        local clean_phone=$(echo "$phone" | tr -d '()-. ')
-        if [[ "$clean_phone" =~ ^[0-9]{10,15}$ ]]; then
-          _update_scan_results "$results_file" "$source" "Valid phone format" "medium" "passed"
-        else
-          _update_scan_results "$results_file" "$source" "Invalid phone format" "high" "failed"
-        fi
-        ;;
-      "carrier_lookup")
-        # Simulate carrier lookup based on number patterns
-        local area_code=$(echo "$phone" | grep -o '^[+1-]*\([0-9]\{3\}\)' | tr -d '+1-')
-        if [ -n "$area_code" ]; then
-          _update_scan_results "$results_file" "$source" "Area code identified" "low" "$area_code"
-        fi
-        ;;
-      "location_analysis")
-        # Basic location analysis
-        local clean_phone=$(echo "$phone" | tr -d '()-. +')
-        if [[ "$clean_phone" =~ ^1[0-9]{10}$ ]]; then
-          _update_scan_results "$results_file" "$source" "US/Canada number pattern" "low" "North America"
-        elif [[ "$clean_phone" =~ ^44[0-9]{10}$ ]]; then
-          _update_scan_results "$results_file" "$source" "UK number pattern" "low" "United Kingdom"
-        else
-          _update_scan_results "$results_file" "$source" "International number" "low" "International"
-        fi
-        ;;
-    esac
-    sleep 0.5
-  done
-  
-  _calculate_confidence_score "$results_file" "${#sources[@]}"
-}
 
 _scan_comprehensive_intelligence() {
   local target="$1"
@@ -4614,7 +4833,9 @@ stop_monitors(){
       any=1
     fi
   done
-  [ "$any" -eq 1 ] && ns_ok "Monitors stopped" || true
+  if [ "$any" -eq 1 ]; then
+    ns_ok "Monitors stopped"
+  fi
 }
 
 # ------------------------------ PY WEB SERVER --------------------------------
@@ -20430,9 +20651,12 @@ _validate_stability_fixes() {
     
     # Test 2: Monitor intervals validation
     echo -n "✓ Validating monitor intervals... "
-    local cpu_interval=$(grep "cpu.*interval_sec:" "$NS_SELF" | head -1 | grep -o "interval_sec: [0-9]*" | cut -d' ' -f2)
-    local memory_interval=$(grep "memory.*interval_sec:" "$NS_SELF" | head -1 | grep -o "interval_sec: [0-9]*" | cut -d' ' -f2)
-    local network_interval=$(grep "network.*interval_sec:" "$NS_SELF" | head -1 | grep -o "interval_sec: [0-9]*" | cut -d' ' -f2)
+    local cpu_interval
+    cpu_interval=$(grep "cpu.*interval_sec:" "$NS_SELF" | head -1 | grep -o "interval_sec: [0-9]*" | cut -d' ' -f2)
+    local memory_interval
+    memory_interval=$(grep "memory.*interval_sec:" "$NS_SELF" | head -1 | grep -o "interval_sec: [0-9]*" | cut -d' ' -f2)
+    local network_interval
+    network_interval=$(grep "network.*interval_sec:" "$NS_SELF" | head -1 | grep -o "interval_sec: [0-9]*" | cut -d' ' -f2)
     
     if [ "$cpu_interval" -ge 10 ] && [ "$memory_interval" -ge 10 ] && [ "$network_interval" -ge 20 ]; then
         echo "PASS (CPU: ${cpu_interval}s, Memory: ${memory_interval}s, Network: ${network_interval}s)"
@@ -20562,14 +20786,17 @@ _current_time() {
 
 # Check if we've exceeded restart limits
 _check_restart_limits() {
-    local now=$(_current_time)
+    local now
+    now=$(_current_time)
     local limit_file="${NS_PID}/restart_limits.txt"
     
     # Clean old restart records (older than RESTART_WINDOW)
     if [ -f "$limit_file" ]; then
-        local temp_file=$(mktemp)
+        local temp_file
+        temp_file=$(mktemp)
         while IFS= read -r line; do
-            local restart_time=$(echo "$line" | cut -d' ' -f1)
+            local restart_time
+            restart_time=$(echo "$line" | cut -d' ' -f1)
             if [ $((now - restart_time)) -lt $WEB_WRAPPER_RESTART_WINDOW ]; then
                 echo "$line" >> "$temp_file"
             fi
@@ -20674,7 +20901,8 @@ _run_internal_web_wrapper() {
         fi
         
         _log_wrapper "Starting web server attempt #$((restart_count + 1))"
-        local start_time=$(_current_time)
+        local start_time
+        start_time=$(_current_time)
         
         # Start the server
         cd "$NS_WWW" || {
@@ -20693,7 +20921,8 @@ _run_internal_web_wrapper() {
         
         # Monitor the server process
         while true; do
-            local health_status=$(_check_server_health "$server_pid" "$start_time")
+            local health_status
+            health_status=$(_check_server_health "$server_pid" "$start_time")
             case $health_status in
                 0)  # Server is healthy, continue monitoring
                     sleep 10  # Check every 10 seconds
@@ -20720,7 +20949,8 @@ _run_internal_web_wrapper() {
         # Remove PID file
         rm -f "${NS_PID}/web.pid" 2>/dev/null || true
         
-        local end_time=$(_current_time)
+        local end_time
+        end_time=$(_current_time)
         local uptime=$((end_time - start_time))
         
         _log_wrapper "Web server exited with code $exit_code after ${uptime}s uptime"
@@ -20771,7 +21001,8 @@ start_web(){
   
   # Check if another start_web is already running
   if [ -f "$lock_file" ]; then
-    local lock_pid=$(cat "$lock_file" 2>/dev/null)
+    local lock_pid
+    lock_pid=$(cat "$lock_file" 2>/dev/null)
     if [ -n "$lock_pid" ] && kill -0 "$lock_pid" 2>/dev/null; then
       ns_warn "Web server startup already in progress (PID: $lock_pid). Waiting..."
       # Wait up to 30 seconds for the other process to finish
@@ -21062,11 +21293,22 @@ install_all_embedded(){
   # Pre-installation system checks and optimization
   ns_log "🔍 Performing pre-installation system checks..."
   
+  # Check system resources before proceeding
+  if ! check_system_resources; then
+    ns_warn "⚠️  System resources are limited. Installation will proceed with conservative settings."
+    # Set a flag for conservative installation
+    export NS_CONSERVATIVE_MODE=1
+  fi
+  
   # Check system requirements and optimize for long-term use
   perform_system_optimization
   
   # Core installation steps with enhanced error handling
   ensure_dirs
+  
+  # Enable stricter error handling after critical initialization is complete
+  enable_strict_mode
+  
   install_dependencies
   write_default_config
   generate_keys
@@ -21122,43 +21364,64 @@ setup_long_term_optimization(){
 perform_system_optimization(){
   ns_log "🔧 Optimizing system for enterprise deployment with enhanced security hardening..."
   
+  # Check available memory before proceeding with optimization
+  local available_memory=0
+  if command -v free >/dev/null 2>&1; then
+    available_memory=$(free -m 2>/dev/null | awk 'NR==2{print $7}' 2>/dev/null || echo 0)
+    if [ "$available_memory" -lt 100 ]; then
+      ns_warn "⚠️  Low available memory (${available_memory}MB). Skipping aggressive optimizations."
+      return 0
+    fi
+  fi
+  
   # PERFORMANCE: Memory management optimization
   if command -v sync >/dev/null 2>&1; then
     sync 2>/dev/null || true  # Flush file system buffers
   fi
   
-  # SECURITY & PERFORMANCE: Optimize file system permissions
+  # SECURITY & PERFORMANCE: Optimize file system permissions (conservatively)
   if [ -d "$NS_HOME" ]; then
     chmod 750 "$NS_HOME" 2>/dev/null || true
     
-    # SECURITY: Set comprehensive secure permissions
-    find "$NS_HOME" -type f -name "*.key" -exec chmod 600 {} \; 2>/dev/null || true
-    find "$NS_HOME" -type f -name "*.json" -exec chmod 640 {} \; 2>/dev/null || true
-    find "$NS_HOME" -type f -name "*.log" -exec chmod 640 {} \; 2>/dev/null || true
-    find "$NS_HOME" -type f -name "*.py" -exec chmod 750 {} \; 2>/dev/null || true
-    find "$NS_HOME" -type f -name "*.sh" -exec chmod 750 {} \; 2>/dev/null || true
-    find "$NS_HOME" -type d -exec chmod 750 {} \; 2>/dev/null || true
+    # SECURITY: Set comprehensive secure permissions (less resource intensive)
+    find "$NS_HOME" -type f -name "*.key" -exec chmod 600 {} + 2>/dev/null || true
+    find "$NS_HOME" -type f -name "*.json" -exec chmod 640 {} + 2>/dev/null || true
+    find "$NS_HOME" -type f -name "*.log" -exec chmod 640 {} + 2>/dev/null || true
+    find "$NS_HOME" -type f -name "*.py" -exec chmod 750 {} + 2>/dev/null || true
+    find "$NS_HOME" -type f -name "*.sh" -exec chmod 750 {} + 2>/dev/null || true
+    find "$NS_HOME" -type d -exec chmod 750 {} + 2>/dev/null || true
   fi
   
-  # PERFORMANCE: Set optimal system limits for production use
+  # PERFORMANCE: Set optimal system limits for production use (with memory checks)
   if command -v ulimit >/dev/null 2>&1; then
-    ulimit -n 16384 2>/dev/null || true  # Optimized file descriptor limit
-    ulimit -u 8192 2>/dev/null || true   # Optimized process limit
-    ulimit -v 4194304 2>/dev/null || true # Virtual memory (4GB)
-    ulimit -s 8192 2>/dev/null || true    # Stack size
+    if [ "$available_memory" -gt 200 ]; then
+      ulimit -n 16384 2>/dev/null || ulimit -n 4096 2>/dev/null || true  # File descriptors
+      ulimit -u 8192 2>/dev/null || ulimit -u 2048 2>/dev/null || true   # Process limit
+      ulimit -v 4194304 2>/dev/null || true # Virtual memory (4GB)
+      ulimit -s 8192 2>/dev/null || true    # Stack size
+    else
+      # Conservative limits for low memory systems
+      ulimit -n 2048 2>/dev/null || true
+      ulimit -u 1024 2>/dev/null || true
+      ulimit -s 4096 2>/dev/null || true
+    fi
   fi
   
-  # PERFORMANCE: Optimize memory usage for long-term operation
-  if [ -f /proc/sys/vm/swappiness ] && [ -w /proc/sys/vm/swappiness ]; then
+  # PERFORMANCE: Optimize memory usage for long-term operation (only if safe)
+  if [ -f /proc/sys/vm/swappiness ] && [ -w /proc/sys/vm/swappiness ] && [ "$available_memory" -gt 150 ]; then
     echo 10 > /proc/sys/vm/swappiness 2>/dev/null || true
   fi
   
   # SECURITY: Clear sensitive environment variables
   unset PASSWORD PASS SECRET TOKEN API_KEY 2>/dev/null || true
   
-  # PERFORMANCE: Set higher priority for main process
-  if command -v renice >/dev/null 2>&1; then
-    renice -n -2 $$ 2>/dev/null || true
+  # PERFORMANCE: Set higher priority for main process (with memory check and fallback)
+  if command -v renice >/dev/null 2>&1 && [ "$available_memory" -gt 150 ]; then
+    renice -n -2 $$ 2>/dev/null || {
+      ns_warn "⚠️  Cannot adjust process priority - insufficient resources or permissions"
+      # Try less aggressive priority adjustment
+      renice -n 0 $$ 2>/dev/null || true
+    }
   fi
   
   ns_log "✅ System optimization complete with enhanced security"
@@ -21712,7 +21975,8 @@ start_security_automation_engine(){
     
     # Check for security events and auto-respond
     if [ -f "${NS_LOGS}/security.log" ]; then
-      local recent_events=$(tail -10 "${NS_LOGS}/security.log" | grep -c "SECURITY\|ALERT" 2>/dev/null || echo "0")
+      local recent_events
+      recent_events=$(tail -10 "${NS_LOGS}/security.log" | grep -c "SECURITY\|ALERT" 2>/dev/null || echo "0")
       if [ "$recent_events" -gt 5 ]; then
         # Auto-trigger enhanced security mode
         enhanced_security_automation
@@ -21969,7 +22233,8 @@ update_jarvis_system_knowledge(){
 
 check_and_optimize_performance(){
   # Automated performance optimization
-  local load_avg=$(uptime | awk '{print $NF}' | cut -d',' -f1 2>/dev/null || echo "0")
+  local load_avg
+  load_avg=$(uptime | awk '{print $NF}' | cut -d',' -f1 2>/dev/null || echo "0")
   
   # If load is high, optimize
   if [ "$(echo "$load_avg > 2.0" | bc 2>/dev/null || echo "0")" = "1" ]; then
@@ -21983,7 +22248,8 @@ check_and_optimize_performance(){
 
 manage_system_resources(){
   # Automated resource management
-  local memory_usage=$(free | awk '/^Mem:/{printf "%.1f", $3/$2 * 100.0}' 2>/dev/null || echo "0")
+  local memory_usage
+  memory_usage=$(free | awk '/^Mem:/{printf "%.1f", $3/$2 * 100.0}' 2>/dev/null || echo "0")
   
   # If memory usage is high, cleanup
   if [ "$(echo "$memory_usage > 85.0" | bc 2>/dev/null || echo "0")" = "1" ]; then
@@ -22877,7 +23143,8 @@ centralized_system_sync() {
 SYNC_CONFIG
 
   # Update sync timestamp
-  local current_time=$(date -u +"%Y-%m-%dT%H:%M:%S.%3NZ")
+  local current_time
+  current_time=$(date -u +"%Y-%m-%dT%H:%M:%S.%3NZ")
   sed -i "s/\"timestamp\": \"\"/\"timestamp\": \"$current_time\"/" "$sync_config"
   sed -i "s/\"last_sync\": \"\"/\"last_sync\": \"$current_time\"/" "$sync_config"
   
