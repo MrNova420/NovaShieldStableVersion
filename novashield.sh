@@ -21977,16 +21977,33 @@ cleanup_system_resources(){
 add_user(){
   local user pass salt
   
-  # Check for non-interactive mode first (environment variables or command args)
-  if [ -n "${NOVASHIELD_ADMIN_USER:-}" ] && [ -n "${NOVASHIELD_ADMIN_PASS:-}" ]; then
-    user="$NOVASHIELD_ADMIN_USER"
-    pass="$NOVASHIELD_ADMIN_PASS"
-    ns_log "Using provided admin credentials for non-interactive setup"
-  else
-    # Interactive mode
-    read -rp "New username: " user
-    read -rsp "Password (won't echo): " pass; echo
-  fi
+  # Enhanced user input with validation
+  while true; do
+    read -rp "New username (3+ characters): " user
+    if [ -z "$user" ] || [ ${#user} -lt 3 ]; then
+      ns_err "Username must be at least 3 characters long. Please try again."
+      continue
+    fi
+    if [[ "$user" =~ [^a-zA-Z0-9_-] ]]; then
+      ns_err "Username can only contain letters, numbers, underscore, and dash. Please try again."
+      continue
+    fi
+    break
+  done
+  
+  while true; do
+    read -rsp "Password (6+ characters, won't echo): " pass; echo
+    if [ -z "$pass" ] || [ ${#pass} -lt 6 ]; then
+      ns_err "Password must be at least 6 characters long. Please try again."
+      continue
+    fi
+    read -rsp "Confirm password: " pass_confirm; echo
+    if [ "$pass" != "$pass_confirm" ]; then
+      ns_err "Passwords do not match. Please try again."
+      continue
+    fi
+    break
+  done
   
   # SECURITY FIX: Enhanced salt retrieval with error handling
   if [ ! -f "$NS_CONF" ]; then
@@ -22005,21 +22022,11 @@ add_user(){
     return 1
   fi
   
-  # Validate username
-  if [ -z "$user" ] || [ ${#user} -lt 3 ]; then
-    ns_err "Username must be at least 3 characters long"
-    return 1
-  fi
-  
-  # Validate password
-  if [ -z "$pass" ] || [ ${#pass} -lt 6 ]; then
-    ns_err "Password must be at least 6 characters long"
-    return 1
-  fi
-  
+  # Create user account
   local sha; sha=$(printf '%s' "${salt}:${pass}" | sha256sum | awk '{print $1}')
   if [ ! -f "$NS_SESS_DB" ]; then echo '{}' >"$NS_SESS_DB"; fi
-  python3 - "$NS_SESS_DB" "$user" "$sha" <<'PY'
+  
+  if python3 - "$NS_SESS_DB" "$user" "$sha" <<'PY'
 import json,sys
 p,u,s=sys.argv[1],sys.argv[2],sys.argv[3]
 try: j=json.load(open(p))
@@ -22030,7 +22037,14 @@ j['_userdb']=ud
 open(p,'w').write(json.dumps(j))
 print('User stored')
 PY
-  ns_ok "User '$user' added. Enable/confirm auth in config.yaml (security.auth_enabled: true)"
+  then
+    ns_ok "✓ User '$user' created successfully!"
+    ns_log "You can now log in to the web dashboard with these credentials."
+    return 0
+  else
+    ns_err "Failed to create user account. Please check system permissions."
+    return 1
+  fi
 }
 
 enable_2fa(){
@@ -22074,18 +22088,38 @@ PY
   echo
   ns_warn "SECURITY REQUIREMENT: No web users found but auth_enabled is true."
   ns_warn "This personal security dashboard requires user authentication for protection."
+  echo
+  ns_log "📋 INTERACTIVE SETUP REQUIRED:"
+  ns_log "   This installation requires creating your first admin user for security."
+  ns_log "   Please provide your desired username and password when prompted."
+  ns_log "   This is a one-time setup to secure your NovaShield dashboard."
+  echo
   echo "Creating the first user for security..."
-  add_user
   
-  # Skip 2FA setup in non-interactive mode
-  if [ -z "${NOVASHIELD_ADMIN_USER:-}" ]; then
-    echo
-    read -r -p "Enable 2FA for this user now? [y/N]: " yn
-    case "$yn" in [Yy]*) enable_2fa ;; esac
-  else
-    echo
-    ns_log "Skipping 2FA setup in non-interactive mode. You can enable it later with: $0 --enable-2fa"
-  fi
+  # Add retry logic for user creation
+  local retry_count=0
+  local max_retries=3
+  while [ $retry_count -lt $max_retries ]; do
+    if add_user; then
+      break
+    else
+      retry_count=$((retry_count + 1))
+      if [ $retry_count -lt $max_retries ]; then
+        echo
+        ns_warn "User creation failed. Please try again. (Attempt $((retry_count + 1)) of $max_retries)"
+        echo
+      else
+        echo
+        ns_err "User creation failed after $max_retries attempts."
+        ns_err "Please run './novashield.sh --add-user' after installation to create your first user."
+        return 1
+      fi
+    fi
+  done
+  
+  echo
+  read -r -p "Enable 2FA for this user now? [y/N]: " yn
+  case "$yn" in [Yy]*) enable_2fa ;; esac
 }
 
 reset_auth(){
@@ -22925,7 +22959,6 @@ Usage: $0 [OPTION]
 
 Core Commands:
   --install              Install NovaShield and dependencies (requires user creation)
-                         For non-interactive: NOVASHIELD_ADMIN_USER=admin NOVASHIELD_ADMIN_PASS=password ./novashield.sh --install
   --start                Start all services (monitors + web dashboard)
   --stop                 Stop all running services
   --status               Show service status and information
@@ -23033,8 +23066,7 @@ Configuration:
   optional features permanently. All features default to stable behavior.
 
 Examples:
-  $0 --install                    # First-time setup (interactive)
-  NOVASHIELD_ADMIN_USER=admin NOVASHIELD_ADMIN_PASS=securepass123 $0 --install  # Non-interactive setup
+  $0 --install                    # First-time setup
   $0 --start                      # Start everything (stable defaults)
   $0 --enable-auto-restart        # Enable auto-restart for this session
   $0 --encrypt /important/data    # Encrypt directory
