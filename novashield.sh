@@ -20533,25 +20533,33 @@ _monitor_server_resources() {
     local pid="$1"
     [ -z "$pid" ] && return 0
     
-    # Get memory usage in MB
+    # Get memory usage in MB - ensure it's always a valid integer
     local mem_mb=0
     if command -v ps >/dev/null 2>&1; then
-        mem_mb=$(ps -o rss= -p "$pid" 2>/dev/null | awk '{print int($1/1024)}' || echo 0)
+        mem_mb=$(ps -o rss= -p "$pid" 2>/dev/null | awk '{print int($1/1024)}' 2>/dev/null)
+        # Ensure mem_mb is a valid integer
+        if ! [[ "$mem_mb" =~ ^[0-9]+$ ]]; then
+            mem_mb=0
+        fi
     fi
     
-    # Get CPU usage percentage (if available)
+    # Get CPU usage percentage (if available) - ensure it's always a valid integer
     local cpu_pct=0
     if command -v ps >/dev/null 2>&1; then
-        cpu_pct=$(ps -o pcpu= -p "$pid" 2>/dev/null | awk '{print int($1)}' || echo 0)
+        cpu_pct=$(ps -o pcpu= -p "$pid" 2>/dev/null | awk '{print int($1)}' 2>/dev/null)
+        # Ensure cpu_pct is a valid integer
+        if ! [[ "$cpu_pct" =~ ^[0-9]+$ ]]; then
+            cpu_pct=0
+        fi
     fi
     
-    # Log high resource usage
-    if [ "$mem_mb" -gt $WEB_WRAPPER_MEMORY_THRESHOLD ]; then
+    # Log high resource usage - now safe to do integer comparisons
+    if [ "$mem_mb" -gt "$WEB_WRAPPER_MEMORY_THRESHOLD" ]; then
         _log_wrapper "WARNING: High memory usage detected: ${mem_mb}MB (threshold: ${WEB_WRAPPER_MEMORY_THRESHOLD}MB)"
         # Don't restart immediately, just warn
     fi
     
-    if [ "$cpu_pct" -gt $WEB_WRAPPER_CPU_THRESHOLD ]; then
+    if [ "$cpu_pct" -gt "$WEB_WRAPPER_CPU_THRESHOLD" ]; then
         _log_wrapper "WARNING: High CPU usage detected: ${cpu_pct}% (threshold: ${WEB_WRAPPER_CPU_THRESHOLD}%)"
         # Don't restart immediately, just warn  
     fi
@@ -20692,6 +20700,39 @@ _run_internal_web_wrapper() {
 start_web(){
   ns_log "Starting web server with enhanced reliability..."
   
+  # CRITICAL FIX: Add locking mechanism to prevent multiple instances
+  local lock_file="${NS_PID}/web_start.lock"
+  
+  # Check if another start_web is already running
+  if [ -f "$lock_file" ]; then
+    local lock_pid=$(cat "$lock_file" 2>/dev/null)
+    if [ -n "$lock_pid" ] && kill -0 "$lock_pid" 2>/dev/null; then
+      ns_warn "Web server startup already in progress (PID: $lock_pid). Waiting..."
+      # Wait up to 30 seconds for the other process to finish
+      local wait_count=0
+      while [ -f "$lock_file" ] && [ $wait_count -lt 30 ]; do
+        sleep 1
+        wait_count=$((wait_count + 1))
+      done
+      if [ -f "$lock_file" ]; then
+        ns_warn "Startup lock is stale, removing it"
+        rm -f "$lock_file"
+      else
+        ns_log "Previous startup completed, continuing..."
+        return 0
+      fi
+    else
+      # Stale lock file
+      rm -f "$lock_file"
+    fi
+  fi
+  
+  # Create lock file with current PID
+  echo $$ > "$lock_file"
+  
+  # Ensure lock file gets cleaned up - use the literal path instead of variable
+  trap "rm -f '${NS_PID}/web_start.lock'" EXIT
+  
   # ENHANCEMENT: Ensure all prerequisites are properly set up
   ensure_dirs
   write_default_config
@@ -20702,23 +20743,24 @@ start_web(){
   # ENHANCEMENT: Comprehensive prerequisite validation
   if ! command -v python3 >/dev/null 2>&1; then
     ns_err "Python3 is required but not found. Run: $0 --install"
+    rm -f "$lock_file"
     return 1
   fi
   
   if [ ! -f "${NS_WWW}/server.py" ]; then
     ns_warn "Server file missing, regenerating..."
-    write_server_py || { ns_err "Failed to generate server.py"; return 1; }
+    write_server_py || { ns_err "Failed to generate server.py"; rm -f "$lock_file"; return 1; }
   fi
   
   if [ ! -f "${NS_WWW}/index.html" ]; then
     ns_warn "Dashboard file missing, regenerating..."
-    write_dashboard || { ns_err "Failed to generate dashboard"; return 1; }
+    write_dashboard || { ns_err "Failed to generate dashboard"; rm -f "$lock_file"; return 1; }
   fi
   
   # ENHANCEMENT: Test Python syntax before starting
   if ! python3 -m py_compile "${NS_WWW}/server.py" 2>/dev/null; then
     ns_err "Server.py has syntax errors! Regenerating..."
-    write_server_py || { ns_err "Failed to regenerate server.py"; return 1; }
+    write_server_py || { ns_err "Failed to regenerate server.py"; rm -f "$lock_file"; return 1; }
   fi
   
   # Check if web server is already running by checking port
@@ -20732,6 +20774,7 @@ start_web(){
       local existing_pid; existing_pid=$(safe_read_pid "${NS_PID}/web.pid")
       if [ "$existing_pid" -gt 0 ] && kill -0 "$existing_pid" 2>/dev/null; then
         ns_warn "Web server already running (PID $existing_pid)"
+        rm -f "$lock_file"
         return 0
       else
         ns_warn "Port $port is in use by another process. Attempting cleanup..."
@@ -20746,8 +20789,8 @@ start_web(){
   stop_web || true
   sleep 1
   
-  # ENHANCEMENT: Try multiple startup strategies
-  local use_wrapper="${NOVASHIELD_USE_WEB_WRAPPER:-1}"
+  # ENHANCEMENT: Try multiple startup strategies  
+  local use_wrapper="${NOVASHIELD_USE_WEB_WRAPPER:-0}"  # CHANGED: Default to 0 to avoid wrapper issues initially
   
   if [ "$use_wrapper" = "1" ]; then
     ns_log "Starting web server with enhanced internal stability wrapper..."
@@ -20775,6 +20818,9 @@ start_web(){
     # Direct startup method
     _start_web_direct
   fi
+  
+  # Remove lock file on successful completion
+  rm -f "$lock_file"
 }
 
 _start_web_direct(){
@@ -20822,7 +20868,13 @@ _start_web_direct(){
   local host; host=$(yaml_get "http" "host" "127.0.0.1")
   
   ns_ok "Web server started successfully (PID: $server_pid)"
-  ns_log "🌐 Dashboard available at: http://${host}:${port}/"
+  
+  # Display correct protocol based on TLS setting
+  local scheme="http"
+  local tls_enabled; tls_enabled=$(yaml_get "security" "tls_enabled" "false")
+  [ "$tls_enabled" = "true" ] && scheme="https"
+  
+  ns_log "🌐 Dashboard available at: ${scheme}://${host}:${port}/"
   return 0
 }
 
@@ -21485,7 +21537,13 @@ start_all(){
   initialize_jarvis_system_integration
   
   ns_ok "🎯 NovaShield fully operational with complete system integration!"
-  ns_log "🌐 Dashboard: http://$(yaml_get "http" "host" "127.0.0.1"):$(yaml_get "http" "port" "8765")/"
+  
+  # Display correct protocol based on TLS setting  
+  local scheme="http"
+  local tls_enabled; tls_enabled=$(yaml_get "security" "tls_enabled" "false")
+  [ "$tls_enabled" = "true" ] && scheme="https"
+  
+  ns_log "🌐 Dashboard: ${scheme}://$(yaml_get "http" "host" "127.0.0.1"):$(yaml_get "http" "port" "8765")/"
   ns_log "🤖 JARVIS: Full automation and security integration active"
   ns_log "🛡️ Security: All monitoring and automation systems online"
 }
