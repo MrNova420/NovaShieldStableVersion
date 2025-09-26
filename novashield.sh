@@ -88,7 +88,8 @@ _rotate_log() {
     
     local timestamp
     timestamp=$(date '+%Y%m%d_%H%M%S')
-    local archive_file="${archive_dir}/$(basename "$logfile")_${timestamp}.gz"
+    local archive_file
+    archive_file="${archive_dir}/$(basename "$logfile")_${timestamp}.gz"
     
     # Keep last 40% of lines, compress and archive the rest
     local keep_lines=$((max_lines * 40 / 100))
@@ -112,11 +113,13 @@ _rotate_log() {
 _optimize_memory() {
   # Prevent excessive memory optimization calls
   local last_optimize_file="${NS_TMP}/last_memory_optimize"
-  local current_time=$(date +%s 2>/dev/null || echo 0)
+  local current_time
+  current_time=$(date +%s 2>/dev/null || echo 0)
   
   # Only run memory optimization every 5 minutes to prevent resource exhaustion
   if [ -f "$last_optimize_file" ]; then
-    local last_optimize=$(cat "$last_optimize_file" 2>/dev/null || echo 0)
+    local last_optimize
+    last_optimize=$(cat "$last_optimize_file" 2>/dev/null || echo 0)
     if [ $((current_time - last_optimize)) -lt 300 ]; then
       return 0  # Skip optimization if ran recently
     fi
@@ -182,13 +185,15 @@ _detect_memory_leaks() {
   if [ "$process_count" -gt 10 ]; then
     ns_warn "⚠️  Potential memory leak: $process_count NovaShield processes detected"
     # Calculate memory footprint for monitoring
-    local memory_footprint=$(ps -C novashield -o rss= 2>/dev/null | awk '{sum+=$1} END {print sum ? sum"KB" : "0KB"}')
+    local memory_footprint
+    memory_footprint=$(ps -C novashield -o rss= 2>/dev/null | awk '{sum+=$1} END {print sum ? sum"KB" : "0KB"}')
     ns_log "🔍 Total memory footprint: $memory_footprint"
     
     # Kill orphaned processes older than 1 hour
     for pid in $(pgrep -f "novashield" 2>/dev/null || true); do
       if [ -n "$pid" ] && [ "$pid" != "$$" ]; then
-        local process_age=$(ps -o etime= -p "$pid" 2>/dev/null | tr -d ' ' || echo "")
+        local process_age
+        process_age=$(ps -o etime= -p "$pid" 2>/dev/null | tr -d ' ' || echo "")
         if [[ "$process_age" =~ ^[0-9]+-[0-9]+:[0-9]+:[0-9]+$ ]]; then
           # Process older than 1 hour, potential leak
           kill -TERM "$pid" 2>/dev/null || true
@@ -208,7 +213,8 @@ _cleanup_storage() {
   ns_log "🧹 Optimizing storage: $cleanup_dir (max age: ${max_age_days} days)"
   
   # Advanced storage optimization
-  local initial_size=$(du -sh "$cleanup_dir" 2>/dev/null | cut -f1 || echo "unknown")
+  local initial_size
+  initial_size=$(du -sh "$cleanup_dir" 2>/dev/null | cut -f1 || echo "unknown")
   
   # Clean files older than max_age_days
   find "$cleanup_dir" -type f -mtime +"$max_age_days" -delete 2>/dev/null || true
@@ -237,7 +243,8 @@ _cleanup_storage() {
   # Storage compression for archives
   _compress_old_files "$cleanup_dir"
   
-  local final_size=$(du -sh "$cleanup_dir" 2>/dev/null | cut -f1 || echo "unknown")
+  local final_size
+  final_size=$(du -sh "$cleanup_dir" 2>/dev/null | cut -f1 || echo "unknown")
   ns_log "✅ Storage optimization: $initial_size → $final_size"
 }
 
@@ -297,7 +304,8 @@ _close_idle_connections() {
   
   # Clean up zombie connections
   if [ -f "$NS_PID/web_server.pid" ]; then
-    local web_pid=$(cat "$NS_PID/web_server.pid" 2>/dev/null || echo "")
+    local web_pid
+    web_pid=$(cat "$NS_PID/web_server.pid" 2>/dev/null || echo "")
     if [ -n "$web_pid" ] && kill -0 "$web_pid" 2>/dev/null; then
       # Send signal to web server to clean up connections
       kill -USR2 "$web_pid" 2>/dev/null || true
@@ -552,12 +560,17 @@ _optimize_system_resources() {
 
 # Optimize file descriptor usage
 _optimize_file_descriptors() {
-  # Close unused file descriptors
-  for fd in $(ls /proc/$$/fd/ 2>/dev/null); do
-    if [ "$fd" -gt 10 ] && [ ! -t "$fd" ]; then
-      exec {fd}>&- 2>/dev/null || true
-    fi
-  done
+  # Close unused file descriptors using safer glob pattern
+  if [ -d "/proc/$$/fd/" ]; then
+    for fd_path in "/proc/$$/fd/"*; do
+      [ -e "$fd_path" ] || continue
+      local fd
+      fd=$(basename "$fd_path")
+      if [[ "$fd" =~ ^[0-9]+$ ]] && [ "$fd" -gt 10 ] && [ ! -t "$fd" ]; then
+        exec {fd}>&- 2>/dev/null || true
+      fi
+    done
+  fi
   
   # Set optimal file descriptor limits
   ulimit -n 4096 2>/dev/null || true
@@ -1265,7 +1278,8 @@ yaml_get_array(){
 safe_read_pid(){
   local pidfile="$1"
   [ -f "$pidfile" ] || { echo "0"; return; }
-  local pid; pid=$(cat "$pidfile" 2>/dev/null | head -n1 | tr -d ' \t\n\r')
+  local pid
+  pid=$(head -n1 "$pidfile" 2>/dev/null | tr -d ' \t\n\r')
   
   # Validate PID is a number
   if ! [[ "$pid" =~ ^[0-9]+$ ]] || [ "$pid" -eq 0 ]; then
@@ -1344,7 +1358,7 @@ ensure_dirs(){
       ns_warn "⚠️  Failed to create directory: $dir (possible memory/permission issue)"
       # Try alternative location if NS_HOME creation fails
       if [[ "$dir" == *"$NS_HOME"* ]]; then
-        local alt_dir="/tmp/novashield-$(whoami)${dir#$NS_HOME}"
+        local alt_dir="/tmp/novashield-$(whoami)${dir#"$NS_HOME"}"
         mkdir -p "$alt_dir" 2>/dev/null || continue
         ns_warn "📁 Using alternative directory: $alt_dir"
       fi
