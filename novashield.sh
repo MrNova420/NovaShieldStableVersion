@@ -138,7 +138,9 @@ _optimize_memory() {
       
       # Less aggressive cache clearing - only if safe
       if [ -w "/proc/sys/vm/drop_caches" ] 2>/dev/null && command -v sync >/dev/null 2>&1; then
-        sync 2>/dev/null && echo 1 > /proc/sys/vm/drop_caches 2>/dev/null || true
+        if sync 2>/dev/null; then
+          echo 1 > /proc/sys/vm/drop_caches 2>/dev/null || true
+        fi
       fi
       
       # Clear bash history cache safely
@@ -368,7 +370,8 @@ _clean_stale_pids() {
   for pid_file in "$pid_dir"/*.pid; do
     [ -f "$pid_file" ] || continue
     
-    local pid=$(cat "$pid_file" 2>/dev/null || echo "")
+    local pid
+    pid=$(cat "$pid_file" 2>/dev/null || echo "")
     if [ -n "$pid" ]; then
       if ! kill -0 "$pid" 2>/dev/null; then
         # Process no longer exists, remove stale PID file
@@ -416,11 +419,14 @@ _monitor_processes() {
   for process in $critical_processes; do
     local pid_file="$NS_PID/${process}.pid"
     if [ -f "$pid_file" ]; then
-      local pid=$(cat "$pid_file" 2>/dev/null || echo "")
+      local pid
+      pid=$(cat "$pid_file" 2>/dev/null || echo "")
       if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
         # Process is running, check health
-        local cpu_usage=$(ps -p "$pid" -o %cpu= 2>/dev/null | tr -d ' ' || echo "0")
-        local mem_usage=$(ps -p "$pid" -o %mem= 2>/dev/null | tr -d ' ' || echo "0")
+        local cpu_usage
+        cpu_usage=$(ps -p "$pid" -o %cpu= 2>/dev/null | tr -d ' ' || echo "0")
+        local mem_usage
+        mem_usage=$(ps -p "$pid" -o %mem= 2>/dev/null | tr -d ' ' || echo "0")
         
         # Alert if process is using excessive resources
         if [ "${cpu_usage%.*}" -gt 80 ]; then
@@ -469,7 +475,8 @@ _setup_api_connection_pools() {
 # Optimize rate limiting for better performance
 _optimize_rate_limiting() {
   # Dynamic rate limiting based on system load
-  local system_load=$(uptime | awk -F'load average:' '{print $2}' | awk '{print $1}' | sed 's/,//' || echo "0")
+  local system_load
+  system_load=$(uptime | awk -F'load average:' '{print $2}' | awk '{print $1}' | sed 's/,//' || echo "0")
   local load_threshold=2.0
   
   if command -v bc >/dev/null 2>&1; then
@@ -640,7 +647,8 @@ enhanced_system_diagnostics() {
   local issues_found=()
   
   # CPU Analysis with AI predictions
-  local cpu_usage=$(top -bn1 | grep "Cpu(s)" | awk '{print $2}' | cut -d'%' -f1)
+  local cpu_usage
+  cpu_usage=$(top -bn1 | grep "Cpu(s)" | awk '{print $2}' | cut -d'%' -f1)
   if (( $(echo "$cpu_usage > 80" | bc -l 2>/dev/null || echo "0") )); then
     issues_found+=("HIGH_CPU_USAGE")
     health_score=$((health_score - 20))
@@ -648,7 +656,8 @@ enhanced_system_diagnostics() {
   fi
   
   # Memory Analysis with leak detection
-  local mem_usage=$(free | grep Mem | awk '{printf("%.1f", $3/$2 * 100.0)}')
+  local mem_usage
+  mem_usage=$(free | grep Mem | awk '{printf("%.1f", $3/$2 * 100.0)}')
   if (( $(echo "$mem_usage > 85" | bc -l 2>/dev/null || echo "0") )); then
     issues_found+=("HIGH_MEMORY_USAGE")
     health_score=$((health_score - 25))
@@ -656,7 +665,8 @@ enhanced_system_diagnostics() {
   fi
   
   # Disk Analysis with predictive failure detection
-  local disk_usage=$(df -h / | awk 'NR==2 {print $5}' | cut -d'%' -f1)
+  local disk_usage
+  disk_usage=$(df -h / | awk 'NR==2 {print $5}' | cut -d'%' -f1)
   if [ "$disk_usage" -gt 85 ]; then
     issues_found+=("HIGH_DISK_USAGE")
     health_score=$((health_score - 15))
@@ -831,7 +841,8 @@ enhanced_protocol_operations() {
 long_term_backup_system() {
   local backup_type="${1:-full}"
   local backup_dir="${NS_HOME}/backups"
-  local timestamp=$(date +%Y%m%d_%H%M%S)
+  local timestamp
+  timestamp=$(date +%Y%m%d_%H%M%S)
   
   mkdir -p "$backup_dir"
   
@@ -847,7 +858,8 @@ long_term_backup_system() {
       ;;
     "incremental")
       # Incremental backup since last full backup
-      local last_full=$(find "$backup_dir" -name "full_backup_*.tar.gz" -type f | sort | tail -1)
+      local last_full
+      last_full=$(find "$backup_dir" -name "full_backup_*.tar.gz" -type f | sort | tail -1)
       if [ -n "$last_full" ]; then
         ns_log "Creating incremental backup since $(basename "$last_full")..."
         find "$NS_HOME" -newer "$last_full" -type f | \
@@ -870,7 +882,8 @@ long_term_backup_system() {
   find "$backup_dir" -name "*.tar.gz" -type f -mtime +30 -delete 2>/dev/null || true
   
   # Verify backup integrity
-  local latest_backup=$(find "$backup_dir" -name "*backup_${timestamp}.tar.gz" -type f | head -1)
+  local latest_backup
+  latest_backup=$(find "$backup_dir" -name "*backup_${timestamp}.tar.gz" -type f | head -1)
   if [ -n "$latest_backup" ] && tar -tzf "$latest_backup" >/dev/null 2>&1; then
     ns_log "✅ Backup verified: $(basename "$latest_backup")"
     return 0
@@ -939,7 +952,8 @@ ns_log() {
   echo -e "$(ns_now) [INFO ] $*" | tee -a "${NS_HOME}/launcher.log" >&2 2>/dev/null || echo -e "$(ns_now) [INFO ] $*" >&2
   
   # Less frequent memory optimization (every 500 log entries instead of 100)
-  local log_count=$(wc -l < "${NS_HOME}/launcher.log" 2>/dev/null || echo 0)
+  local log_count
+  log_count=$(wc -l < "${NS_HOME}/launcher.log" 2>/dev/null || echo 0)
   if [ $((log_count % 500)) -eq 0 ] && [ "$log_count" -gt 0 ]; then
     _optimize_memory &
   fi
