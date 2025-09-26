@@ -1430,15 +1430,35 @@ ensure_dirs(){
   
   # Create JSON files with secure permissions (with existence check)
   if [ -d "$(dirname "$NS_SESS_DB")" ]; then
-    [ -f "$NS_SESS_DB" ] || { echo '{}' >"$NS_SESS_DB" && chmod 600 "$NS_SESS_DB" 2>/dev/null || true; }
+    if [ ! -f "$NS_SESS_DB" ]; then
+      if echo '{}' >"$NS_SESS_DB"; then
+        chmod 600 "$NS_SESS_DB" 2>/dev/null || true
+      fi
+    fi
   fi
-  [ -f "$NS_RL_DB" ] || { echo '{}' >"$NS_RL_DB" && chmod 600 "$NS_RL_DB" 2>/dev/null || true; }
-  [ -f "$NS_BANS_DB" ] || { echo '{}' >"$NS_BANS_DB" && chmod 600 "$NS_BANS_DB" 2>/dev/null || true; }
-  [ -f "$NS_JARVIS_MEM" ] || { echo '{"conversations":[]}' >"$NS_JARVIS_MEM" && chmod 600 "$NS_JARVIS_MEM" 2>/dev/null || true; }
+  if [ ! -f "$NS_RL_DB" ]; then
+    if echo '{}' >"$NS_RL_DB"; then
+      chmod 600 "$NS_RL_DB" 2>/dev/null || true
+    fi
+  fi
+  if [ ! -f "$NS_BANS_DB" ]; then
+    if echo '{}' >"$NS_BANS_DB"; then
+      chmod 600 "$NS_BANS_DB" 2>/dev/null || true
+    fi
+  fi
+  if [ ! -f "$NS_JARVIS_MEM" ]; then
+    if echo '{"conversations":[]}' >"$NS_JARVIS_MEM"; then
+      chmod 600 "$NS_JARVIS_MEM" 2>/dev/null || true
+    fi
+  fi
   
   # Version and path files
-  echo "$NS_VERSION" >"$NS_VERSION_FILE" && chmod 644 "$NS_VERSION_FILE" 2>/dev/null || true
-  echo "$NS_SELF" >"$NS_SELF_PATH_FILE" && chmod 644 "$NS_SELF_PATH_FILE" 2>/dev/null || true
+  if echo "$NS_VERSION" >"$NS_VERSION_FILE"; then
+    chmod 644 "$NS_VERSION_FILE" 2>/dev/null || true
+  fi
+  if echo "$NS_SELF" >"$NS_SELF_PATH_FILE"; then
+    chmod 644 "$NS_SELF_PATH_FILE" 2>/dev/null || true
+  fi
   
   # Restore previous umask
   umask "$old_umask"
@@ -2290,8 +2310,10 @@ rotate_backups(){
 }
 
 version_snapshot(){
-  local stamp="$(date '+%Y%m%d-%H%M%S')"
-  local vdir="${NS_VERSIONS}/${stamp}"; mkdir -p "$vdir"
+  local stamp
+  stamp="$(date '+%Y%m%d-%H%M%S')"
+  local vdir="${NS_VERSIONS}/${stamp}"
+  mkdir -p "$vdir"
   ns_log "Creating version snapshot: $vdir"
   cp -a "$NS_MODULES" "$vdir/modules" 2>/dev/null || true
   cp -a "$NS_PROJECTS" "$vdir/projects" 2>/dev/null || true
@@ -2379,7 +2401,8 @@ _monitor_mem(){
     fi
     
     # Check NovaShield process memory usage for long-term stability
-    local web_pid=$(safe_read_pid "${NS_PID}/web.pid" 2>/dev/null || echo 0)
+    local web_pid
+    web_pid=$(safe_read_pid "${NS_PID}/web.pid" 2>/dev/null || echo 0)
     local web_mem=0
     if [ "$web_pid" -gt 0 ] && kill -0 "$web_pid" 2>/dev/null; then
       web_mem=$(ps -o rss= -p "$web_pid" 2>/dev/null | awk '{print int($1/1024)}' || echo 0)
@@ -2395,9 +2418,11 @@ _monitor_mem(){
     # Check monitor processes memory usage
     local total_monitor_mem=0
     for monitor in cpu memory disk network integrity process userlogins services logs scheduler supervisor; do
-      local monitor_pid=$(safe_read_pid "${NS_PID}/${monitor}.pid" 2>/dev/null || echo 0)
+      local monitor_pid
+      monitor_pid=$(safe_read_pid "${NS_PID}/${monitor}.pid" 2>/dev/null || echo 0)
       if [ "$monitor_pid" -gt 0 ] && kill -0 "$monitor_pid" 2>/dev/null; then
-        local monitor_mem=$(ps -o rss= -p "$monitor_pid" 2>/dev/null | awk '{print int($1/1024)}' || echo 0)
+        local monitor_mem
+        monitor_mem=$(ps -o rss= -p "$monitor_pid" 2>/dev/null | awk '{print int($1/1024)}' || echo 0)
         total_monitor_mem=$((total_monitor_mem + monitor_mem))
         
         # Alert if individual monitor uses excessive memory (potential memory leak)
@@ -2432,12 +2457,14 @@ storage_maintenance() {
   echo "$$" > "$maintenance_lock"
   trap 'rm -f "'"$maintenance_lock"'" 2>/dev/null || true' EXIT
   
-  local initial_size total_cleaned=0
+  local initial_size
+  local total_cleaned=0
   initial_size=$(du -sb "${NS_HOME}" 2>/dev/null | cut -f1 || echo 0)
   
   # 1. Clean old backup files (keep last 10)
   if [ -d "${NS_HOME}/backups" ]; then
-    local backup_count=$(ls -1 "${NS_HOME}/backups"/*.tar.gz 2>/dev/null | wc -l)
+    local backup_count
+    backup_count=$(ls -1 "${NS_HOME}/backups"/*.tar.gz 2>/dev/null | wc -l)
     backup_count=${backup_count:-0}
     if [ "$backup_count" -gt 10 ]; then
       ns_log "Cleaning old backups (keeping last 10 of $backup_count)"
@@ -2812,7 +2839,8 @@ _supervisor(){
   fi
   
   while true; do
-    local current_hour=$(date +%Y%m%d%H)
+    local current_hour
+    current_hour=$(date +%Y%m%d%H)
     
     # Helper function to check and record restarts
     check_restart_limit() {
