@@ -1333,7 +1333,7 @@ keys:
 
 notifications:
   email:
-    enabled: false
+    enabled: true              # Enable email notifications by default
     smtp_host: "smtp.example.com"
     smtp_port: 587
     username: "user@example.com"
@@ -1341,19 +1341,19 @@ notifications:
     to: ["you@example.com"]
     use_tls: true
   telegram:
-    enabled: false
+    enabled: true             # Enable Telegram notifications by default
     bot_token: ""
     chat_id: ""
   discord:
-    enabled: false
+    enabled: true             # Enable Discord notifications by default
     webhook_url: ""
 
 updates:
-  enabled: false
+  enabled: true               # Enable automatic updates by default
   source: ""
 
 sync:
-  enabled: false
+  enabled: true               # Enable synchronization by default
   method: "rclone"
   remote: ""
 
