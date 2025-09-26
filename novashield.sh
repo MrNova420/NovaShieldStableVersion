@@ -2299,7 +2299,7 @@ rotate_backups(){
   [ -d "$bdir" ] || return 0
 
   local to_delete
-  to_delete="$(ls -1t "$bdir"/backup-*.tar.gz* 2>/dev/null | tail -n +"$((max_keep+1))" || true)"
+  to_delete="$(find "$bdir" -name "backup-*.tar.gz*" -type f -printf '%T@ %p\n' 2>/dev/null | sort -nr | tail -n +"$((max_keep+1))" | cut -d' ' -f2- || true)"
   if [ -n "$to_delete" ]; then
     echo "$to_delete" | while IFS= read -r f; do
       [ -n "$f" ] || continue
@@ -2477,11 +2477,13 @@ storage_maintenance() {
   # 1. Clean old backup files (keep last 10)
   if [ -d "${NS_HOME}/backups" ]; then
     local backup_count
-    backup_count=$(ls -1 "${NS_HOME}/backups"/*.tar.gz 2>/dev/null | wc -l)
+    backup_count=$(find "${NS_HOME}/backups" -name "*.tar.gz" -type f | wc -l)
     backup_count=${backup_count:-0}
     if [ "$backup_count" -gt 10 ]; then
       ns_log "Cleaning old backups (keeping last 10 of $backup_count)"
-      cd "${NS_HOME}/backups" && ls -1t *.tar.gz 2>/dev/null | tail -n +11 | xargs rm -f || true
+      if cd "${NS_HOME}/backups"; then
+        find . -name "*.tar.gz" -type f -printf '%T@ %p\n' | sort -nr | tail -n +11 | cut -d' ' -f2- | xargs rm -f || true
+      fi
     fi
   fi
   
@@ -2586,7 +2588,11 @@ _monitor_disk(){
     fi
     
     write_json "${NS_LOGS}/disk.json" "{\"ts\":\"$(ns_now)\",\"use_pct\":${use},\"warn\":${warn},\"crit\":${crit},\"mount\":\"${mount}\",\"level\":\"${lvl}\",\"cleanup_threshold\":${cleanup_threshold}}"
-    [ "$lvl" = "CRIT" ] && alert CRIT "Disk $mount critical: ${use}% (cleanup triggered)" || { [ "$lvl" = "WARN" ] && alert WARN "Disk $mount elevated: ${use}%"; }
+    if [ "$lvl" = "CRIT" ]; then
+      alert CRIT "Disk $mount critical: ${use}% (cleanup triggered)"
+    elif [ "$lvl" = "WARN" ]; then
+      alert WARN "Disk $mount elevated: ${use}%"
+    fi
     sleep "$interval"
   done
 }
@@ -3102,10 +3108,12 @@ health_check_system() {
     # Check running processes
     echo "NovaShield processes:"
     for monitor in cpu memory disk network integrity process userlogins services logs scheduler supervisor; do
-      local pid=$(safe_read_pid "${NS_PID}/${monitor}.pid" 2>/dev/null || echo 0)
+      local pid
+      pid=$(safe_read_pid "${NS_PID}/${monitor}.pid" 2>/dev/null || echo 0)
       local status="stopped"
       if [ "$pid" -gt 0 ] && kill -0 "$pid" 2>/dev/null; then
-        local mem=$(ps -o rss= -p "$pid" 2>/dev/null | awk '{print int($1/1024)}' || echo 0)
+        local mem
+        mem=$(ps -o rss= -p "$pid" 2>/dev/null | awk '{print int($1/1024)}' || echo 0)
         status="running (${mem}MB)"
       fi
       printf "  %-12s: %s\n" "$monitor" "$status"
@@ -3114,7 +3122,8 @@ health_check_system() {
     local web_pid
     web_pid=$(safe_read_pid "${NS_PID}/web.pid" 2>/dev/null || echo 0)
     if [ "$web_pid" -gt 0 ] && kill -0 "$web_pid" 2>/dev/null; then
-      local web_mem=$(ps -o rss= -p "$web_pid" 2>/dev/null | awk '{print int($1/1024)}' || echo 0)
+      local web_mem
+      web_mem=$(ps -o rss= -p "$web_pid" 2>/dev/null | awk '{print int($1/1024)}' || echo 0)
       echo "  Web server   : running (${web_mem}MB)"
     else
       echo "  Web server   : stopped"
@@ -3124,8 +3133,10 @@ health_check_system() {
     echo "Log files:"
     for log_file in "${NS_LOGS}"/*.log "${NS_HOME}"/*.log; do
       if [ -f "$log_file" ]; then
-        local size=$(du -sh "$log_file" 2>/dev/null | cut -f1 || echo "0")
-        local lines=$(wc -l < "$log_file" 2>/dev/null || echo 0)
+        local size
+        size=$(du -sh "$log_file" 2>/dev/null | cut -f1 || echo "0")
+        local lines
+        lines=$(wc -l < "$log_file" 2>/dev/null || echo 0)
         printf "  %-20s: %s (%s lines)\n" "$(basename "$log_file")" "$size" "$lines"
       fi
     done
@@ -3203,7 +3214,8 @@ enhanced_threat_detection() {
   
   # Check system load (simplified)
   if [ -f /proc/loadavg ]; then
-    local load_avg=$(cut -d' ' -f1 /proc/loadavg 2>/dev/null || echo "0")
+    local load_avg
+    load_avg=$(cut -d' ' -f1 /proc/loadavg 2>/dev/null || echo "0")
     if [ "${load_avg%.*}" -gt 4 ] 2>/dev/null; then
       threat_count=$((threat_count + 1))
     fi
@@ -3376,7 +3388,8 @@ enhanced_plugin_system() {
       if [ -d "$plugin_dir" ] && [ "$(ls -A "$plugin_dir" 2>/dev/null)" ]; then
         for plugin in "$plugin_dir"/*.sh; do
           if [ -f "$plugin" ]; then
-            local name=$(basename "$plugin" .sh)
+            local name
+            name=$(basename "$plugin" .sh)
             echo "  📦 $name - $(head -1 "$plugin" | sed 's/^# *//')"
           fi
         done
@@ -20628,9 +20641,12 @@ _validate_stability_fixes() {
     
     # Test 2: Monitor intervals validation
     echo -n "✓ Validating monitor intervals... "
-    local cpu_interval=$(grep "cpu.*interval_sec:" "$NS_SELF" | head -1 | grep -o "interval_sec: [0-9]*" | cut -d' ' -f2)
-    local memory_interval=$(grep "memory.*interval_sec:" "$NS_SELF" | head -1 | grep -o "interval_sec: [0-9]*" | cut -d' ' -f2)
-    local network_interval=$(grep "network.*interval_sec:" "$NS_SELF" | head -1 | grep -o "interval_sec: [0-9]*" | cut -d' ' -f2)
+    local cpu_interval
+    cpu_interval=$(grep "cpu.*interval_sec:" "$NS_SELF" | head -1 | grep -o "interval_sec: [0-9]*" | cut -d' ' -f2)
+    local memory_interval
+    memory_interval=$(grep "memory.*interval_sec:" "$NS_SELF" | head -1 | grep -o "interval_sec: [0-9]*" | cut -d' ' -f2)
+    local network_interval
+    network_interval=$(grep "network.*interval_sec:" "$NS_SELF" | head -1 | grep -o "interval_sec: [0-9]*" | cut -d' ' -f2)
     
     if [ "$cpu_interval" -ge 10 ] && [ "$memory_interval" -ge 10 ] && [ "$network_interval" -ge 20 ]; then
         echo "PASS (CPU: ${cpu_interval}s, Memory: ${memory_interval}s, Network: ${network_interval}s)"
