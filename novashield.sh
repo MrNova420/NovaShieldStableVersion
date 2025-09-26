@@ -57,14 +57,16 @@ ns_now() { date '+%Y-%m-%d %H:%M:%S'; }
 _rotate_log() {
   local logfile="$1"
   local max_lines="${2:-8000}"  # Reduced for storage efficiency
-  local compress_after="${3:-5000}"  # Compress old logs after 5K lines
+  local compress_after="${3:-5000}"  # Used for cleanup scheduling
   
   if [ -f "$logfile" ] && [ "$(wc -l < "$logfile" 2>/dev/null || echo 0)" -gt "$max_lines" ]; then
     # Archive old logs with compression for long-term storage
-    local archive_dir="$(dirname "$logfile")/archive"
+    local archive_dir
+    archive_dir="$(dirname "$logfile")/archive"
     mkdir -p "$archive_dir" 2>/dev/null
     
-    local timestamp=$(date '+%Y%m%d_%H%M%S')
+    local timestamp
+    timestamp=$(date '+%Y%m%d_%H%M%S')
     local archive_file="${archive_dir}/$(basename "$logfile")_${timestamp}.gz"
     
     # Keep last 40% of lines, compress and archive the rest
@@ -78,8 +80,10 @@ _rotate_log() {
     tail -n "$keep_lines" "$logfile" > "${logfile}.tmp.$$" 2>/dev/null && mv "${logfile}.tmp.$$" "$logfile"
     echo "$(ns_now) [INFO ] Log rotated - kept $keep_lines lines, archived $archive_lines to $(basename "$archive_file")" >> "$logfile"
     
-    # Clean old archives (keep last 10 for long-term storage)
-    find "$archive_dir" -name "*.gz" -type f | sort | head -n -10 | xargs rm -f 2>/dev/null || true
+    # Schedule cleanup based on compress_after threshold
+    [ "$archive_lines" -gt "$compress_after" ] && {
+      find "$archive_dir" -name "*.gz" -type f | sort | head -n -10 | xargs rm -f 2>/dev/null || true
+    }
   fi
 }
 
@@ -134,12 +138,15 @@ _optimize_memory() {
 # Advanced memory leak detection and prevention
 _detect_memory_leaks() {
   local process_count
-  local memory_footprint
   
   # Check for excessive process spawning
   process_count=$(pgrep -c -f "novashield" 2>/dev/null || echo "0")
   if [ "$process_count" -gt 10 ]; then
     ns_warn "⚠️  Potential memory leak: $process_count NovaShield processes detected"
+    # Calculate memory footprint for monitoring
+    local memory_footprint=$(ps -C novashield -o rss= 2>/dev/null | awk '{sum+=$1} END {print sum ? sum"KB" : "0KB"}')
+    ns_log "🔍 Total memory footprint: $memory_footprint"
+    
     # Kill orphaned processes older than 1 hour
     for pid in $(pgrep -f "novashield" 2>/dev/null || true); do
       if [ -n "$pid" ] && [ "$pid" != "$$" ]; then
@@ -160,10 +167,13 @@ _cleanup_storage() {
   
   [ -d "$cleanup_dir" ] || return 0
   
-  ns_log "🧹 Optimizing storage: $cleanup_dir"
+  ns_log "🧹 Optimizing storage: $cleanup_dir (max age: ${max_age_days} days)"
   
   # Advanced storage optimization
   local initial_size=$(du -sh "$cleanup_dir" 2>/dev/null | cut -f1 || echo "unknown")
+  
+  # Clean files older than max_age_days
+  find "$cleanup_dir" -type f -mtime +"$max_age_days" -delete 2>/dev/null || true
   
   # Clean temporary files
   find "$cleanup_dir" -name "*.tmp*" -type f -mtime +1 -delete 2>/dev/null || true
@@ -566,6 +576,7 @@ enhanced_system_diagnostics() {
   local cpu_usage=$(top -bn1 | grep "Cpu(s)" | awk '{print $2}' | cut -d'%' -f1)
   if (( $(echo "$cpu_usage > 80" | bc -l 2>/dev/null || echo "0") )); then
     issues_found+=("HIGH_CPU_USAGE")
+    health_score=$((health_score - 20))
     enhanced_cpu_optimization
   fi
   
@@ -573,6 +584,7 @@ enhanced_system_diagnostics() {
   local mem_usage=$(free | grep Mem | awk '{printf("%.1f", $3/$2 * 100.0)}')
   if (( $(echo "$mem_usage > 85" | bc -l 2>/dev/null || echo "0") )); then
     issues_found+=("HIGH_MEMORY_USAGE")
+    health_score=$((health_score - 25))
     enhanced_memory_optimization
   fi
   
@@ -580,6 +592,7 @@ enhanced_system_diagnostics() {
   local disk_usage=$(df -h / | awk 'NR==2 {print $5}' | cut -d'%' -f1)
   if [ "$disk_usage" -gt 85 ]; then
     issues_found+=("HIGH_DISK_USAGE")
+    health_score=$((health_score - 15))
     enhanced_disk_cleanup
   fi
   
@@ -588,6 +601,10 @@ enhanced_system_diagnostics() {
   
   # Security Analysis with threat assessment
   enhanced_security_diagnostics
+  
+  # Calculate final health score (higher is better)
+  health_score=$((100 + health_score))  # Start from 100, subtract for issues
+  ns_log "📊 System Health Score: ${health_score}/100"
   
   # Generate AI-powered recommendations
   enhanced_generate_recommendations "${issues_found[@]}"
@@ -647,7 +664,9 @@ enhanced_configuration_optimization() {
   ns_log "⚙️ Running Enhanced Configuration Optimization..."
   
   # AI-powered configuration analysis
-  local config_analysis=$(enhanced_analyze_configurations)
+  local config_analysis
+  config_analysis=$(enhanced_analyze_configurations)
+  ns_log "📋 Configuration Analysis: $config_analysis"
   
   # Dynamic configuration adjustment
   enhanced_dynamic_config_tuning
