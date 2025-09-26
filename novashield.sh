@@ -1753,18 +1753,62 @@ generate_keys(){
 }
 
 generate_self_signed_tls(){
-  local enabled; enabled=$(yaml_get "security" "tls_enabled" "true")
-  [ "$enabled" = "true" ] || return 0
-  local crt key
-  crt=$(yaml_get "security" "tls_cert" "keys/server.crt")
-  key=$(yaml_get "security" "tls_key" "keys/server.key")
-  [ -z "$crt" ] && crt="keys/tls.crt"
-  [ -z "$key" ] && key="keys/tls.key"
-  [ -f "${NS_HOME}/${crt}" ] && [ -f "${NS_HOME}/${key}" ] && return 0
-  ns_log "Generating self-signed TLS cert"
-  (cd "$NS_HOME/keys" && \
-    openssl req -x509 -newkey rsa:2048 -nodes -keyout tls.key -out tls.crt -days 825 \
-      -subj "/CN=localhost/O=NovaShield/OU=SelfSigned") || ns_warn "TLS cert generation failed"
+  # Check if TLS is enabled - be more robust about reading the config
+  local enabled="true"  # Default to enabled
+  if [ -f "$NS_CONF" ]; then
+    enabled=$(awk -F': ' '/tls_enabled:/ {print $2}' "$NS_CONF" 2>/dev/null | tr -d ' "' | head -1)
+    # If we can't read it or it's empty, default to true for security
+    [ -z "$enabled" ] && enabled="true"
+  fi
+  
+  [ "$enabled" = "false" ] && return 0  # Only skip if explicitly disabled
+  
+  # Determine certificate paths
+  local crt="keys/tls.crt" 
+  local key="keys/tls.key"
+  
+  # Check if certificates already exist
+  if [ -f "${NS_HOME}/${crt}" ] && [ -f "${NS_HOME}/${key}" ]; then
+    ns_log "TLS certificates already exist"
+    return 0
+  fi
+  
+  ns_log "Generating advanced self-signed TLS certificates for HTTPS"
+  
+  # Ensure keys directory exists
+  mkdir -p "$NS_HOME/keys"
+  
+  # Generate strong TLS certificates with modern security
+  # Using RSA 4096 for enhanced security, ECC option available
+  if command -v openssl >/dev/null 2>&1; then
+    if (cd "$NS_HOME/keys" && \
+      openssl req -x509 -newkey rsa:4096 -sha256 -nodes -keyout tls.key -out tls.crt -days 365 \
+        -subj "/CN=localhost/O=NovaShield/OU=SecureMonitoring/C=US" \
+        -addext "subjectAltName=DNS:localhost,DNS:127.0.0.1,IP:127.0.0.1" \
+        -addext "keyUsage=critical,digitalSignature,keyEncipherment" \
+        -addext "extendedKeyUsage=serverAuth" 2>/dev/null); then
+      ns_log "✓ Advanced TLS certificates generated successfully (RSA 4096-bit, SHA-256)"
+      # Set proper permissions
+      chmod 600 "$NS_HOME/keys/tls.key" 2>/dev/null || true
+      chmod 644 "$NS_HOME/keys/tls.crt" 2>/dev/null || true
+    else
+      # Fallback to basic certificate if advanced options fail
+      ns_warn "Advanced certificate generation failed, using standard method..."
+      if (cd "$NS_HOME/keys" && \
+        openssl req -x509 -newkey rsa:2048 -nodes -keyout tls.key -out tls.crt -days 365 \
+          -subj "/CN=localhost/O=NovaShield/OU=SelfSigned" 2>/dev/null); then
+        ns_log "✓ Standard TLS certificates generated successfully"
+        chmod 600 "$NS_HOME/keys/tls.key" 2>/dev/null || true
+        chmod 644 "$NS_HOME/keys/tls.crt" 2>/dev/null || true
+      else
+        ns_warn "TLS certificate generation failed - HTTPS will not be available"
+        return 1
+      fi
+    fi
+  else
+    ns_warn "OpenSSL not available - TLS certificate generation failed"
+    return 1
+  fi
 }
 
 aes_key_path(){ yaml_get "security" "aes_key_file" "keys/aes.key"; }
@@ -2774,8 +2818,8 @@ web_health_check() {
     port=$(yaml_get "http" "port" "8765")
     
     if command -v curl >/dev/null 2>&1; then
-      if ! curl -sf "http://${host}:${port}/" -m 5 >/dev/null 2>&1; then
-        alert WARN "Web server not responding on http://${host}:${port}/ (PID: $web_pid exists but not serving)"
+      if ! curl -sf "https://${host}:${port}/" -k -m 5 >/dev/null 2>&1; then
+        alert WARN "Web server not responding on https://${host}:${port}/ (PID: $web_pid exists but not serving)"
         # Log detailed health check failure
         mkdir -p "${NS_LOGS}" 2>/dev/null
         _rotate_log "${NS_LOGS}/health_checks.log" 1000
@@ -7515,8 +7559,8 @@ def execute_tool(tool_name):
         'ss': ['ss', '-tuln'],
         'iptables': ['iptables', '-L', '-n'],
         'ping': ['ping', '-c', '4', '8.8.8.8'],
-        'curl': ['curl', '-I', 'http://httpbin.org/ip'],
-        'wget': ['wget', '--spider', 'http://httpbin.org/ip'],
+        'curl': ['curl', '-I', 'https://httpbin.org/ip'],
+        'wget': ['wget', '--spider', 'https://httpbin.org/ip'],
         'dig': ['dig', 'google.com'],
         'traceroute': ['traceroute', 'google.com'],
         'htop': ['htop', '--version'],  # Safe non-interactive version
@@ -7880,6 +7924,10 @@ class Handler(SimpleHTTPRequestHandler):
         self.send_header('X-XSS-Protection', '1; mode=block')
         self.send_header('Referrer-Policy', 'no-referrer')
         self.send_header('Permissions-Policy', 'geolocation=(), microphone=(), camera=(), usb=(), bluetooth=(), payment=(), fullscreen=()')
+        
+        # ENHANCED HTTPS SECURITY: Force HTTPS and secure transport
+        self.send_header('Strict-Transport-Security', 'max-age=31536000; includeSubDomains; preload')
+        self.send_header('Upgrade-Insecure-Requests', '1')
         
         # ENHANCED CSP: More restrictive Content Security Policy
         if ctype.startswith('text/html'):
@@ -9244,7 +9292,25 @@ if __name__ == '__main__':
             try:
                 httpd = HTTPServer((h, port), Handler)
                 if crt_key:
+                    # Enhanced TLS/SSL security configuration
                     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+                    
+                    # Modern TLS security settings
+                    ctx.minimum_version = ssl.TLSVersion.TLSv1_2  # Minimum TLS 1.2
+                    ctx.maximum_version = ssl.TLSVersion.TLSv1_3  # Allow TLS 1.3 if available
+                    
+                    # Secure cipher configuration
+                    ctx.set_ciphers('ECDHE+AESGCM:ECDHE+CHACHA20:DHE+AESGCM:DHE+CHACHA20:!aNULL:!MD5:!DSS')
+                    
+                    # Enhanced security options (compatible with Python 3.12+)
+                    ctx.options |= ssl.OP_NO_SSLv2
+                    ctx.options |= ssl.OP_NO_SSLv3
+                    # Remove deprecated options that cause warnings in Python 3.12+
+                    # ctx.minimum_version already handles TLS version requirements
+                    ctx.options |= ssl.OP_SINGLE_DH_USE
+                    ctx.options |= ssl.OP_SINGLE_ECDH_USE
+                    
+                    # Load certificate chain
                     ctx.load_cert_chain(crt_key[0], crt_key[1])
                     httpd.socket = ctx.wrap_socket(httpd.socket, server_side=True)
                     scheme='https'
@@ -20533,25 +20599,33 @@ _monitor_server_resources() {
     local pid="$1"
     [ -z "$pid" ] && return 0
     
-    # Get memory usage in MB
+    # Get memory usage in MB - ensure it's always a valid integer
     local mem_mb=0
     if command -v ps >/dev/null 2>&1; then
-        mem_mb=$(ps -o rss= -p "$pid" 2>/dev/null | awk '{print int($1/1024)}' || echo 0)
+        mem_mb=$(ps -o rss= -p "$pid" 2>/dev/null | awk '{print int($1/1024)}' 2>/dev/null)
+        # Ensure mem_mb is a valid integer
+        if ! [[ "$mem_mb" =~ ^[0-9]+$ ]]; then
+            mem_mb=0
+        fi
     fi
     
-    # Get CPU usage percentage (if available)
+    # Get CPU usage percentage (if available) - ensure it's always a valid integer
     local cpu_pct=0
     if command -v ps >/dev/null 2>&1; then
-        cpu_pct=$(ps -o pcpu= -p "$pid" 2>/dev/null | awk '{print int($1)}' || echo 0)
+        cpu_pct=$(ps -o pcpu= -p "$pid" 2>/dev/null | awk '{print int($1)}' 2>/dev/null)
+        # Ensure cpu_pct is a valid integer
+        if ! [[ "$cpu_pct" =~ ^[0-9]+$ ]]; then
+            cpu_pct=0
+        fi
     fi
     
-    # Log high resource usage
-    if [ "$mem_mb" -gt $WEB_WRAPPER_MEMORY_THRESHOLD ]; then
+    # Log high resource usage - now safe to do integer comparisons
+    if [ "$mem_mb" -gt "$WEB_WRAPPER_MEMORY_THRESHOLD" ]; then
         _log_wrapper "WARNING: High memory usage detected: ${mem_mb}MB (threshold: ${WEB_WRAPPER_MEMORY_THRESHOLD}MB)"
         # Don't restart immediately, just warn
     fi
     
-    if [ "$cpu_pct" -gt $WEB_WRAPPER_CPU_THRESHOLD ]; then
+    if [ "$cpu_pct" -gt "$WEB_WRAPPER_CPU_THRESHOLD" ]; then
         _log_wrapper "WARNING: High CPU usage detected: ${cpu_pct}% (threshold: ${WEB_WRAPPER_CPU_THRESHOLD}%)"
         # Don't restart immediately, just warn  
     fi
@@ -20692,6 +20766,39 @@ _run_internal_web_wrapper() {
 start_web(){
   ns_log "Starting web server with enhanced reliability..."
   
+  # CRITICAL FIX: Add locking mechanism to prevent multiple instances
+  local lock_file="${NS_PID}/web_start.lock"
+  
+  # Check if another start_web is already running
+  if [ -f "$lock_file" ]; then
+    local lock_pid=$(cat "$lock_file" 2>/dev/null)
+    if [ -n "$lock_pid" ] && kill -0 "$lock_pid" 2>/dev/null; then
+      ns_warn "Web server startup already in progress (PID: $lock_pid). Waiting..."
+      # Wait up to 30 seconds for the other process to finish
+      local wait_count=0
+      while [ -f "$lock_file" ] && [ $wait_count -lt 30 ]; do
+        sleep 1
+        wait_count=$((wait_count + 1))
+      done
+      if [ -f "$lock_file" ]; then
+        ns_warn "Startup lock is stale, removing it"
+        rm -f "$lock_file"
+      else
+        ns_log "Previous startup completed, continuing..."
+        return 0
+      fi
+    else
+      # Stale lock file
+      rm -f "$lock_file"
+    fi
+  fi
+  
+  # Create lock file with current PID
+  echo $$ > "$lock_file"
+  
+  # Ensure lock file gets cleaned up - use the literal path instead of variable
+  trap "rm -f '${NS_PID}/web_start.lock'" EXIT
+  
   # ENHANCEMENT: Ensure all prerequisites are properly set up
   ensure_dirs
   write_default_config
@@ -20702,23 +20809,24 @@ start_web(){
   # ENHANCEMENT: Comprehensive prerequisite validation
   if ! command -v python3 >/dev/null 2>&1; then
     ns_err "Python3 is required but not found. Run: $0 --install"
+    rm -f "$lock_file"
     return 1
   fi
   
   if [ ! -f "${NS_WWW}/server.py" ]; then
     ns_warn "Server file missing, regenerating..."
-    write_server_py || { ns_err "Failed to generate server.py"; return 1; }
+    write_server_py || { ns_err "Failed to generate server.py"; rm -f "$lock_file"; return 1; }
   fi
   
   if [ ! -f "${NS_WWW}/index.html" ]; then
     ns_warn "Dashboard file missing, regenerating..."
-    write_dashboard || { ns_err "Failed to generate dashboard"; return 1; }
+    write_dashboard || { ns_err "Failed to generate dashboard"; rm -f "$lock_file"; return 1; }
   fi
   
   # ENHANCEMENT: Test Python syntax before starting
   if ! python3 -m py_compile "${NS_WWW}/server.py" 2>/dev/null; then
     ns_err "Server.py has syntax errors! Regenerating..."
-    write_server_py || { ns_err "Failed to regenerate server.py"; return 1; }
+    write_server_py || { ns_err "Failed to regenerate server.py"; rm -f "$lock_file"; return 1; }
   fi
   
   # Check if web server is already running by checking port
@@ -20732,6 +20840,7 @@ start_web(){
       local existing_pid; existing_pid=$(safe_read_pid "${NS_PID}/web.pid")
       if [ "$existing_pid" -gt 0 ] && kill -0 "$existing_pid" 2>/dev/null; then
         ns_warn "Web server already running (PID $existing_pid)"
+        rm -f "$lock_file"
         return 0
       else
         ns_warn "Port $port is in use by another process. Attempting cleanup..."
@@ -20746,8 +20855,8 @@ start_web(){
   stop_web || true
   sleep 1
   
-  # ENHANCEMENT: Try multiple startup strategies
-  local use_wrapper="${NOVASHIELD_USE_WEB_WRAPPER:-1}"
+  # ENHANCEMENT: Try multiple startup strategies  
+  local use_wrapper="${NOVASHIELD_USE_WEB_WRAPPER:-0}"  # CHANGED: Default to 0 to avoid wrapper issues initially
   
   if [ "$use_wrapper" = "1" ]; then
     ns_log "Starting web server with enhanced internal stability wrapper..."
@@ -20775,6 +20884,9 @@ start_web(){
     # Direct startup method
     _start_web_direct
   fi
+  
+  # Remove lock file on successful completion
+  rm -f "$lock_file"
 }
 
 _start_web_direct(){
@@ -20822,7 +20934,13 @@ _start_web_direct(){
   local host; host=$(yaml_get "http" "host" "127.0.0.1")
   
   ns_ok "Web server started successfully (PID: $server_pid)"
-  ns_log "🌐 Dashboard available at: http://${host}:${port}/"
+  
+  # Display correct protocol based on TLS setting
+  local scheme="http"
+  local tls_enabled; tls_enabled=$(yaml_get "security" "tls_enabled" "false")
+  [ "$tls_enabled" = "true" ] && scheme="https"
+  
+  ns_log "🌐 Dashboard available at: ${scheme}://${host}:${port}/"
   return 0
 }
 
@@ -21485,7 +21603,13 @@ start_all(){
   initialize_jarvis_system_integration
   
   ns_ok "🎯 NovaShield fully operational with complete system integration!"
-  ns_log "🌐 Dashboard: http://$(yaml_get "http" "host" "127.0.0.1"):$(yaml_get "http" "port" "8765")/"
+  
+  # Display correct protocol based on TLS setting  
+  local scheme="http"
+  local tls_enabled; tls_enabled=$(yaml_get "security" "tls_enabled" "false")
+  [ "$tls_enabled" = "true" ] && scheme="https"
+  
+  ns_log "🌐 Dashboard: ${scheme}://$(yaml_get "http" "host" "127.0.0.1"):$(yaml_get "http" "port" "8765")/"
   ns_log "🤖 JARVIS: Full automation and security integration active"
   ns_log "🛡️ Security: All monitoring and automation systems online"
 }
@@ -21893,8 +22017,34 @@ cleanup_system_resources(){
 
 add_user(){
   local user pass salt
-  read -rp "New username: " user
-  read -rsp "Password (won't echo): " pass; echo
+  
+  # Enhanced user input with validation
+  while true; do
+    read -rp "New username (3+ characters): " user
+    if [ -z "$user" ] || [ ${#user} -lt 3 ]; then
+      ns_err "Username must be at least 3 characters long. Please try again."
+      continue
+    fi
+    if [[ "$user" =~ [^a-zA-Z0-9_-] ]]; then
+      ns_err "Username can only contain letters, numbers, underscore, and dash. Please try again."
+      continue
+    fi
+    break
+  done
+  
+  while true; do
+    read -rsp "Password (6+ characters, won't echo): " pass; echo
+    if [ -z "$pass" ] || [ ${#pass} -lt 6 ]; then
+      ns_err "Password must be at least 6 characters long. Please try again."
+      continue
+    fi
+    read -rsp "Confirm password: " pass_confirm; echo
+    if [ "$pass" != "$pass_confirm" ]; then
+      ns_err "Passwords do not match. Please try again."
+      continue
+    fi
+    break
+  done
   
   # SECURITY FIX: Enhanced salt retrieval with error handling
   if [ ! -f "$NS_CONF" ]; then
@@ -21913,21 +22063,11 @@ add_user(){
     return 1
   fi
   
-  # Validate username
-  if [ -z "$user" ] || [ ${#user} -lt 3 ]; then
-    ns_err "Username must be at least 3 characters long"
-    return 1
-  fi
-  
-  # Validate password
-  if [ -z "$pass" ] || [ ${#pass} -lt 6 ]; then
-    ns_err "Password must be at least 6 characters long"
-    return 1
-  fi
-  
+  # Create user account
   local sha; sha=$(printf '%s' "${salt}:${pass}" | sha256sum | awk '{print $1}')
   if [ ! -f "$NS_SESS_DB" ]; then echo '{}' >"$NS_SESS_DB"; fi
-  python3 - "$NS_SESS_DB" "$user" "$sha" <<'PY'
+  
+  if python3 - "$NS_SESS_DB" "$user" "$sha" <<'PY'
 import json,sys
 p,u,s=sys.argv[1],sys.argv[2],sys.argv[3]
 try: j=json.load(open(p))
@@ -21938,7 +22078,14 @@ j['_userdb']=ud
 open(p,'w').write(json.dumps(j))
 print('User stored')
 PY
-  ns_ok "User '$user' added. Enable/confirm auth in config.yaml (security.auth_enabled: true)"
+  then
+    ns_ok "✓ User '$user' created successfully!"
+    ns_log "You can now log in to the web dashboard with these credentials."
+    return 0
+  else
+    ns_err "Failed to create user account. Please check system permissions."
+    return 1
+  fi
 }
 
 enable_2fa(){
@@ -21982,8 +22129,35 @@ PY
   echo
   ns_warn "SECURITY REQUIREMENT: No web users found but auth_enabled is true."
   ns_warn "This personal security dashboard requires user authentication for protection."
+  echo
+  ns_log "📋 INTERACTIVE SETUP REQUIRED:"
+  ns_log "   This installation requires creating your first admin user for security."
+  ns_log "   Please provide your desired username and password when prompted."
+  ns_log "   This is a one-time setup to secure your NovaShield dashboard."
+  echo
   echo "Creating the first user for security..."
-  add_user
+  
+  # Add retry logic for user creation
+  local retry_count=0
+  local max_retries=3
+  while [ $retry_count -lt $max_retries ]; do
+    if add_user; then
+      break
+    else
+      retry_count=$((retry_count + 1))
+      if [ $retry_count -lt $max_retries ]; then
+        echo
+        ns_warn "User creation failed. Please try again. (Attempt $((retry_count + 1)) of $max_retries)"
+        echo
+      else
+        echo
+        ns_err "User creation failed after $max_retries attempts."
+        ns_err "Please run './novashield.sh --add-user' after installation to create your first user."
+        return 1
+      fi
+    fi
+  done
+  
   echo
   read -r -p "Enable 2FA for this user now? [y/N]: " yn
   case "$yn" in [Yy]*) enable_2fa ;; esac
@@ -22939,7 +23113,7 @@ Examples:
   $0 --encrypt /important/data    # Encrypt directory
   $0 --backup                     # Create backup
 
-The web dashboard will be available at http://127.0.0.1:8765 after starting.
+The web dashboard will be available at https://127.0.0.1:8765 after starting.
 For Android/Termux users: All features are optimized for mobile terminal use.
 USG
 }
@@ -22988,7 +23162,7 @@ menu(){
       10) enable_2fa;;
       11) reset_auth;;
       12) python3 "${NS_BIN}/notify.py" "WARN" "NovaShield Test" "This is a test notification";;
-      13) h=$(awk -F': ' '/host:/ {print $2}' "$NS_CONF" | head -n1 | tr -d '" '); prt=$(awk -F': ' '/port:/ {print $2}' "$NS_CONF" | head -n1 | tr -d '" '); [ -z "$h" ] && h="127.0.0.1"; [ -z "$prt" ] && prt=8765; echo "Open: http://${h}:${prt}";;
+      13) h=$(awk -F': ' '/host:/ {print $2}' "$NS_CONF" | head -n1 | tr -d '" '); prt=$(awk -F': ' '/port:/ {print $2}' "$NS_CONF" | head -n1 | tr -d '" '); [ -z "$h" ] && h="127.0.0.1"; [ -z "$prt" ] && prt=8765; echo "Open: https://${h}:${prt}";;
       14) break;;
       *) echo "?";;
     esac
