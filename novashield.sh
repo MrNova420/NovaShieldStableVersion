@@ -3512,7 +3512,9 @@ enhanced_performance_optimization() {
       
       # Memory optimization
       if [ -f /proc/sys/vm/drop_caches ] && [ -w /proc/sys/vm/drop_caches ]; then
-        sync && echo 1 > /proc/sys/vm/drop_caches 2>/dev/null || true
+        if sync; then
+          echo 1 > /proc/sys/vm/drop_caches 2>/dev/null || true
+        fi
       fi
       
       # Log rotation
@@ -4831,7 +4833,9 @@ stop_monitors(){
       any=1
     fi
   done
-  [ "$any" -eq 1 ] && ns_ok "Monitors stopped" || true
+  if [ "$any" -eq 1 ]; then
+    ns_ok "Monitors stopped"
+  fi
 }
 
 # ------------------------------ PY WEB SERVER --------------------------------
@@ -21971,7 +21975,8 @@ start_security_automation_engine(){
     
     # Check for security events and auto-respond
     if [ -f "${NS_LOGS}/security.log" ]; then
-      local recent_events=$(tail -10 "${NS_LOGS}/security.log" | grep -c "SECURITY\|ALERT" 2>/dev/null || echo "0")
+      local recent_events
+      recent_events=$(tail -10 "${NS_LOGS}/security.log" | grep -c "SECURITY\|ALERT" 2>/dev/null || echo "0")
       if [ "$recent_events" -gt 5 ]; then
         # Auto-trigger enhanced security mode
         enhanced_security_automation
@@ -23138,7 +23143,8 @@ centralized_system_sync() {
 SYNC_CONFIG
 
   # Update sync timestamp
-  local current_time=$(date -u +"%Y-%m-%dT%H:%M:%S.%3NZ")
+  local current_time
+  current_time=$(date -u +"%Y-%m-%dT%H:%M:%S.%3NZ")
   sed -i "s/\"timestamp\": \"\"/\"timestamp\": \"$current_time\"/" "$sync_config"
   sed -i "s/\"last_sync\": \"\"/\"last_sync\": \"$current_time\"/" "$sync_config"
   
