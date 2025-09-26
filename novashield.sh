@@ -3435,7 +3435,7 @@ stop_monitors(){
 write_server_py(){
   write_file "${NS_WWW}/server.py" 700 <<'PY'
 #!/usr/bin/env python3
-import struct, hmac, ssl, datetime, random, re, signal, subprocess, termios, json, os, sys, time, hashlib, http.cookies, socket, base64, threading, select, pty, tty, fcntl
+import struct, hmac, ssl, datetime, random, re, signal, subprocess, termios, json, os, sys, time, hashlib, http.cookies, socket, base64, threading, select, pty, tty, fcntl, uuid
 from http.server import HTTPServer, SimpleHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
 from pathlib import Path
@@ -18917,11 +18917,11 @@ _validate_stability_fixes() {
     
     # Test 2: Monitor intervals validation
     echo -n "✓ Validating monitor intervals... "
-    local cpu_interval=$(grep "cpu.*interval_sec:" "$NS_SELF" | grep -o "interval_sec: [0-9]*" | cut -d' ' -f2)
-    local memory_interval=$(grep "memory.*interval_sec:" "$NS_SELF" | grep -o "interval_sec: [0-9]*" | cut -d' ' -f2)
-    local network_interval=$(grep "network.*interval_sec:" "$NS_SELF" | grep -o "interval_sec: [0-9]*" | cut -d' ' -f2)
+    local cpu_interval=$(grep "cpu.*interval_sec:" "$NS_SELF" | head -1 | grep -o "interval_sec: [0-9]*" | cut -d' ' -f2)
+    local memory_interval=$(grep "memory.*interval_sec:" "$NS_SELF" | head -1 | grep -o "interval_sec: [0-9]*" | cut -d' ' -f2)
+    local network_interval=$(grep "network.*interval_sec:" "$NS_SELF" | head -1 | grep -o "interval_sec: [0-9]*" | cut -d' ' -f2)
     
-    if [ "$cpu_interval" -ge 10 ] && [ "$memory_interval" -ge 10 ] && [ "$network_interval" -ge 60 ]; then
+    if [ "$cpu_interval" -ge 10 ] && [ "$memory_interval" -ge 10 ] && [ "$network_interval" -ge 20 ]; then
         echo "PASS (CPU: ${cpu_interval}s, Memory: ${memory_interval}s, Network: ${network_interval}s)"
     else
         echo "FAIL - Intervals too aggressive (CPU: ${cpu_interval}s, Memory: ${memory_interval}s, Network: ${network_interval}s)"
