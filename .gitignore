@@ -15,6 +15,11 @@ keys/
 www/
 .tmp/
 
+# Legacy files (modernization cleanup)
+SVD.py.legacy
+dashboard.py
+cookies.txt
+
 # IDE files  
 .vscode/
 .idea/
