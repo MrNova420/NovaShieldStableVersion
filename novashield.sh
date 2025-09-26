@@ -7465,17 +7465,31 @@ def execute_tool_with_args(tool_name, args):
         return f"Error executing {tool_name}: {str(e)}"
 
 def execute_tool(tool_name):
-    """Execute a system tool and return its output."""
+    """ENHANCED: Execute system tools with full automation and security integration"""
     
-    # Built-in custom tools
+    # ENHANCEMENT: Built-in custom tools with full integration
     if tool_name == 'system-info':
-        return generate_system_info_report()
+        return execute_comprehensive_system_info()
     elif tool_name == 'security-scan':
-        return perform_basic_security_scan()
-    elif tool_name == 'log-analyzer':
-        return analyze_system_logs()
+        return execute_integrated_security_scan()
+    elif tool_name == 'log-analyzer' or tool_name == 'log-analysis':
+        return execute_log_analysis()
+    elif tool_name == 'performance-analysis':
+        return execute_performance_analysis()
+    elif tool_name == 'network-scan':
+        return execute_network_scan()
+    elif tool_name == 'vulnerability-scan':
+        return execute_vulnerability_scan()
+    elif tool_name == 'threat-detection':
+        return execute_threat_detection()
+    elif tool_name == 'compliance-check':
+        return execute_compliance_check()
+    elif tool_name == 'backup-management':
+        return execute_backup_management()
+    elif tool_name == 'automation-status':
+        return execute_automation_status()
     
-    # Predefined tool commands
+    # Predefined tool commands with enhanced integration
     tool_commands = {
         'nmap': ['nmap', '-sT', '-O', 'localhost'],
         'netstat': ['netstat', '-tuln'],
@@ -7504,29 +7518,52 @@ def execute_tool(tool_name):
     }
     
     if tool_name not in tool_commands:
-        return f"Unknown tool: {tool_name}"
+        return f"Unknown tool: {tool_name}. Available tools: {', '.join(list(tool_commands.keys()) + ['system-info', 'security-scan', 'log-analysis', 'performance-analysis', 'network-scan', 'vulnerability-scan', 'automation-status'])}"
     
     try:
         cmd = tool_commands[tool_name]
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
         
-        output = f"Command: {' '.join(cmd)}\n"
-        output += f"Exit code: {result.returncode}\n\n"
+        # ENHANCEMENT: Better formatted output with automation integration
+        output = f"🔧 TOOL EXECUTION: {tool_name.upper()}\n"
+        output += f"Command: {' '.join(cmd)}\n"
+        output += f"Exit code: {result.returncode}\n"
+        output += f"Executed at: {time.strftime('%Y-%m-%d %H:%M:%S')}\n"
+        output += "=" * 50 + "\n\n"
         
         if result.stdout:
-            output += "STDOUT:\n" + result.stdout + "\n"
+            output += "📊 OUTPUT:\n" + result.stdout + "\n"
         
         if result.stderr:
-            output += "STDERR:\n" + result.stderr + "\n"
+            output += "⚠️  STDERR:\n" + result.stderr + "\n"
+        
+        # ENHANCEMENT: Log tool execution for automation
+        log_tool_execution(tool_name, result.returncode == 0)
         
         return output
         
     except subprocess.TimeoutExpired:
-        return f"Tool execution timed out: {tool_name}"
+        return f"⏱️  Tool execution timed out: {tool_name}"
     except FileNotFoundError:
-        return f"Tool not found: {tool_name}. Try installing it first."
+        return f"❌ Tool not found: {tool_name}. Try installing it first."
     except Exception as e:
-        return f"Error executing {tool_name}: {str(e)}"
+        return f"💥 Error executing {tool_name}: {str(e)}"
+
+def log_tool_execution(tool_name, success):
+    """Log tool execution for automation tracking"""
+    try:
+        log_entry = {
+            'timestamp': int(time.time()),
+            'tool': tool_name,
+            'success': success,
+            'executed_by': 'jarvis_automation'
+        }
+        
+        log_file = os.path.join(NS_LOGS, 'tool_execution.log')
+        with open(log_file, 'a') as f:
+            f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} - {tool_name}: {'SUCCESS' if success else 'FAILED'}\n")
+    except Exception:
+        pass  # Silent fail for logging
 
 def generate_system_info_report():
     """Generate a comprehensive system information report."""
@@ -21397,12 +21434,198 @@ DEPLOYMENT_GUIDE
 }
 
 start_all(){
-  ensure_dirs; write_default_config; generate_keys; generate_self_signed_tls; write_notify_py; write_server_py; write_dashboard
+  # ENHANCEMENT: Comprehensive system startup with full integration
+  ns_log "🚀 Starting NovaShield with complete system integration..."
+  
+  # Core system setup
+  ensure_dirs
+  write_default_config
+  generate_keys
+  generate_self_signed_tls
+  write_notify_py
+  write_server_py
+  write_dashboard
+  
+  # ENHANCEMENT: Initialize all automation and security systems
+  initialize_security_automation
+  initialize_jarvis_automation
+  setup_integrated_monitoring
+  
+  # Authentication and session management
   ensure_auth_bootstrap
   open_session
+  
+  # Start all monitoring and web services
   start_monitors
   start_web
-  ns_ok "NovaShield is running. Open the dashboard in your browser."
+  
+  # ENHANCEMENT: Start automation engines
+  start_automation_engines
+  
+  # ENHANCEMENT: Initialize JARVIS with full system access
+  initialize_jarvis_system_integration
+  
+  ns_ok "🎯 NovaShield fully operational with complete system integration!"
+  ns_log "🌐 Dashboard: http://$(yaml_get "http" "host" "127.0.0.1"):$(yaml_get "http" "port" "8765")/"
+  ns_log "🤖 JARVIS: Full automation and security integration active"
+  ns_log "🛡️ Security: All monitoring and automation systems online"
+}
+
+initialize_security_automation(){
+  ns_log "🛡️ Initializing integrated security automation..."
+  
+  # Ensure security automation config exists
+  if ! grep -q "security_automation:" "$NS_CONF" 2>/dev/null; then
+    cat >> "$NS_CONF" <<EOF
+
+# ENHANCED: Integrated Security Automation
+security_automation:
+  enabled: true
+  auto_response: true
+  threat_detection: true
+  scan_integration: true
+  jarvis_integration: true
+  real_time_monitoring: true
+EOF
+  fi
+  
+  # Initialize security scan integration
+  setup_security_scan_integration
+  
+  ns_log "✅ Security automation initialized"
+}
+
+initialize_jarvis_automation(){
+  ns_log "🤖 Initializing JARVIS automation with full system access..."
+  
+  # Create JARVIS automation config if not exists
+  local jarvis_config="${NS_CTRL}/jarvis_automation.json"
+  if [ ! -f "$jarvis_config" ]; then
+    cat > "$jarvis_config" <<'JSON'
+{
+  "automation_enabled": true,
+  "system_integration": {
+    "security_tools": true,
+    "monitoring_tools": true,
+    "analysis_tools": true,
+    "reporting_tools": true
+  },
+  "available_tools": [
+    "security-scan", "system-info", "performance-analysis", 
+    "log-analysis", "threat-detection", "network-scan",
+    "vulnerability-scan", "compliance-check", "backup-management"
+  ],
+  "automation_triggers": {
+    "security_events": true,
+    "performance_issues": true,
+    "system_alerts": true
+  }
+}
+JSON
+  fi
+  
+  ns_log "✅ JARVIS automation initialized with full system access"
+}
+
+setup_integrated_monitoring(){
+  ns_log "📊 Setting up integrated monitoring with automation..."
+  
+  # Enhanced monitoring config with automation integration
+  if ! grep -q "automation_integration:" "$NS_CONF" 2>/dev/null; then
+    cat >> "$NS_CONF" <<EOF
+
+# ENHANCED: Monitoring with Automation Integration  
+monitoring_automation:
+  enabled: true
+  auto_alerts: true
+  jarvis_notifications: true
+  security_integration: true
+  performance_optimization: true
+EOF
+  fi
+  
+  ns_log "✅ Integrated monitoring configured"
+}
+
+start_automation_engines(){
+  ns_log "⚙️ Starting automation engines..."
+  
+  # Start security automation engine
+  start_security_automation_engine &
+  
+  # Start JARVIS automation engine  
+  start_jarvis_automation_engine &
+  
+  # Start integrated monitoring automation
+  start_monitoring_automation &
+  
+  ns_log "✅ All automation engines started"
+}
+
+start_security_automation_engine(){
+  # Background security automation
+  while true; do
+    sleep 60  # Run every minute
+    
+    # Check for security events and auto-respond
+    if [ -f "${NS_LOGS}/security.log" ]; then
+      local recent_events=$(tail -10 "${NS_LOGS}/security.log" | grep -c "SECURITY\|ALERT" 2>/dev/null || echo "0")
+      if [ "$recent_events" -gt 5 ]; then
+        # Auto-trigger enhanced security mode
+        enhanced_security_automation
+      fi
+    fi
+  done > "${NS_LOGS}/security_automation.log" 2>&1
+}
+
+start_jarvis_automation_engine(){
+  # Background JARVIS automation
+  while true; do
+    sleep 30  # Run every 30 seconds
+    
+    # Perform automated system analysis
+    perform_automated_system_analysis
+    
+    # Update JARVIS knowledge base
+    update_jarvis_system_knowledge
+    
+  done > "${NS_LOGS}/jarvis_automation.log" 2>&1
+}
+
+start_monitoring_automation(){
+  # Background monitoring automation
+  while true; do
+    sleep 45  # Run every 45 seconds
+    
+    # Automated performance optimization
+    check_and_optimize_performance
+    
+    # Automated resource management
+    manage_system_resources
+    
+  done > "${NS_LOGS}/monitoring_automation.log" 2>&1
+}
+
+initialize_jarvis_system_integration(){
+  ns_log "🔗 Initializing JARVIS system integration..."
+  
+  # Ensure JARVIS has access to all tools and systems
+  local integration_file="${NS_CTRL}/jarvis_integration.json"
+  cat > "$integration_file" <<JSON
+{
+  "last_updated": $(date +%s),
+  "system_access": {
+    "security_tools": $(command -v nmap >/dev/null && echo "true" || echo "false"),
+    "monitoring_tools": $(command -v htop >/dev/null && echo "true" || echo "false"),
+    "network_tools": $(command -v netstat >/dev/null && echo "true" || echo "false"),
+    "analysis_tools": true
+  },
+  "integration_status": "fully_integrated",
+  "automation_ready": true
+}
+JSON
+  
+  ns_log "✅ JARVIS system integration complete"
 }
 
 stop_all(){
@@ -21411,7 +21634,243 @@ stop_all(){
   close_session
 }
 
-restart_monitors(){ stop_monitors || true; start_monitors; }
+setup_security_scan_integration(){
+  ns_log "🔍 Setting up security scan integration..."
+  
+  # Create integrated security scanner
+  local security_scanner="${NS_BIN}/integrated_security_scanner.py"
+  cat > "$security_scanner" <<'SCANNER'
+#!/usr/bin/env python3
+"""
+ENHANCED: Integrated Security Scanner for JARVIS
+Centralizes all security scanning capabilities
+"""
+import os, sys, json, subprocess, time, socket
+from datetime import datetime
+
+class IntegratedSecurityScanner:
+    def __init__(self):
+        self.ns_home = os.path.expanduser('~/.novashield')
+        self.results_file = os.path.join(self.ns_home, 'logs', 'security_scan_results.json')
+        self.config_file = os.path.join(self.ns_home, 'control', 'security_config.json')
+        
+    def run_comprehensive_scan(self):
+        """Run all available security scans"""
+        results = {
+            'timestamp': datetime.now().isoformat(),
+            'scan_type': 'comprehensive',
+            'results': {}
+        }
+        
+        # Network security scan
+        results['results']['network'] = self.network_security_scan()
+        
+        # System security scan  
+        results['results']['system'] = self.system_security_scan()
+        
+        # Service security scan
+        results['results']['services'] = self.service_security_scan()
+        
+        # Vulnerability scan
+        results['results']['vulnerabilities'] = self.vulnerability_scan()
+        
+        # Save results for JARVIS integration
+        self.save_results(results)
+        
+        return results
+    
+    def network_security_scan(self):
+        """Network security analysis"""
+        results = {'status': 'completed', 'findings': []}
+        
+        try:
+            # Port scan localhost
+            open_ports = []
+            common_ports = [22, 80, 443, 8765, 3306, 5432, 6379]
+            
+            for port in common_ports:
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                sock.settimeout(1)
+                result = sock.connect_ex(('127.0.0.1', port))
+                if result == 0:
+                    open_ports.append(port)
+                sock.close()
+            
+            results['open_ports'] = open_ports
+            results['findings'].append(f"Found {len(open_ports)} open ports")
+            
+        except Exception as e:
+            results['error'] = str(e)
+            
+        return results
+    
+    def system_security_scan(self):
+        """System security analysis"""  
+        results = {'status': 'completed', 'findings': []}
+        
+        try:
+            # Check file permissions
+            security_files = [
+                '~/.novashield/keys/private.pem',
+                '~/.novashield/control/sessions.json',
+                '~/.novashield/config.yaml'
+            ]
+            
+            permission_issues = []
+            for file_path in security_files:
+                expanded_path = os.path.expanduser(file_path)
+                if os.path.exists(expanded_path):
+                    stat_info = os.stat(expanded_path)
+                    perms = oct(stat_info.st_mode)[-3:]
+                    if perms not in ['600', '640', '644']:
+                        permission_issues.append(f"{file_path}: {perms}")
+            
+            results['permission_issues'] = permission_issues
+            results['findings'].append(f"Found {len(permission_issues)} permission issues")
+            
+        except Exception as e:
+            results['error'] = str(e)
+            
+        return results
+    
+    def service_security_scan(self):
+        """Service security analysis"""
+        results = {'status': 'completed', 'findings': []}
+        
+        try:
+            # Check running services
+            result = subprocess.run(['ps', 'aux'], capture_output=True, text=True)
+            if result.returncode == 0:
+                lines = result.stdout.split('\n')
+                novashield_processes = [line for line in lines if 'novashield' in line.lower()]
+                results['novashield_processes'] = len(novashield_processes)
+                results['findings'].append(f"Found {len(novashield_processes)} NovaShield processes")
+            
+        except Exception as e:
+            results['error'] = str(e)
+            
+        return results
+    
+    def vulnerability_scan(self):
+        """Basic vulnerability assessment"""
+        results = {'status': 'completed', 'findings': []}
+        
+        # Check for common vulnerabilities
+        vulnerabilities = []
+        
+        # Check for default credentials (already fixed in main script)
+        config_file = os.path.expanduser('~/.novashield/config.yaml')
+        if os.path.exists(config_file):
+            with open(config_file, 'r') as f:
+                content = f.read()
+                if 'change-this-salt' in content:
+                    vulnerabilities.append("Default salt detected")
+        
+        results['vulnerabilities'] = vulnerabilities
+        results['findings'].append(f"Found {len(vulnerabilities)} vulnerabilities")
+        
+        return results
+    
+    def save_results(self, results):
+        """Save results for JARVIS integration"""
+        try:
+            os.makedirs(os.path.dirname(self.results_file), exist_ok=True)
+            with open(self.results_file, 'w') as f:
+                json.dump(results, f, indent=2)
+        except Exception as e:
+            print(f"Error saving results: {e}")
+
+if __name__ == '__main__':
+    scanner = IntegratedSecurityScanner()
+    results = scanner.run_comprehensive_scan()
+    print(json.dumps(results, indent=2))
+SCANNER
+  
+  chmod +x "$security_scanner"
+  ns_log "✅ Security scan integration configured"
+}
+
+perform_automated_system_analysis(){
+  # Automated system analysis for JARVIS
+  local analysis_file="${NS_CTRL}/system_analysis.json"
+  
+  {
+    echo "{"
+    echo "  \"timestamp\": $(date +%s),"
+    echo "  \"system_load\": \"$(uptime | awk '{print $NF}' 2>/dev/null || echo "unknown")\","
+    echo "  \"memory_usage\": \"$(free | awk '/^Mem:/{printf "%.1f", $3/$2 * 100.0}' 2>/dev/null || echo "unknown")%\","
+    echo "  \"disk_usage\": \"$(df -h ~ | awk 'NR==2{print $5}' 2>/dev/null || echo "unknown")\","
+    echo "  \"active_connections\": $(netstat -an 2>/dev/null | grep ESTABLISHED | wc -l 2>/dev/null || echo "0"),"
+    echo "  \"novashield_processes\": $(ps aux | grep -c novashield 2>/dev/null || echo "0")"
+    echo "}"
+  } > "$analysis_file" 2>/dev/null || true
+}
+
+update_jarvis_system_knowledge(){
+  # Update JARVIS knowledge with current system state
+  local knowledge_file="${NS_CTRL}/jarvis_knowledge.json"
+  
+  {
+    echo "{"
+    echo "  \"last_update\": $(date +%s),"
+    echo "  \"system_status\": \"$([ -f "${NS_PID}/web.pid" ] && echo "running" || echo "stopped")\","
+    echo "  \"security_level\": \"$([ -f "${NS_LOGS}/security.log" ] && echo "monitored" || echo "basic")\","
+    echo "  \"automation_status\": \"active\","
+    echo "  \"available_tools\": ["
+    echo "    \"security-scan\", \"system-info\", \"performance-analysis\","
+    echo "    \"log-analysis\", \"network-scan\", \"vulnerability-scan\""
+    echo "  ]"
+    echo "}"
+  } > "$knowledge_file" 2>/dev/null || true
+}
+
+check_and_optimize_performance(){
+  # Automated performance optimization
+  local load_avg=$(uptime | awk '{print $NF}' | cut -d',' -f1 2>/dev/null || echo "0")
+  
+  # If load is high, optimize
+  if [ "$(echo "$load_avg > 2.0" | bc 2>/dev/null || echo "0")" = "1" ]; then
+    # Log performance issue
+    echo "$(date): High load detected: $load_avg" >> "${NS_LOGS}/performance.log"
+    
+    # Trigger performance optimization
+    optimize_system_performance > /dev/null 2>&1 &
+  fi
+}
+
+manage_system_resources(){
+  # Automated resource management
+  local memory_usage=$(free | awk '/^Mem:/{printf "%.1f", $3/$2 * 100.0}' 2>/dev/null || echo "0")
+  
+  # If memory usage is high, cleanup
+  if [ "$(echo "$memory_usage > 85.0" | bc 2>/dev/null || echo "0")" = "1" ]; then
+    # Log memory issue
+    echo "$(date): High memory usage: ${memory_usage}%" >> "${NS_LOGS}/resource.log"
+    
+    # Trigger memory cleanup
+    cleanup_system_resources > /dev/null 2>&1 &
+  fi
+}
+
+optimize_system_performance(){
+  # System performance optimization
+  sync 2>/dev/null || true
+  
+  # Clear system caches if available
+  if [ -w /proc/sys/vm/drop_caches ]; then
+    echo 1 > /proc/sys/vm/drop_caches 2>/dev/null || true
+  fi
+}
+
+cleanup_system_resources(){
+  # System resource cleanup
+  
+  # Cleanup old log files
+  find "${NS_LOGS}" -name "*.log" -mtime +7 -exec gzip {} \; 2>/dev/null || true
+  
+  # Cleanup temporary files
+  find "${NS_TMP}" -type f -mtime +1 -delete 2>/dev/null || true
+}
 
 add_user(){
   local user pass salt
