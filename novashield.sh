@@ -20897,7 +20897,8 @@ _run_internal_web_wrapper() {
         fi
         
         _log_wrapper "Starting web server attempt #$((restart_count + 1))"
-        local start_time=$(_current_time)
+        local start_time
+        start_time=$(_current_time)
         
         # Start the server
         cd "$NS_WWW" || {
@@ -20916,7 +20917,8 @@ _run_internal_web_wrapper() {
         
         # Monitor the server process
         while true; do
-            local health_status=$(_check_server_health "$server_pid" "$start_time")
+            local health_status
+            health_status=$(_check_server_health "$server_pid" "$start_time")
             case $health_status in
                 0)  # Server is healthy, continue monitoring
                     sleep 10  # Check every 10 seconds
@@ -20943,7 +20945,8 @@ _run_internal_web_wrapper() {
         # Remove PID file
         rm -f "${NS_PID}/web.pid" 2>/dev/null || true
         
-        local end_time=$(_current_time)
+        local end_time
+        end_time=$(_current_time)
         local uptime=$((end_time - start_time))
         
         _log_wrapper "Web server exited with code $exit_code after ${uptime}s uptime"
@@ -20994,7 +20997,8 @@ start_web(){
   
   # Check if another start_web is already running
   if [ -f "$lock_file" ]; then
-    local lock_pid=$(cat "$lock_file" 2>/dev/null)
+    local lock_pid
+    lock_pid=$(cat "$lock_file" 2>/dev/null)
     if [ -n "$lock_pid" ] && kill -0 "$lock_pid" 2>/dev/null; then
       ns_warn "Web server startup already in progress (PID: $lock_pid). Waiting..."
       # Wait up to 30 seconds for the other process to finish
@@ -22224,7 +22228,8 @@ update_jarvis_system_knowledge(){
 
 check_and_optimize_performance(){
   # Automated performance optimization
-  local load_avg=$(uptime | awk '{print $NF}' | cut -d',' -f1 2>/dev/null || echo "0")
+  local load_avg
+  load_avg=$(uptime | awk '{print $NF}' | cut -d',' -f1 2>/dev/null || echo "0")
   
   # If load is high, optimize
   if [ "$(echo "$load_avg > 2.0" | bc 2>/dev/null || echo "0")" = "1" ]; then
@@ -22238,7 +22243,8 @@ check_and_optimize_performance(){
 
 manage_system_resources(){
   # Automated resource management
-  local memory_usage=$(free | awk '/^Mem:/{printf "%.1f", $3/$2 * 100.0}' 2>/dev/null || echo "0")
+  local memory_usage
+  memory_usage=$(free | awk '/^Mem:/{printf "%.1f", $3/$2 * 100.0}' 2>/dev/null || echo "0")
   
   # If memory usage is high, cleanup
   if [ "$(echo "$memory_usage > 85.0" | bc 2>/dev/null || echo "0")" = "1" ]; then
