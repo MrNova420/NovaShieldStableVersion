@@ -20103,9 +20103,10 @@ PY
 )
   if [ "$have_user" = "yes" ]; then return 0; fi
   
-  # Handle non-interactive mode
-  if [ "${NS_NON_INTERACTIVE:-}" = "1" ]; then
-    ns_warn "Non-interactive mode: Skipping user creation. You can add users later with --add-user"
+  # Handle non-interactive mode and automated startup scenarios
+  if [ "${NS_NON_INTERACTIVE:-}" = "1" ] || [ ! -t 0 ] || [ "${NOVASHIELD_AUTO_START:-}" = "1" ]; then
+    ns_warn "Non-interactive mode or automated startup: Skipping user creation. You can add users later with --add-user"
+    ns_warn "Note: Authentication is enabled but no users exist. Web access will be blocked until users are added."
     return 0
   fi
   
@@ -20276,7 +20277,12 @@ case "${1:-}" in
     else
       install_all
     fi;;
-  --start) start_all;;
+  --start) 
+    if [ "${2:-}" = "--no-prompts" ] || [ "${2:-}" = "--non-interactive" ]; then
+      NS_NON_INTERACTIVE=1 start_all
+    else
+      start_all
+    fi;;
   --stop) stop_all;;
   --restart-monitors) restart_monitors;;
   --validate) _validate_stability_fixes; exit $?;;
