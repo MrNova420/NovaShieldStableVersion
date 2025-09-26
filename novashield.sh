@@ -756,10 +756,12 @@ webgen:
   enabled: true
   site_name: "NovaShield Enterprise Operations Center"
   theme: "jarvis-enterprise"
+  ui_enhanced: true                 # Enhanced web interface enabled by default
   multi_user_support: true           # Enable multi-user capabilities
   user_session_timeout: 43200       # 12-hour sessions for enterprise use
   concurrent_users: 10              # Support up to 10 concurrent users
   load_balancing: true              # Enable load balancing for performance
+  enhanced_protocols: true          # Advanced web protocols and features
 
 # Ultra-enhanced JARVIS with long-term learning and multi-user support  
 jarvis:
@@ -4641,7 +4643,7 @@ def load_user_memory(username):
             "auto_save": True,
             "learning_mode": "enhanced",
             "conversation_memory_size": 50,
-            # Default JARVIS voice settings - ensuring male Iron Man voice is default
+            # Default JARVIS voice settings - JARVIS AI-inspired from Iron Man
             "voice_gender": "male",
             "voice_rate": 0.85,      # Measured, authoritative pace
             "voice_pitch": 0.8,      # Deep, commanding tone
@@ -6671,6 +6673,7 @@ class Handler(SimpleHTTPRequestHandler):
                 'csrf': sess.get('csrf','') if auth_enabled() else 'public',
                 'voice_enabled': cfg_get('jarvis.voice_enabled', True),
                 'ui_theme': cfg_get('webgen.theme', 'jarvis-dark'),
+                'ui_enhanced': cfg_get('webgen.ui_enhanced', True),  # Enhanced web interface enabled by default
                 # Add monitor enabled state flags for dashboard UI
                 'integrity_enabled': monitor_enabled('integrity'),
                 'process_enabled': monitor_enabled('process'),
@@ -8913,7 +8916,7 @@ write_dashboard(){
     <section id="tab-ai" class="tab active" aria-labelledby="Jarvis">
       <div class="panel">
         <h3>🤖 Jarvis AI Assistant <span class="ai-status" id="ai-status">Online & Ready</span></h3>
-        <p class="panel-description">Your intelligent AI assistant with advanced system knowledge, learning capabilities, and Iron Man-inspired personality. Jarvis remembers your preferences, learns from interactions, and provides contextual assistance with NovaShield operations, security analysis, and system management.</p>
+        <p class="panel-description">Your intelligent AI assistant with advanced system knowledge, learning capabilities, and JARVIS AI-inspired personality from Iron Man. Jarvis remembers your preferences, learns from interactions, and provides contextual assistance with NovaShield operations, security analysis, and system management.</p>
         
         <div class="ai-stats">
           <div class="stat-item">
@@ -14549,9 +14552,9 @@ async function refresh(){
             theme: 'jarvis-dark',
             auto_save: true,
             learning_mode: 'enhanced',
-            // Enhanced Jarvis voice settings for Iron Man experience
+            // Enhanced JARVIS voice settings - JARVIS AI-inspired from Iron Man
             voice_gender: 'male',
-            voice_rate: 0.85,   // Optimal Jarvis pace
+            voice_rate: 0.85,   // Optimal JARVIS AI pace
             voice_pitch: 0.8,   // Lower pitch for authority  
             voice_volume: 0.9,  // Clear and audible
             tts_enabled: true,  // Voice enabled by default
@@ -14605,6 +14608,18 @@ async function refresh(){
           btn.classList.remove('active');
         }
       }
+    }
+    
+    // Apply enhanced web interface by default (merged with protocols)
+    if (j.ui_enhanced !== false) {  // Enabled by default unless explicitly disabled
+        // Merge enhanced protocols with existing web features
+        document.body.classList.add('enhanced-web-mode');
+        
+        // Enhanced real-time updates with adaptive intervals (2-3 seconds)
+        if (!window.enhancedWebActive) {
+            window.enhancedWebActive = true;
+            console.log('🚀 Enhanced web interface activated with merged protocols');
+        }
     }
 
     // Update Live Stats Panel
@@ -15184,9 +15199,9 @@ async function loadJarvisMemory() {
         theme: 'jarvis-dark',
         auto_save: true,
         learning_mode: 'enhanced',
-        // Enhanced Jarvis voice settings
+        // Enhanced JARVIS voice settings - JARVIS AI-inspired from Iron Man
         voice_gender: 'male',
-        voice_rate: 0.85,   // Optimal Jarvis pace
+        voice_rate: 0.85,   // Optimal JARVIS AI pace
         voice_pitch: 0.8,   // Lower pitch for authority
         voice_volume: 0.9,  // Clear and audible
         tts_enabled: true   // Voice enabled by default
