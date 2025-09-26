@@ -9302,11 +9302,11 @@ if __name__ == '__main__':
                     # Secure cipher configuration
                     ctx.set_ciphers('ECDHE+AESGCM:ECDHE+CHACHA20:DHE+AESGCM:DHE+CHACHA20:!aNULL:!MD5:!DSS')
                     
-                    # Enhanced security options
+                    # Enhanced security options (compatible with Python 3.12+)
                     ctx.options |= ssl.OP_NO_SSLv2
                     ctx.options |= ssl.OP_NO_SSLv3
-                    ctx.options |= ssl.OP_NO_TLSv1
-                    ctx.options |= ssl.OP_NO_TLSv1_1
+                    # Remove deprecated options that cause warnings in Python 3.12+
+                    # ctx.minimum_version already handles TLS version requirements
                     ctx.options |= ssl.OP_SINGLE_DH_USE
                     ctx.options |= ssl.OP_SINGLE_ECDH_USE
                     
