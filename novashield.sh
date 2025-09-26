@@ -3734,7 +3734,8 @@ enhanced_intelligence_scanner() {
     return 1
   fi
   
-  local scan_id=$(date +%s)_$$
+  local scan_id
+  scan_id=$(date +%s)_$$
   local scan_dir="${NS_LOGS}/intelligence_scans"
   mkdir -p "$scan_dir"
   
@@ -3823,9 +3824,11 @@ _scan_email_intelligence() {
     ns_log "Scanning email with source: $source"
     case "$source" in
       "mx_lookup")
-        local domain=$(echo "$email" | cut -d'@' -f2)
+        local domain
+        domain=$(echo "$email" | cut -d'@' -f2)
         if command -v dig >/dev/null 2>&1; then
-          local mx_records=$(dig +short MX "$domain" 2>/dev/null | head -5)
+          local mx_records
+          mx_records=$(dig +short MX "$domain" 2>/dev/null | head -5)
           if [ -n "$mx_records" ]; then
             _update_scan_results "$results_file" "$source" "MX records found" "high" "$mx_records"
           else
@@ -3836,7 +3839,8 @@ _scan_email_intelligence() {
       "disposable_check")
         # Check against common disposable email domains
         local disposable_domains="10minutemail.com temp-mail.org guerrillamail.com mailinator.com"
-        local domain=$(echo "$email" | cut -d'@' -f2)
+        local domain
+        domain=$(echo "$email" | cut -d'@' -f2)
         if echo "$disposable_domains" | grep -q "$domain"; then
           _update_scan_results "$results_file" "$source" "Disposable email detected" "high" "$domain"
         else
@@ -3851,9 +3855,11 @@ _scan_email_intelligence() {
         fi
         ;;
       "domain_analysis")
-        local domain=$(echo "$email" | cut -d'@' -f2)
+        local domain
+        domain=$(echo "$email" | cut -d'@' -f2)
         if command -v whois >/dev/null 2>&1; then
-          local whois_info=$(whois "$domain" 2>/dev/null | grep -E "(Creation Date|Registrar|Status)" | head -3)
+          local whois_info
+          whois_info=$(whois "$domain" 2>/dev/null | grep -E "(Creation Date|Registrar|Status)" | head -3)
           if [ -n "$whois_info" ]; then
             _update_scan_results "$results_file" "$source" "Domain information found" "medium" "$whois_info"
           fi
@@ -20776,14 +20782,17 @@ _current_time() {
 
 # Check if we've exceeded restart limits
 _check_restart_limits() {
-    local now=$(_current_time)
+    local now
+    now=$(_current_time)
     local limit_file="${NS_PID}/restart_limits.txt"
     
     # Clean old restart records (older than RESTART_WINDOW)
     if [ -f "$limit_file" ]; then
-        local temp_file=$(mktemp)
+        local temp_file
+        temp_file=$(mktemp)
         while IFS= read -r line; do
-            local restart_time=$(echo "$line" | cut -d' ' -f1)
+            local restart_time
+            restart_time=$(echo "$line" | cut -d' ' -f1)
             if [ $((now - restart_time)) -lt $WEB_WRAPPER_RESTART_WINDOW ]; then
                 echo "$line" >> "$temp_file"
             fi
