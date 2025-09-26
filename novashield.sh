@@ -3886,7 +3886,18 @@ def _coerce_int(v, default=0):
     except Exception: return default
 
 # ------------------------------- Security helpers -----------------------------
-def auth_enabled(): return _coerce_bool(cfg_get('security.auth_enabled', True), True)
+def auth_enabled(): 
+    """Check if authentication is enabled AND there are users configured"""
+    if not _coerce_bool(cfg_get('security.auth_enabled', True), True):
+        return False
+    
+    # If auth is enabled but no users exist, effectively disable auth to prevent lockout
+    try:
+        db = users_db()
+        userdb = db.get('_userdb', {})
+        return bool(userdb)  # Return True only if there are users
+    except Exception:
+        return False  # On error, disable auth to prevent lockout
 def csrf_required(): return _coerce_bool(cfg_get('security.csrf_required', True), True)
 def require_2fa(): return _coerce_bool(cfg_get('security.require_2fa', False), False)
 def rate_limit_per_min(): return _coerce_int(cfg_get('security.rate_limit_per_min', 60), 60)
