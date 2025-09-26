@@ -898,17 +898,18 @@ install_dependencies(){
 generate_keys(){
   if [ ! -f "${NS_KEYS}/private.pem" ] || [ ! -f "${NS_KEYS}/public.pem" ]; then
     ns_log "Generating RSA keypair"
-    local bits; bits=$(yaml_get "security" "rsa_bits" "4096")
-    (cd "$NS_KEYS" && openssl genrsa -out private.pem "${bits}" && openssl rsa -in private.pem -pubout -out public.pem)
-    chmod 600 "${NS_KEYS}/private.pem"
+    set +e  # Temporarily disable error exit
+    openssl genpkey -algorithm RSA -out "${NS_KEYS}/private.pem" 2>/dev/null || openssl genrsa -out "${NS_KEYS}/private.pem" 2048 2>/dev/null
+    openssl rsa -pubout -in "${NS_KEYS}/private.pem" -out "${NS_KEYS}/public.pem" 2>/dev/null
+    set -e  # Re-enable error exit
+    chmod 600 "${NS_KEYS}/private.pem" 2>/dev/null || true
   fi
-  local aesf
-  aesf=$(yaml_get "security" "aes_key_file" "keys/aes.key")
-  [ -z "$aesf" ] && aesf="keys/aes.key"
-  if [ ! -f "${NS_HOME}/${aesf}" ]; then
-    ns_log "Generating AES key file: ${aesf}"
-    head -c 64 /dev/urandom >"${NS_HOME}/${aesf}"
-    chmod 600 "${NS_HOME}/${aesf}"
+  if [ ! -f "${NS_KEYS}/aes.key" ]; then
+    ns_log "Generating AES key file: keys/aes.key"
+    set +e
+    openssl rand -hex 32 > "${NS_KEYS}/aes.key" 2>/dev/null || head -c 32 /dev/urandom | xxd -p > "${NS_KEYS}/aes.key"
+    set -e
+    chmod 600 "${NS_KEYS}/aes.key" 2>/dev/null || true
   fi
 }
 
