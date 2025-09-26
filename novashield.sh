@@ -1682,6 +1682,22 @@ generate_keys(){
     set -e
     chmod 600 "${NS_KEYS}/aes.key" 2>/dev/null || true
   fi
+  
+  # SECURITY FIX: Generate secure auth salt if using default
+  local current_salt; current_salt=$(awk -F': ' '/auth_salt:/ {print $2}' "$NS_CONF" 2>/dev/null | tr -d ' "' || echo "")
+  if [ "$current_salt" = "change-this-salt" ] || [ -z "$current_salt" ]; then
+    ns_log "🔒 SECURITY: Generating secure authentication salt..."
+    local new_salt
+    new_salt=$(openssl rand -hex 32 2>/dev/null || head -c 32 /dev/urandom | xxd -p -c 32)
+    
+    # Update the config file with secure salt
+    if [ -f "$NS_CONF" ]; then
+      # Use sed to replace the salt in the config file
+      sed -i "s/auth_salt: \"change-this-salt\"/auth_salt: \"$new_salt\"/" "$NS_CONF" 2>/dev/null || true
+      sed -i "s/auth_salt: \".*\"/auth_salt: \"$new_salt\"/" "$NS_CONF" 2>/dev/null || true
+      ns_ok "🔒 Secure authentication salt generated and configured"
+    fi
+  fi
 }
 
 generate_self_signed_tls(){
@@ -5009,7 +5025,10 @@ def set_2fa(username, secret_b32):
     set_users_db(db)
 
 def check_login(username, password):
-    salt = cfg_get('security.auth_salt','change-this-salt')
+    salt = cfg_get('security.auth_salt','')
+    if not salt or salt == 'change-this-salt':
+        # SECURITY: Never use default salt
+        return False
     sha = hashlib.sha256((salt+':'+password).encode()).hexdigest()
     return users_list().get(username,'')==sha
 
@@ -21133,7 +21152,14 @@ add_user(){
   read -rp "New username: " user
   read -rsp "Password (won't echo): " pass; echo
   salt=$(awk -F': ' '/auth_salt:/ {print $2}' "$NS_CONF" | tr -d ' "')
-  [ -z "$salt" ] && salt="change-this-salt"
+  
+  # SECURITY FIX: Never use default salt
+  if [ -z "$salt" ] || [ "$salt" = "change-this-salt" ]; then
+    ns_err "SECURITY ERROR: Authentication salt not properly configured!"
+    ns_err "Run './novashield.sh --install' first to generate secure salt."
+    return 1
+  fi
+  
   local sha; sha=$(printf '%s' "${salt}:${pass}" | sha256sum | awk '{print $1}')
   if [ ! -f "$NS_SESS_DB" ]; then echo '{}' >"$NS_SESS_DB"; fi
   python3 - "$NS_SESS_DB" "$user" "$sha" <<'PY'
