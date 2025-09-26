@@ -1753,18 +1753,43 @@ generate_keys(){
 }
 
 generate_self_signed_tls(){
-  local enabled; enabled=$(yaml_get "security" "tls_enabled" "true")
-  [ "$enabled" = "true" ] || return 0
-  local crt key
-  crt=$(yaml_get "security" "tls_cert" "keys/server.crt")
-  key=$(yaml_get "security" "tls_key" "keys/server.key")
-  [ -z "$crt" ] && crt="keys/tls.crt"
-  [ -z "$key" ] && key="keys/tls.key"
-  [ -f "${NS_HOME}/${crt}" ] && [ -f "${NS_HOME}/${key}" ] && return 0
-  ns_log "Generating self-signed TLS cert"
-  (cd "$NS_HOME/keys" && \
+  # Check if TLS is enabled - be more robust about reading the config
+  local enabled="true"  # Default to enabled
+  if [ -f "$NS_CONF" ]; then
+    enabled=$(awk -F': ' '/tls_enabled:/ {print $2}' "$NS_CONF" 2>/dev/null | tr -d ' "' | head -1)
+    # If we can't read it or it's empty, default to true for security
+    [ -z "$enabled" ] && enabled="true"
+  fi
+  
+  [ "$enabled" = "false" ] && return 0  # Only skip if explicitly disabled
+  
+  # Determine certificate paths
+  local crt="keys/tls.crt" 
+  local key="keys/tls.key"
+  
+  # Check if certificates already exist
+  if [ -f "${NS_HOME}/${crt}" ] && [ -f "${NS_HOME}/${key}" ]; then
+    ns_log "TLS certificates already exist"
+    return 0
+  fi
+  
+  ns_log "Generating self-signed TLS certificates for HTTPS"
+  
+  # Ensure keys directory exists
+  mkdir -p "$NS_HOME/keys"
+  
+  # Generate the certificates
+  if (cd "$NS_HOME/keys" && \
     openssl req -x509 -newkey rsa:2048 -nodes -keyout tls.key -out tls.crt -days 825 \
-      -subj "/CN=localhost/O=NovaShield/OU=SelfSigned") || ns_warn "TLS cert generation failed"
+      -subj "/CN=localhost/O=NovaShield/OU=SelfSigned" 2>/dev/null); then
+    ns_log "✓ TLS certificates generated successfully"
+    # Set proper permissions
+    chmod 600 "$NS_HOME/keys/tls.key" 2>/dev/null || true
+    chmod 644 "$NS_HOME/keys/tls.crt" 2>/dev/null || true
+  else
+    ns_warn "TLS certificate generation failed - HTTPS will not be available"
+    return 1
+  fi
 }
 
 aes_key_path(){ yaml_get "security" "aes_key_file" "keys/aes.key"; }
@@ -21951,8 +21976,17 @@ cleanup_system_resources(){
 
 add_user(){
   local user pass salt
-  read -rp "New username: " user
-  read -rsp "Password (won't echo): " pass; echo
+  
+  # Check for non-interactive mode first (environment variables or command args)
+  if [ -n "${NOVASHIELD_ADMIN_USER:-}" ] && [ -n "${NOVASHIELD_ADMIN_PASS:-}" ]; then
+    user="$NOVASHIELD_ADMIN_USER"
+    pass="$NOVASHIELD_ADMIN_PASS"
+    ns_log "Using provided admin credentials for non-interactive setup"
+  else
+    # Interactive mode
+    read -rp "New username: " user
+    read -rsp "Password (won't echo): " pass; echo
+  fi
   
   # SECURITY FIX: Enhanced salt retrieval with error handling
   if [ ! -f "$NS_CONF" ]; then
@@ -22042,9 +22076,16 @@ PY
   ns_warn "This personal security dashboard requires user authentication for protection."
   echo "Creating the first user for security..."
   add_user
-  echo
-  read -r -p "Enable 2FA for this user now? [y/N]: " yn
-  case "$yn" in [Yy]*) enable_2fa ;; esac
+  
+  # Skip 2FA setup in non-interactive mode
+  if [ -z "${NOVASHIELD_ADMIN_USER:-}" ]; then
+    echo
+    read -r -p "Enable 2FA for this user now? [y/N]: " yn
+    case "$yn" in [Yy]*) enable_2fa ;; esac
+  else
+    echo
+    ns_log "Skipping 2FA setup in non-interactive mode. You can enable it later with: $0 --enable-2fa"
+  fi
 }
 
 reset_auth(){
@@ -22884,6 +22925,7 @@ Usage: $0 [OPTION]
 
 Core Commands:
   --install              Install NovaShield and dependencies (requires user creation)
+                         For non-interactive: NOVASHIELD_ADMIN_USER=admin NOVASHIELD_ADMIN_PASS=password ./novashield.sh --install
   --start                Start all services (monitors + web dashboard)
   --stop                 Stop all running services
   --status               Show service status and information
@@ -22991,7 +23033,8 @@ Configuration:
   optional features permanently. All features default to stable behavior.
 
 Examples:
-  $0 --install                    # First-time setup
+  $0 --install                    # First-time setup (interactive)
+  NOVASHIELD_ADMIN_USER=admin NOVASHIELD_ADMIN_PASS=securepass123 $0 --install  # Non-interactive setup
   $0 --start                      # Start everything (stable defaults)
   $0 --enable-auto-restart        # Enable auto-restart for this session
   $0 --encrypt /important/data    # Encrypt directory
