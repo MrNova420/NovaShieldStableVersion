@@ -617,22 +617,30 @@ security:
   require_2fa: true         # Enable 2FA by default for enterprise security
   users: []        # add via CLI: ./novashield.sh --add-user
   auth_salt: "change-this-salt"
-  rate_limit_per_min: 30    # More restrictive rate limiting
-  lockout_threshold: 5      # Stricter lockout threshold
-  ip_allowlist: ["127.0.0.1"] # Only localhost by default
+  rate_limit_per_min: 20    # Very restrictive rate limiting for security
+  lockout_threshold: 3      # Very strict lockout threshold
+  ip_allowlist: ["127.0.0.1"] # Only localhost by default - additional layer of protection
   ip_denylist: []  # e.g. ["0.0.0.0/0"]
   csrf_required: true
   tls_enabled: true         # Enable TLS by default
   tls_cert: "keys/tls.crt"
   tls_key: "keys/tls.key"
-  session_ttl_minutes: 480  # 8 hour sessions for better security
-  session_ttl_min: 480      # Alternate naming for session TTL 
+  session_ttl_minutes: 240  # 4 hour sessions for better security
+  session_ttl_min: 240      # Alternate naming for session TTL 
   strict_reload: true       # Force login validation on reload for security
-  force_login_on_reload: false  # Keep disabled to prevent loops
+  force_login_on_reload: true  # Enhanced security - force relogin on reload
   trust_proxy: false       # Trust X-Forwarded-For headers from reverse proxies
   single_session: true     # Enforce single active session per user
   auto_logout_idle: true   # Auto logout on idle
   session_encryption: true # Encrypt session data
+  require_https: true      # Force HTTPS only
+  secure_headers: true     # Add security headers
+  content_security_policy: true  # CSP protection
+  bruteforce_protection: true    # Advanced bruteforce protection
+  session_fingerprinting: true  # Session fingerprinting for security
+  audit_all_access: true   # Audit all access attempts
+  geo_blocking: false      # Geo-blocking (can be enabled if needed)
+  honeypot_protection: true     # Honeypot traps for attackers
 
 terminal:
   enabled: true
@@ -645,18 +653,20 @@ terminal:
 
 # Ultra-optimized monitoring intervals for long-term 99.9% uptime operation
 monitors:
-  cpu:         { enabled: true,  interval_sec: 15, warn_load: 2.00, crit_load: 4.00, adaptive: true }  # Adaptive monitoring
-  memory:      { enabled: true,  interval_sec: 15, warn_pct: 80,  crit_pct: 90, process_limit_mb: 800, auto_cleanup: true }  # Enhanced memory management
-  disk:        { enabled: true,  interval_sec: 45, warn_pct: 80, crit_pct: 90, cleanup_pct: 85, mount: "/", auto_compress: true }  # Auto compression
-  network:     { enabled: true,  interval_sec: 30, iface: "", ping_host: "1.1.1.1", loss_warn: 15, external_checks: true, public_ip_services: ["icanhazip.com", "ifconfig.me", "api.ipify.org"], retry_backoff: true }  # Intelligent retry
-  integrity:   { enabled: true,  interval_sec: 120, watch_paths: ["/system/bin","/system/xbin","/usr/bin"], checksum_cache: true }  # Cached checksums for efficiency
-  process:     { enabled: true,  interval_sec: 20, suspicious: ["nc","nmap","hydra","netcat","telnet"], whitelist_cache: true }  # Process whitelist caching
-  userlogins:  { enabled: true,  interval_sec: 25, session_tracking: true }  # Enhanced session tracking
-  services:    { enabled: false, interval_sec: 60, targets: ["cron","ssh","sshd"], health_cache: true }  # Service health caching
-  logs:        { enabled: true,  interval_sec: 90, files: ["/var/log/auth.log","/var/log/syslog"], patterns:["error","failed","denied","segfault"], smart_parsing: true }  # Smart log parsing
-  scheduler:   { enabled: true,  interval_sec: 20, priority_queue: true }  # Priority-based scheduling
+  cpu:         { enabled: true,  interval_sec: 10, warn_load: 1.50, crit_load: 3.00, adaptive: true }  # More frequent monitoring
+  memory:      { enabled: true,  interval_sec: 10, warn_pct: 75,  crit_pct: 85, process_limit_mb: 800, auto_cleanup: true }  # Enhanced memory management
+  disk:        { enabled: true,  interval_sec: 30, warn_pct: 75, crit_pct: 85, cleanup_pct: 80, mount: "/", auto_compress: true }  # Auto compression
+  network:     { enabled: true,  interval_sec: 20, iface: "", ping_host: "1.1.1.1", loss_warn: 10, external_checks: true, public_ip_services: ["icanhazip.com", "ifconfig.me", "api.ipify.org"], retry_backoff: true }  # Intelligent retry
+  integrity:   { enabled: true,  interval_sec: 60, watch_paths: ["/system/bin","/system/xbin","/usr/bin","/home"], checksum_cache: true }  # More comprehensive monitoring
+  process:     { enabled: true,  interval_sec: 15, suspicious: ["nc","nmap","hydra","netcat","telnet","metasploit","sqlmap"], whitelist_cache: true }  # Enhanced threat detection
+  userlogins:  { enabled: true,  interval_sec: 15, session_tracking: true }  # Enhanced session tracking
+  services:    { enabled: true, interval_sec: 30, targets: ["cron","ssh","sshd","nginx","apache2"], health_cache: true }  # Enable service monitoring
+  logs:        { enabled: true,  interval_sec: 60, files: ["/var/log/auth.log","/var/log/syslog","/var/log/nginx/error.log"], patterns:["error","failed","denied","segfault","attack","intrusion"], smart_parsing: true }  # Enhanced threat detection
+  scheduler:   { enabled: true,  interval_sec: 15, priority_queue: true }  # Priority-based scheduling
   uptime:      { enabled: true,  interval_sec: 10, target_pct: 99.9, auto_recovery: true }  # 99.9% uptime monitoring
-  storage:     { enabled: true,  interval_sec: 300, auto_cleanup: true, compression: true, archive_days: 30 }  # Long-term storage management
+  storage:     { enabled: true,  interval_sec: 180, auto_cleanup: true, compression: true, archive_days: 30 }  # Long-term storage management
+  security:    { enabled: true,  interval_sec: 10, threat_detection: true, anomaly_detection: true }  # New security monitoring
+  ai_analysis: { enabled: true,  interval_sec: 30, pattern_recognition: true, behavioral_analysis: true }  # AI-powered monitoring
 
 # Enhanced logging with intelligent compression and long-term retention
 logging:
@@ -768,11 +778,11 @@ webgen:
 # Ultra-enhanced JARVIS with long-term learning and multi-user support  
 jarvis:
   personality: "professional"        # Professional enterprise personality
-  memory_size: 200                  # Increased memory for long-term learning (was 50)
+  memory_size: 500                  # Massive memory for comprehensive learning
   voice_enabled: true               # Voice talk-back enabled by default
   learning_enabled: true           # Enable continuous learning
   multi_user_context: true         # Separate context per user
-  conversation_retention_days: 90   # Keep conversations for 90 days
+  conversation_retention_days: 365  # Keep conversations for full year
   knowledge_base_auto_update: true # Auto-update knowledge base
   performance_optimization: true   # Optimize for long-term performance
   enterprise_features: true        # Enable enterprise-specific features
@@ -781,6 +791,39 @@ jarvis:
   user_preference_learning: true  # Learn individual user preferences
   context_switching: true         # Smart context switching between users
   advanced_analytics: true       # Advanced conversation analytics
+  threat_intelligence: true      # AI-powered threat intelligence
+  behavioral_analysis: true      # User behavior analysis for security
+  anomaly_detection: true        # AI anomaly detection
+  predictive_security: true     # Predictive security analysis
+  automated_responses: true     # Automated security responses
+  natural_language_processing: true  # Advanced NLP capabilities
+  sentiment_analysis: true      # Sentiment analysis for user interactions
+  risk_assessment: true         # Automated risk assessment
+
+# Advanced Automation and AI Features
+automation:
+  enabled: true                  # Enable all automation features
+  threat_response: true         # Automated threat response
+  system_healing: true          # Self-healing system capabilities  
+  performance_optimization: true # Automated performance tuning
+  security_hardening: true     # Automated security hardening
+  backup_automation: true      # Intelligent backup automation
+  log_analysis: true           # Automated log analysis
+  incident_response: true      # Automated incident response
+  compliance_monitoring: true  # Automated compliance monitoring
+  vulnerability_scanning: true # Automated vulnerability scanning
+
+# AI-Powered Security Features
+ai_security:
+  enabled: true                 # Enable AI security features
+  machine_learning: true       # ML-based threat detection
+  neural_networks: true        # Neural network analysis
+  pattern_recognition: true    # Advanced pattern recognition
+  deep_learning: true          # Deep learning algorithms
+  behavioral_modeling: true    # Behavioral threat modeling
+  zero_day_detection: true     # Zero-day threat detection
+  adversarial_detection: true  # Adversarial attack detection
+  social_engineering_detection: true # Social engineering detection
 YAML
 }
 
@@ -20249,15 +20292,10 @@ PY
 )
   if [ "$have_user" = "yes" ]; then return 0; fi
   
-  # Only skip user creation in truly non-interactive scenarios
-  if [ "${NS_NON_INTERACTIVE:-}" = "1" ]; then
-    ns_warn "Non-interactive mode: Skipping user creation. You can add users later with --add-user"
-    ns_warn "SECURITY WARNING: Authentication is enabled but no users exist. Web access will be properly secured."
-    return 0
-  fi
-  
   echo
-  ns_warn "No web users found but auth_enabled is true. Creating the first user for security."
+  ns_warn "SECURITY REQUIREMENT: No web users found but auth_enabled is true."
+  ns_warn "This personal security dashboard requires user authentication for protection."
+  echo "Creating the first user for security..."
   add_user
   echo
   read -r -p "Enable 2FA for this user now? [y/N]: " yn
@@ -20280,8 +20318,7 @@ A comprehensive security monitoring and management system for Android/Termux and
 Usage: $0 [OPTION]
 
 Core Commands:
-  --install              Install NovaShield and dependencies
-  --install --non-interactive  Install without prompting for user creation
+  --install              Install NovaShield and dependencies (requires user creation)
   --start                Start all services (monitors + web dashboard)
   --stop                 Stop all running services
   --status               Show service status and information
@@ -20418,18 +20455,8 @@ load_config_file
 case "${1:-}" in
   --help|-h) usage; exit 0;;
   --version|-v) echo "NovaShield ${NS_VERSION}"; exit 0;;
-  --install) 
-    if [ "${2:-}" = "--non-interactive" ]; then
-      NS_NON_INTERACTIVE=1 install_all
-    else
-      install_all
-    fi;;
-  --start) 
-    if [ "${2:-}" = "--no-prompts" ] || [ "${2:-}" = "--non-interactive" ]; then
-      NS_NON_INTERACTIVE=1 start_all
-    else
-      start_all
-    fi;;
+  --install) install_all;;
+  --start) start_all;;
   --stop) stop_all;;
   --restart-monitors) restart_monitors;;
   --validate) _validate_stability_fixes; exit $?;;
