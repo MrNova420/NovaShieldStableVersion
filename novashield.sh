@@ -2660,6 +2660,132 @@ _calculate_confidence_score() {
   echo "Risk Assessment: $risk" >> "${results_file}.log"
 }
 
+# Missing intelligence scanning helper functions
+_scan_ip_intelligence() {
+  local ip="$1"
+  local results_file="$2"
+  local depth="$3"
+  
+  local sources=("ping_test" "nmap_scan" "whois_lookup" "reverse_dns")
+  
+  if [ "$depth" = "deep" ]; then
+    sources+=("port_scan" "traceroute" "geolocation")
+  fi
+  
+  ns_log "Scanning IP: $ip with depth: $depth"
+  
+  # Basic ping test
+  if command -v ping >/dev/null 2>&1; then
+    if ping -c 1 -W 3 "$ip" >/dev/null 2>&1; then
+      _update_scan_results "$results_file" "ping_test" "host_reachable" "high" "IP $ip is reachable"
+    else
+      _update_scan_results "$results_file" "ping_test" "host_unreachable" "medium" "IP $ip is not reachable"
+    fi
+  fi
+  
+  # nmap scan if available
+  if command -v nmap >/dev/null 2>&1 && [ "$depth" = "deep" ]; then
+    local nmap_result; nmap_result=$(timeout 10 nmap -sP "$ip" 2>/dev/null | grep -i "host\|up" | head -3)
+    if [ -n "$nmap_result" ]; then
+      _update_scan_results "$results_file" "nmap_scan" "host_discovered" "high" "$nmap_result"
+    fi
+  fi
+  
+  # Reverse DNS lookup
+  if command -v dig >/dev/null 2>&1; then
+    local reverse_dns; reverse_dns=$(timeout 5 dig +short -x "$ip" 2>/dev/null | head -1)
+    if [ -n "$reverse_dns" ]; then
+      _update_scan_results "$results_file" "reverse_dns" "hostname_found" "medium" "$reverse_dns"
+    fi
+  fi
+  
+  _calculate_confidence_score "$results_file" "${#sources[@]}"
+}
+
+_scan_domain_intelligence() {
+  local domain="$1"
+  local results_file="$2"
+  local depth="$3"
+  
+  local sources=("dns_lookup" "whois_lookup" "ssl_check")
+  
+  if [ "$depth" = "deep" ]; then
+    sources+=("subdomain_scan" "certificate_transparency" "security_headers")
+  fi
+  
+  ns_log "Scanning domain: $domain with depth: $depth"
+  
+  # DNS lookup
+  if command -v dig >/dev/null 2>&1; then
+    local dns_result; dns_result=$(timeout 5 dig +short "$domain" 2>/dev/null | head -3)
+    if [ -n "$dns_result" ]; then
+      _update_scan_results "$results_file" "dns_lookup" "dns_resolved" "high" "$dns_result"
+    fi
+  fi
+  
+  # SSL certificate check
+  if command -v openssl >/dev/null 2>&1; then
+    local ssl_info; ssl_info=$(timeout 10 openssl s_client -connect "$domain:443" -servername "$domain" 2>/dev/null </dev/null | grep -E "subject=|issuer=" | head -2)
+    if [ -n "$ssl_info" ]; then
+      _update_scan_results "$results_file" "ssl_check" "certificate_found" "medium" "$ssl_info"
+    fi
+  fi
+  
+  _calculate_confidence_score "$results_file" "${#sources[@]}"
+}
+
+_scan_phone_intelligence() {
+  local phone="$1"
+  local results_file="$2" 
+  local depth="$3"
+  
+  local sources=("format_validation" "country_code")
+  
+  ns_log "Scanning phone: $phone with depth: $depth"
+  
+  # Basic format validation
+  if [[ "$phone" =~ ^[+]?[0-9\-\(\)\ \.]{7,15}$ ]]; then
+    _update_scan_results "$results_file" "format_validation" "valid_format" "medium" "Phone number format appears valid"
+  else
+    _update_scan_results "$results_file" "format_validation" "invalid_format" "high" "Phone number format is invalid"
+  fi
+  
+  # Extract country code if present
+  if [[ "$phone" =~ ^\+([0-9]{1,3}) ]]; then
+    local country_code="${BASH_REMATCH[1]}"
+    _update_scan_results "$results_file" "country_code" "extracted" "low" "Country code: +$country_code"
+  fi
+  
+  _calculate_confidence_score "$results_file" "${#sources[@]}"
+}
+
+_scan_username_intelligence() {
+  local username="$1"
+  local results_file="$2"
+  local depth="$3"
+  
+  local sources=("format_check" "length_check")
+  
+  ns_log "Scanning username: $username with depth: $depth"
+  
+  # Basic format validation
+  if [[ "$username" =~ ^[a-zA-Z0-9._-]{3,20}$ ]]; then
+    _update_scan_results "$results_file" "format_check" "valid_format" "medium" "Username format is valid"
+  else
+    _update_scan_results "$results_file" "format_check" "invalid_format" "low" "Username format may be invalid"
+  fi
+  
+  # Length check
+  local length=${#username}
+  if [ "$length" -ge 3 ] && [ "$length" -le 20 ]; then
+    _update_scan_results "$results_file" "length_check" "acceptable_length" "low" "Username length: $length characters"
+  else
+    _update_scan_results "$results_file" "length_check" "poor_length" "medium" "Username length: $length characters (unusual)"
+  fi
+  
+  _calculate_confidence_score "$results_file" "${#sources[@]}"
+}
+
 # Enhanced Web-based Intelligence Dashboard
 enhanced_intelligence_dashboard() {
   local action="${1:-generate}"
@@ -20304,6 +20430,7 @@ load_config_file
 
 case "${1:-}" in
   --help|-h) usage; exit 0;;
+  --version|-v) echo "NovaShield ${NS_VERSION}"; exit 0;;
   --install) 
     if [ "${2:-}" = "--non-interactive" ]; then
       NS_NON_INTERACTIVE=1 install_all
