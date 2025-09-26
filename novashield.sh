@@ -614,23 +614,25 @@ http:
 
 security:
   auth_enabled: true
-  require_2fa: false
+  require_2fa: true         # Enable 2FA by default for enterprise security
   users: []        # add via CLI: ./novashield.sh --add-user
   auth_salt: "change-this-salt"
-  rate_limit_per_min: 60
-  lockout_threshold: 10
-  ip_allowlist: [] # e.g. ["127.0.0.1"]
+  rate_limit_per_min: 30    # More restrictive rate limiting
+  lockout_threshold: 5      # Stricter lockout threshold
+  ip_allowlist: ["127.0.0.1"] # Only localhost by default
   ip_denylist: []  # e.g. ["0.0.0.0/0"]
   csrf_required: true
-  tls_enabled: false
+  tls_enabled: true         # Enable TLS by default
   tls_cert: "keys/tls.crt"
   tls_key: "keys/tls.key"
-  session_ttl_minutes: 720  # Session timeout in minutes (default: 12 hours)
-  session_ttl_min: 720      # Alternate naming for session TTL 
-  strict_reload: false      # Force login on every page reload  
-  force_login_on_reload: false  # Force login on every page reload (disabled to prevent loops)
+  session_ttl_minutes: 480  # 8 hour sessions for better security
+  session_ttl_min: 480      # Alternate naming for session TTL 
+  strict_reload: true       # Force login validation on reload for security
+  force_login_on_reload: false  # Keep disabled to prevent loops
   trust_proxy: false       # Trust X-Forwarded-For headers from reverse proxies
   single_session: true     # Enforce single active session per user
+  auto_logout_idle: true   # Auto logout on idle
+  session_encryption: true # Encrypt session data
 
 terminal:
   enabled: true
@@ -3592,10 +3594,9 @@ AUTH_STRICT = os.environ.get('NOVASHIELD_AUTH_STRICT', '0') == '1'
 
 def get_client_ip(handler):
     """Get the real client IP address, supporting X-Forwarded-For when trust_proxy is enabled"""
-    # Simplified version to avoid cfg_get calls that might cause hanging
-    # Check if we should trust proxy headers (default to False for safety)
     try:
-        trust_proxy = False  # Simplified - disable proxy header trust to avoid cfg_get hanging
+        # Check if we should trust proxy headers from config
+        trust_proxy = _coerce_bool(cfg_get('security.trust_proxy', False), False)
         
         if trust_proxy:
             # Check for X-Forwarded-For header (most common proxy header)
@@ -3619,7 +3620,7 @@ def get_client_ip(handler):
     except Exception:
         pass  # On any error, fall back to direct connection IP
     
-    # Fallback to direct connection IP (fixed recursive call)
+    # Fallback to direct connection IP
     return handler.client_address[0]
 
 def py_alert(level, msg):
@@ -4016,22 +4017,7 @@ def _coerce_int(v, default=0):
     except Exception: return default
 
 # ------------------------------- Security helpers -----------------------------
-def auth_enabled(): 
-    """Check if authentication is enabled AND there are users configured"""
-    if not _coerce_bool(cfg_get('security.auth_enabled', True), True):
-        return False
-    
-    # If auth is enabled but no users exist, effectively disable auth to prevent lockout
-    try:
-        # Check if sessions file exists and has users - avoid using users_db() to prevent circular calls
-        if not os.path.exists(SESSIONS):
-            return False
-        with open(SESSIONS, 'r') as f:
-            data = json.load(f)
-            userdb = data.get('_userdb', {})
-            return bool(userdb)  # Return True only if there are users
-    except Exception:
-        return False  # On error, disable auth to prevent lockout
+def auth_enabled(): return _coerce_bool(cfg_get('security.auth_enabled', True), True)
 def csrf_required(): return _coerce_bool(cfg_get('security.csrf_required', True), True)
 def require_2fa(): return _coerce_bool(cfg_get('security.require_2fa', False), False)
 def rate_limit_per_min(): return _coerce_int(cfg_get('security.rate_limit_per_min', 60), 60)
@@ -20262,15 +20248,15 @@ PY
 )
   if [ "$have_user" = "yes" ]; then return 0; fi
   
-  # Handle non-interactive mode and automated startup scenarios
-  if [ "${NS_NON_INTERACTIVE:-}" = "1" ] || [ ! -t 0 ] || [ "${NOVASHIELD_AUTO_START:-}" = "1" ]; then
-    ns_warn "Non-interactive mode or automated startup: Skipping user creation. You can add users later with --add-user"
-    ns_warn "Note: Authentication is enabled but no users exist. Web access will be blocked until users are added."
+  # Only skip user creation in truly non-interactive scenarios
+  if [ "${NS_NON_INTERACTIVE:-}" = "1" ]; then
+    ns_warn "Non-interactive mode: Skipping user creation. You can add users later with --add-user"
+    ns_warn "SECURITY WARNING: Authentication is enabled but no users exist. Web access will be properly secured."
     return 0
   fi
   
   echo
-  ns_warn "No web users found but auth_enabled is true. Creating the first user."
+  ns_warn "No web users found but auth_enabled is true. Creating the first user for security."
   add_user
   echo
   read -r -p "Enable 2FA for this user now? [y/N]: " yn
