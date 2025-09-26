@@ -9,8 +9,29 @@
 # OPTIMIZED: 99.9% Uptime, Storage Efficiency, Multi-User Support, Long-Term Reliability
 # ==============================================================================
 
-set -Eeuo pipefail
+# Use less aggressive error handling during initialization to prevent memory-related failures
+set -Eeu
 IFS=$'\n\t'
+
+# Function to enable stricter error handling after initialization
+enable_strict_mode() {
+  set -o pipefail 2>/dev/null || true
+}
+
+# Function to check if we have sufficient resources for operations
+check_system_resources() {
+  local min_memory_mb=50
+  local available_memory=0
+  
+  if command -v free >/dev/null 2>&1; then
+    available_memory=$(free -m 2>/dev/null | awk 'NR==2{print $7}' 2>/dev/null || echo 0)
+    if [ "$available_memory" -lt "$min_memory_mb" ]; then
+      echo "WARNING: Low memory detected (${available_memory}MB available, ${min_memory_mb}MB minimum recommended)" >&2
+      return 1
+    fi
+  fi
+  return 0
+}
 
 NS_VERSION="3.4.0-Enterprise-AAA-JARVIS-Centralized"  # JARVIS-Centralized System
 
@@ -89,50 +110,67 @@ _rotate_log() {
 
 # Enhanced memory management for long-term operation with advanced optimization
 _optimize_memory() {
-  local memory_threshold=80  # Percentage threshold for memory optimization
+  # Prevent excessive memory optimization calls
+  local last_optimize_file="${NS_TMP}/last_memory_optimize"
+  local current_time=$(date +%s 2>/dev/null || echo 0)
+  
+  # Only run memory optimization every 5 minutes to prevent resource exhaustion
+  if [ -f "$last_optimize_file" ]; then
+    local last_optimize=$(cat "$last_optimize_file" 2>/dev/null || echo 0)
+    if [ $((current_time - last_optimize)) -lt 300 ]; then
+      return 0  # Skip optimization if ran recently
+    fi
+  fi
+  
+  local memory_threshold=85  # Increased threshold to be less aggressive
   local current_memory_usage
   
-  # Get current memory usage percentage
+  # Get current memory usage percentage with better error handling
   if command -v free >/dev/null 2>&1; then
-    current_memory_usage=$(free | awk 'NR==2{printf "%.0f", $3*100/$2}')
+    current_memory_usage=$(free 2>/dev/null | awk 'NR==2{printf "%.0f", $3*100/$2}' 2>/dev/null || echo "0")
     
-    # Only optimize if memory usage is above threshold
-    if [ "$current_memory_usage" -gt "$memory_threshold" ]; then
-      ns_log "Memory usage at ${current_memory_usage}%, optimizing..."
+    # Only optimize if memory usage is above threshold and we have valid data
+    if [ "$current_memory_usage" -gt "$memory_threshold" ] && [ "$current_memory_usage" -lt 100 ]; then
+      ns_log "Memory usage at ${current_memory_usage}%, optimizing (threshold: ${memory_threshold}%)"
       
-      # Clear system caches periodically (if we have permissions)
-      if [ -w "/proc/sys/vm/drop_caches" ] 2>/dev/null; then
-        sync && echo 1 > /proc/sys/vm/drop_caches 2>/dev/null || true
+      # Less aggressive cache clearing - only if safe
+      if [ -w "/proc/sys/vm/drop_caches" ] 2>/dev/null && command -v sync >/dev/null 2>&1; then
+        sync 2>/dev/null && echo 1 > /proc/sys/vm/drop_caches 2>/dev/null || true
       fi
       
-      # Clear bash history cache
+      # Clear bash history cache safely
       history -c 2>/dev/null || true
       
-      # Force garbage collection in background processes
-      kill -USR1 $$ 2>/dev/null || true
+      # Skip aggressive signal handling that might cause issues
+      # kill -USR1 $$ 2>/dev/null || true  # Commented out as it can cause instability
       
-      # Advanced memory optimization
-      # Clear DNS cache if available
+      # Clear DNS cache if available (less aggressive)
       if command -v systemd-resolve >/dev/null 2>&1; then
         systemd-resolve --flush-caches 2>/dev/null || true
       fi
       
-      # Optimize shared memory
+      # Optimize shared memory more conservatively  
       if [ -d "/dev/shm" ]; then
-        find /dev/shm -user "$(whoami)" -type f -mtime +1 -delete 2>/dev/null || true
+        find /dev/shm -user "$(whoami)" -type f -mtime +7 -delete 2>/dev/null || true
       fi
       
-      # Memory compaction
-      if [ -w "/proc/sys/vm/compact_memory" ] 2>/dev/null; then
-        echo 1 > /proc/sys/vm/compact_memory 2>/dev/null || true
-      fi
+      # Skip memory compaction as it can be resource-intensive
+      # if [ -w "/proc/sys/vm/compact_memory" ] 2>/dev/null; then
+      #   echo 1 > /proc/sys/vm/compact_memory 2>/dev/null || true
+      # fi
       
       ns_log "✅ Memory optimization completed"
     fi
   fi
   
-  # Memory leak detection and prevention
-  _detect_memory_leaks
+  # Update last optimization timestamp
+  mkdir -p "$(dirname "$last_optimize_file")" 2>/dev/null || true
+  echo "$current_time" > "$last_optimize_file" 2>/dev/null || true
+  
+  # Memory leak detection and prevention (less frequent)
+  if [ $((current_time % 600)) -eq 0 ]; then  # Every 10 minutes
+    _detect_memory_leaks
+  fi
 }
 
 # Advanced memory leak detection and prevention
@@ -338,13 +376,29 @@ _clean_stale_pids() {
 
 # Optimize process limits and resource usage
 _optimize_process_limits() {
-  # Set optimal ulimits for the current shell
-  ulimit -n 4096 2>/dev/null || true  # Max open files
-  ulimit -u 2048 2>/dev/null || true  # Max processes
-  ulimit -v 1048576 2>/dev/null || true  # Virtual memory (1GB)
+  # Check available memory before setting aggressive limits
+  local available_memory=0
+  if command -v free >/dev/null 2>&1; then
+    available_memory=$(free -m 2>/dev/null | awk 'NR==2{print $7}' 2>/dev/null || echo 0)
+  fi
   
-  # CPU niceness for background processes
-  renice +5 $$ 2>/dev/null || true
+  # Set optimal ulimits for the current shell based on available resources
+  if [ "$available_memory" -gt 200 ]; then
+    # Higher limits for systems with adequate memory
+    ulimit -n 4096 2>/dev/null || ulimit -n 1024 2>/dev/null || true  # Max open files
+    ulimit -u 2048 2>/dev/null || ulimit -u 512 2>/dev/null || true   # Max processes
+    ulimit -v 1048576 2>/dev/null || true # Virtual memory (1GB)
+  else
+    # Conservative limits for low memory systems
+    ulimit -n 1024 2>/dev/null || true
+    ulimit -u 512 2>/dev/null || true
+    ulimit -v 524288 2>/dev/null || true # Virtual memory (512MB)
+  fi
+  
+  # CPU niceness for background processes (less aggressive)
+  if [ "$available_memory" -gt 100 ]; then
+    renice +5 $$ 2>/dev/null || true
+  fi
 }
 
 # Process monitoring and health checks
@@ -857,22 +911,53 @@ optimize_storage_for_uptime() {
 }
 
 ns_log() { 
-  mkdir -p "${NS_HOME}" 2>/dev/null
-  _rotate_log "${NS_HOME}/launcher.log" 4000  # Optimized for storage
-  echo -e "$(ns_now) [INFO ] $*" | tee -a "${NS_HOME}/launcher.log" >&2
+  # Create directory only once, cache result to avoid repeated mkdir calls
+  if [ ! -d "${NS_HOME}" ]; then
+    mkdir -p "${NS_HOME}" 2>/dev/null || {
+      # Fallback to system temp if NS_HOME creation fails
+      local fallback_dir="/tmp/novashield-$(whoami)"
+      mkdir -p "$fallback_dir" 2>/dev/null || return 0
+      echo -e "$(ns_now) [INFO ] $*" | tee -a "$fallback_dir/launcher.log" >&2 2>/dev/null || echo -e "$(ns_now) [INFO ] $*" >&2
+      return 0
+    }
+  fi
   
-  # Periodic memory optimization (every 100 log entries)
-  [ $(($(wc -l < "${NS_HOME}/launcher.log" 2>/dev/null || echo 0) % 100)) -eq 0 ] && _optimize_memory &
+  _rotate_log "${NS_HOME}/launcher.log" 4000  # Optimized for storage
+  echo -e "$(ns_now) [INFO ] $*" | tee -a "${NS_HOME}/launcher.log" >&2 2>/dev/null || echo -e "$(ns_now) [INFO ] $*" >&2
+  
+  # Less frequent memory optimization (every 500 log entries instead of 100)
+  local log_count=$(wc -l < "${NS_HOME}/launcher.log" 2>/dev/null || echo 0)
+  if [ $((log_count % 500)) -eq 0 ] && [ "$log_count" -gt 0 ]; then
+    _optimize_memory &
+  fi
 }
 ns_warn(){ 
-  mkdir -p "${NS_HOME}" 2>/dev/null
+  # Create directory only once, with better error handling
+  if [ ! -d "${NS_HOME}" ]; then
+    mkdir -p "${NS_HOME}" 2>/dev/null || {
+      local fallback_dir="/tmp/novashield-$(whoami)"
+      mkdir -p "$fallback_dir" 2>/dev/null || return 0
+      echo -e "${YELLOW}$(ns_now) [WARN ] $*${NC}" | tee -a "$fallback_dir/launcher.log" >&2 2>/dev/null || echo -e "${YELLOW}$(ns_now) [WARN ] $*${NC}" >&2
+      return 0
+    }
+  fi
+  
   _rotate_log "${NS_HOME}/launcher.log" 4000
-  echo -e "${YELLOW}$(ns_now) [WARN ] $*${NC}" | tee -a "${NS_HOME}/launcher.log" >&2
+  echo -e "${YELLOW}$(ns_now) [WARN ] $*${NC}" | tee -a "${NS_HOME}/launcher.log" >&2 2>/dev/null || echo -e "${YELLOW}$(ns_now) [WARN ] $*${NC}" >&2
 }
 ns_err() { 
-  mkdir -p "${NS_HOME}" 2>/dev/null
+  # Create directory only once, with better error handling
+  if [ ! -d "${NS_HOME}" ]; then
+    mkdir -p "${NS_HOME}" 2>/dev/null || {
+      local fallback_dir="/tmp/novashield-$(whoami)"
+      mkdir -p "$fallback_dir" 2>/dev/null || return 0
+      echo -e "${RED}$(ns_now) [ERROR] $*${NC}" | tee -a "$fallback_dir/launcher.log" >&2 2>/dev/null || echo -e "${RED}$(ns_now) [ERROR] $*${NC}" >&2
+      return 0
+    }
+  fi
+  
   _rotate_log "${NS_HOME}/launcher.log" 4000
-  echo -e "${RED}$(ns_now) [ERROR] $*${NC}" | tee -a "${NS_HOME}/launcher.log" >&2
+  echo -e "${RED}$(ns_now) [ERROR] $*${NC}" | tee -a "${NS_HOME}/launcher.log" >&2 2>/dev/null || echo -e "${RED}$(ns_now) [ERROR] $*${NC}" >&2
 }
 ns_ok()  { echo -e "${GREEN}✓ $*${NC}"; }
 
@@ -1233,6 +1318,11 @@ PKG_INSTALL(){
 }
 
 ensure_dirs(){
+  # Check system resources before creating directories
+  if ! check_system_resources; then
+    ns_warn "⚠️  Low system resources detected. Using conservative directory creation."
+  fi
+  
   # SECURITY HARDENING: Create directories with secure permissions and validation
   local dirs=(
     "$NS_BIN" "$NS_LOGS" "$NS_WWW" "$NS_MODULES" "$NS_PROJECTS" 
@@ -1244,8 +1334,22 @@ ensure_dirs(){
   local old_umask=$(umask)
   umask 077
   
+  # Create directories in batches to avoid memory pressure
+  local batch_size=3
+  local created_count=0
+  
   for dir in "${dirs[@]}"; do
-    mkdir -p "$dir" 2>/dev/null || true
+    # Create directory with better error handling
+    if ! mkdir -p "$dir" 2>/dev/null; then
+      ns_warn "⚠️  Failed to create directory: $dir (possible memory/permission issue)"
+      # Try alternative location if NS_HOME creation fails
+      if [[ "$dir" == *"$NS_HOME"* ]]; then
+        local alt_dir="/tmp/novashield-$(whoami)${dir#$NS_HOME}"
+        mkdir -p "$alt_dir" 2>/dev/null || continue
+        ns_warn "📁 Using alternative directory: $alt_dir"
+      fi
+      continue
+    fi
     
     # SECURITY: Set appropriate permissions based on directory purpose
     case "$dir" in
@@ -1259,15 +1363,30 @@ ensure_dirs(){
         chmod 755 "$dir" 2>/dev/null || true  # Standard for other dirs
         ;;
     esac
+    
+    created_count=$((created_count + 1))
+    
+    # Pause every few directories to prevent memory pressure
+    if [ $((created_count % batch_size)) -eq 0 ]; then
+      sleep 0.1 2>/dev/null || true
+    fi
   done
   
-  # Create essential files with secure permissions
-  : >"$NS_ALERTS" && chmod 640 "$NS_ALERTS" 2>/dev/null || true
-  : >"$NS_CHATLOG" && chmod 640 "$NS_CHATLOG" 2>/dev/null || true
-  : >"$NS_AUDIT" && chmod 600 "$NS_AUDIT" 2>/dev/null || true  # Most sensitive
+  # Create essential files with secure permissions (more conservatively)
+  if [ -d "$(dirname "$NS_ALERTS")" ]; then
+    : >"$NS_ALERTS" && chmod 640 "$NS_ALERTS" 2>/dev/null || true
+  fi
+  if [ -d "$(dirname "$NS_CHATLOG")" ]; then
+    : >"$NS_CHATLOG" && chmod 640 "$NS_CHATLOG" 2>/dev/null || true
+  fi
+  if [ -d "$(dirname "$NS_AUDIT")" ]; then
+    : >"$NS_AUDIT" && chmod 600 "$NS_AUDIT" 2>/dev/null || true  # Most sensitive
+  fi
   
-  # Create JSON files with secure permissions
-  [ -f "$NS_SESS_DB" ] || { echo '{}' >"$NS_SESS_DB" && chmod 600 "$NS_SESS_DB" 2>/dev/null || true; }
+  # Create JSON files with secure permissions (with existence check)
+  if [ -d "$(dirname "$NS_SESS_DB")" ]; then
+    [ -f "$NS_SESS_DB" ] || { echo '{}' >"$NS_SESS_DB" && chmod 600 "$NS_SESS_DB" 2>/dev/null || true; }
+  fi
   [ -f "$NS_RL_DB" ] || { echo '{}' >"$NS_RL_DB" && chmod 600 "$NS_RL_DB" 2>/dev/null || true; }
   [ -f "$NS_BANS_DB" ] || { echo '{}' >"$NS_BANS_DB" && chmod 600 "$NS_BANS_DB" 2>/dev/null || true; }
   [ -f "$NS_JARVIS_MEM" ] || { echo '{"conversations":[]}' >"$NS_JARVIS_MEM" && chmod 600 "$NS_JARVIS_MEM" 2>/dev/null || true; }
@@ -21062,11 +21181,22 @@ install_all_embedded(){
   # Pre-installation system checks and optimization
   ns_log "🔍 Performing pre-installation system checks..."
   
+  # Check system resources before proceeding
+  if ! check_system_resources; then
+    ns_warn "⚠️  System resources are limited. Installation will proceed with conservative settings."
+    # Set a flag for conservative installation
+    export NS_CONSERVATIVE_MODE=1
+  fi
+  
   # Check system requirements and optimize for long-term use
   perform_system_optimization
   
   # Core installation steps with enhanced error handling
   ensure_dirs
+  
+  # Enable stricter error handling after critical initialization is complete
+  enable_strict_mode
+  
   install_dependencies
   write_default_config
   generate_keys
@@ -21122,43 +21252,64 @@ setup_long_term_optimization(){
 perform_system_optimization(){
   ns_log "🔧 Optimizing system for enterprise deployment with enhanced security hardening..."
   
+  # Check available memory before proceeding with optimization
+  local available_memory=0
+  if command -v free >/dev/null 2>&1; then
+    available_memory=$(free -m 2>/dev/null | awk 'NR==2{print $7}' 2>/dev/null || echo 0)
+    if [ "$available_memory" -lt 100 ]; then
+      ns_warn "⚠️  Low available memory (${available_memory}MB). Skipping aggressive optimizations."
+      return 0
+    fi
+  fi
+  
   # PERFORMANCE: Memory management optimization
   if command -v sync >/dev/null 2>&1; then
     sync 2>/dev/null || true  # Flush file system buffers
   fi
   
-  # SECURITY & PERFORMANCE: Optimize file system permissions
+  # SECURITY & PERFORMANCE: Optimize file system permissions (conservatively)
   if [ -d "$NS_HOME" ]; then
     chmod 750 "$NS_HOME" 2>/dev/null || true
     
-    # SECURITY: Set comprehensive secure permissions
-    find "$NS_HOME" -type f -name "*.key" -exec chmod 600 {} \; 2>/dev/null || true
-    find "$NS_HOME" -type f -name "*.json" -exec chmod 640 {} \; 2>/dev/null || true
-    find "$NS_HOME" -type f -name "*.log" -exec chmod 640 {} \; 2>/dev/null || true
-    find "$NS_HOME" -type f -name "*.py" -exec chmod 750 {} \; 2>/dev/null || true
-    find "$NS_HOME" -type f -name "*.sh" -exec chmod 750 {} \; 2>/dev/null || true
-    find "$NS_HOME" -type d -exec chmod 750 {} \; 2>/dev/null || true
+    # SECURITY: Set comprehensive secure permissions (less resource intensive)
+    find "$NS_HOME" -type f -name "*.key" -exec chmod 600 {} + 2>/dev/null || true
+    find "$NS_HOME" -type f -name "*.json" -exec chmod 640 {} + 2>/dev/null || true
+    find "$NS_HOME" -type f -name "*.log" -exec chmod 640 {} + 2>/dev/null || true
+    find "$NS_HOME" -type f -name "*.py" -exec chmod 750 {} + 2>/dev/null || true
+    find "$NS_HOME" -type f -name "*.sh" -exec chmod 750 {} + 2>/dev/null || true
+    find "$NS_HOME" -type d -exec chmod 750 {} + 2>/dev/null || true
   fi
   
-  # PERFORMANCE: Set optimal system limits for production use
+  # PERFORMANCE: Set optimal system limits for production use (with memory checks)
   if command -v ulimit >/dev/null 2>&1; then
-    ulimit -n 16384 2>/dev/null || true  # Optimized file descriptor limit
-    ulimit -u 8192 2>/dev/null || true   # Optimized process limit
-    ulimit -v 4194304 2>/dev/null || true # Virtual memory (4GB)
-    ulimit -s 8192 2>/dev/null || true    # Stack size
+    if [ "$available_memory" -gt 200 ]; then
+      ulimit -n 16384 2>/dev/null || ulimit -n 4096 2>/dev/null || true  # File descriptors
+      ulimit -u 8192 2>/dev/null || ulimit -u 2048 2>/dev/null || true   # Process limit
+      ulimit -v 4194304 2>/dev/null || true # Virtual memory (4GB)
+      ulimit -s 8192 2>/dev/null || true    # Stack size
+    else
+      # Conservative limits for low memory systems
+      ulimit -n 2048 2>/dev/null || true
+      ulimit -u 1024 2>/dev/null || true
+      ulimit -s 4096 2>/dev/null || true
+    fi
   fi
   
-  # PERFORMANCE: Optimize memory usage for long-term operation
-  if [ -f /proc/sys/vm/swappiness ] && [ -w /proc/sys/vm/swappiness ]; then
+  # PERFORMANCE: Optimize memory usage for long-term operation (only if safe)
+  if [ -f /proc/sys/vm/swappiness ] && [ -w /proc/sys/vm/swappiness ] && [ "$available_memory" -gt 150 ]; then
     echo 10 > /proc/sys/vm/swappiness 2>/dev/null || true
   fi
   
   # SECURITY: Clear sensitive environment variables
   unset PASSWORD PASS SECRET TOKEN API_KEY 2>/dev/null || true
   
-  # PERFORMANCE: Set higher priority for main process
-  if command -v renice >/dev/null 2>&1; then
-    renice -n -2 $$ 2>/dev/null || true
+  # PERFORMANCE: Set higher priority for main process (with memory check and fallback)
+  if command -v renice >/dev/null 2>&1 && [ "$available_memory" -gt 150 ]; then
+    renice -n -2 $$ 2>/dev/null || {
+      ns_warn "⚠️  Cannot adjust process priority - insufficient resources or permissions"
+      # Try less aggressive priority adjustment
+      renice -n 0 $$ 2>/dev/null || true
+    }
   fi
   
   ns_log "✅ System optimization complete with enhanced security"
