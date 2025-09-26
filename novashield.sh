@@ -7552,39 +7552,130 @@ write_dashboard(){
   <link rel="stylesheet" href="/static/style.css" />
 </head>
 <body>
-  <header>
-    <div class="brand">
-      <div class="ring"></div>
-      <h1>NovaShield <span class="mini">JARVIS</span></h1>
-      <div class="by">Created by @MrNova420</div>
+  <header class="enterprise-header">
+    <div class="header-left">
+      <div class="brand-enterprise">
+        <div class="nova-logo">⚡</div>
+        <div class="brand-text">
+          <h1>NovaShield <span class="edition">ENTERPRISE</span></h1>
+          <div class="tagline">Advanced Security & Intelligence Platform</div>
+        </div>
+      </div>
     </div>
-    <div class="actions">
-      <button id="btn-420-theme" type="button" title="Toggle 420 themed colors (purple, green, blue)">🌿 420 Mode</button>
-      <button id="btn-refresh" type="button" title="Refresh all dashboard data and status information">Refresh Dashboard</button>
-      <button data-act="backup" type="button" title="Create a backup of important system files and configurations">Create Backup</button>
-      <button data-act="version" type="button" title="Create a system snapshot with current state and version info">Create Snapshot</button>
-      <button data-act="restart_monitors" type="button" title="Restart all monitoring services and background processes">Restart Monitors</button>
-      <a href="/logout" class="logout-link" aria-label="Logout">
-        <button type="button" title="Sign out and return to login screen">Logout</button>
-      </a>
+    <div class="header-center">
+      <div class="system-status-bar">
+        <div class="status-item" id="connection-status">
+          <span class="status-icon">🔴</span>
+          <span class="status-text">Initializing...</span>
+        </div>
+        <div class="status-item" id="security-level">
+          <span class="status-icon">🛡️</span>
+          <span class="status-text">Secure</span>
+        </div>
+        <div class="status-item" id="ai-status">
+          <span class="status-icon">🤖</span>
+          <span class="status-text">JARVIS Online</span>
+        </div>
+      </div>
+    </div>
+    <div class="header-right">
+      <div class="user-profile">
+        <div class="user-avatar">👤</div>
+        <div class="user-info">
+          <span class="user-name" id="current-user">Admin</span>
+          <span class="user-role">Administrator</span>
+        </div>
+      </div>
+      <div class="enterprise-actions">
+        <button class="action-btn primary" id="btn-enterprise-dashboard" title="Enterprise Command Center">📊 Command Center</button>
+        <button class="action-btn secondary" id="btn-420-theme" title="Toggle 420 themed colors">🌿 420 Mode</button>
+        <button class="action-btn secondary" id="btn-refresh" title="Refresh dashboard">🔄 Refresh</button>
+        <div class="dropdown-container">
+          <button class="action-btn dropdown-trigger" id="system-actions" title="System Actions">⚙️ System ▼</button>
+          <div class="dropdown-menu" id="system-dropdown">
+            <button data-act="backup" class="dropdown-item">💾 Create Backup</button>
+            <button data-act="version" class="dropdown-item">📸 Create Snapshot</button>
+            <button data-act="restart_monitors" class="dropdown-item">🔄 Restart Monitors</button>
+            <hr class="dropdown-divider">
+            <a href="/logout" class="dropdown-item logout-link">🚪 Logout</a>
+          </div>
+        </div>
+      </div>
     </div>
   </header>
 
-  <nav class="tabs" aria-label="Main">
-    <button data-tab="ai" class="active" type="button">🤖 Jarvis AI</button>
-    <button data-tab="dashboard" type="button">📊 Dashboard</button>
-    <button data-tab="alerts" type="button">🚨 Alerts</button>
-    <button data-tab="status" type="button">📈 Status</button>
-    <button data-tab="security" type="button">🛡️ Security</button>
-    <button data-tab="intelligence" type="button">🔍 Intelligence</button>
-    <button data-tab="tools" type="button">🔧 Tools</button>
-    <button data-tab="files" type="button">📁 Files</button>
-    <button data-tab="terminal" type="button">💻 Terminal</button>
-    <button data-tab="network" type="button">🌐 Network</button>
-    <button data-tab="analytics" type="button">📈 Analytics</button>
-    <button data-tab="webgen" type="button">🌐 Web Builder</button>
-    <button data-tab="config" type="button">⚙️ Config</button>
-    <button data-tab="results" type="button">Results</button>
+  <nav class="enterprise-nav" aria-label="Main Navigation">
+    <div class="nav-section">
+      <div class="nav-category">AI & Intelligence</div>
+      <button data-tab="ai" class="nav-item active" type="button">
+        <span class="nav-icon">🤖</span>
+        <span class="nav-text">JARVIS AI</span>
+        <span class="nav-badge" id="ai-conversations">0</span>
+      </button>
+      <button data-tab="intelligence" class="nav-item" type="button">
+        <span class="nav-icon">🔍</span>
+        <span class="nav-text">Intelligence Gathering</span>
+      </button>
+      <button data-tab="analytics" class="nav-item" type="button">
+        <span class="nav-icon">📈</span>
+        <span class="nav-text">Advanced Analytics</span>
+      </button>
+    </div>
+    
+    <div class="nav-section">
+      <div class="nav-category">Operations Center</div>
+      <button data-tab="dashboard" class="nav-item" type="button">
+        <span class="nav-icon">📊</span>
+        <span class="nav-text">Dashboard</span>
+      </button>
+      <button data-tab="status" class="nav-item" type="button">
+        <span class="nav-icon">📈</span>
+        <span class="nav-text">System Status</span>
+        <span class="nav-indicator" id="status-indicator">●</span>
+      </button>
+      <button data-tab="network" class="nav-item" type="button">
+        <span class="nav-icon">🌐</span>
+        <span class="nav-text">Network Monitor</span>
+      </button>
+    </div>
+    
+    <div class="nav-section">
+      <div class="nav-category">Security Operations</div>
+      <button data-tab="security" class="nav-item" type="button">
+        <span class="nav-icon">🛡️</span>
+        <span class="nav-text">Security Center</span>
+        <span class="nav-badge" id="security-alerts">0</span>
+      </button>
+      <button data-tab="alerts" class="nav-item" type="button">
+        <span class="nav-icon">🚨</span>
+        <span class="nav-text">Threat Alerts</span>
+        <span class="nav-badge alert" id="alert-count">0</span>
+      </button>
+    </div>
+    
+    <div class="nav-section">
+      <div class="nav-category">Tools & Management</div>
+      <button data-tab="tools" class="nav-item" type="button">
+        <span class="nav-icon">🔧</span>
+        <span class="nav-text">Security Tools</span>
+      </button>
+      <button data-tab="files" class="nav-item" type="button">
+        <span class="nav-icon">📁</span>
+        <span class="nav-text">File Explorer</span>
+      </button>
+      <button data-tab="terminal" class="nav-item" type="button">
+        <span class="nav-icon">💻</span>
+        <span class="nav-text">Terminal</span>
+      </button>
+      <button data-tab="webgen" class="nav-item" type="button">
+        <span class="nav-icon">🌐</span>
+        <span class="nav-text">Web Builder</span>
+      </button>
+      <button data-tab="config" class="nav-item" type="button">
+        <span class="nav-icon">⚙️</span>
+        <span class="nav-text">Configuration</span>
+      </button>
+    </div>
   </nav>
 
   <main>
@@ -8443,7 +8534,32 @@ write_dashboard(){
 HTML
 
   write_file "${NS_WWW}/style.css" 644 <<'CSS'
-:root { --bg:#0a1a3d; --card:#0f1d42; --text:#e1f3ff; --muted:#8bb4d9; --ok:#00d884; --warn:#ffb347; --crit:#ff5757; --accent:#00c4f7; --ring:#00ffe1; --info:#00a8ff; --success:#16a34a; }
+:root { 
+  --bg:#0a1a3d; 
+  --card:#0f1d42; 
+  --text:#e1f3ff; 
+  --muted:#8bb4d9; 
+  --ok:#00d884; 
+  --warn:#ffb347; 
+  --crit:#ff5757; 
+  --accent:#00c4f7; 
+  --ring:#00ffe1; 
+  --info:#00a8ff; 
+  --success:#16a34a; 
+  
+  /* Enterprise theme enhancements */
+  --primary:#0066cc;
+  --primary-light:#338fff;
+  --secondary:#6c757d;
+  --dark:#1e2329;
+  --darker:#131619;
+  --border:#2d3748;
+  --border-light:#4a5568;
+  --shadow:rgba(0,0,0,0.25);
+  --enterprise-gradient:linear-gradient(135deg, #0066cc 0%, #004080 50%, #002040 100%);
+  --glass-bg:rgba(255,255,255,0.05);
+  --glass-border:rgba(255,255,255,0.1);
+}
 
 /* 420 Theme Variables */
 :root.theme-420 { 
@@ -8462,25 +8578,939 @@ HTML
   --green-bright: #7fff00;
   --blue-bright: #4169e1;
 }
-*{box-sizing:border-box}
-body{margin:0;background:radial-gradient(1400px 700px at 15% -25%,rgba(0,159,255,.15),transparent),linear-gradient(180deg,#021933,#0d1b3a 40%,#1a2b5c 100%);color:var(--text);font-family:ui-sans-serif,system-ui,Segoe UI,Roboto,Arial}
+*{box-sizing:border-box; margin:0; padding:0;}
+
+body{
+  margin:0;
+  background:radial-gradient(1400px 700px at 15% -25%,rgba(0,159,255,.15),transparent),linear-gradient(180deg,#021933,#0d1b3a 40%,#1a2b5c 100%);
+  color:var(--text);
+  font-family:'Segoe UI',system-ui,-apple-system,BlinkMacSystemFont,sans-serif;
+  font-size:14px;
+  line-height:1.5;
+  overflow-x:hidden;
+}
 
 /* 420 Theme Body Background */
 .theme-420 body{background:radial-gradient(1400px 700px at 15% -25%,rgba(147,112,219,.15),transparent),linear-gradient(180deg,#0a0a0a,#1a0f2a 40%,#2a1a4a 100%)}
-header{display:flex;align-items:center;justify-content:space-between;padding:14px 18px;border-bottom:1px solid #0e223a;background:linear-gradient(180deg,rgba(0,208,255,.06),transparent)}
-.brand{display:flex;align-items:center;gap:12px}
-.brand h1{margin:0;font-size:20px;letter-spacing:.6px}
-.brand .mini{color:var(--accent);font-weight:700;margin-left:6px}
-.by{font-size:12px;color:var(--muted)}
-.ring{width:20px;height:20px;border-radius:50%;box-shadow:0 0 0 3px rgba(0,255,225,.3),inset 0 0 0 2px rgba(0,255,225,.6),0 0 18px 2px rgba(0,255,225,.4)}
-.actions button{background:#091425;color:#fff;border:1px solid #143055;border-radius:10px;padding:8px 12px;margin-left:8px;cursor:pointer}
-.logout-link{margin-left:8px}
-.tabs{display:flex;gap:8px;padding:8px 16px;border-bottom:1px solid #0e223a;background:rgba(0,12,24,.4)}
-.tabs button{background:#0a1426;border:1px solid #173764;border-radius:8px;color:#cfe6ff;padding:8px 10px;cursor:pointer}
-.tabs button.active{outline:2px solid var(--accent); color:#fff}
-main{padding:16px}
-.tab{display:none}
-.tab.active{display:block}
+
+/* Enterprise Header Styling */
+.enterprise-header{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  padding:12px 24px;
+  background:var(--enterprise-gradient);
+  border-bottom:2px solid var(--primary-light);
+  box-shadow:0 4px 20px var(--shadow);
+  backdrop-filter:blur(10px);
+  position:sticky;
+  top:0;
+  z-index:1000;
+}
+
+.header-left{
+  display:flex;
+  align-items:center;
+  gap:16px;
+}
+
+.brand-enterprise{
+  display:flex;
+  align-items:center;
+  gap:12px;
+}
+
+.nova-logo{
+  width:32px;
+  height:32px;
+  border-radius:50%;
+  background:var(--enterprise-gradient);
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  font-size:18px;
+  box-shadow:0 0 20px rgba(0,102,204,0.5);
+  animation:pulse 2s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { box-shadow:0 0 20px rgba(0,102,204,0.5); }
+  50% { box-shadow:0 0 30px rgba(0,102,204,0.8); }
+}
+
+.brand-text h1{
+  font-size:22px;
+  font-weight:700;
+  color:#ffffff;
+  text-shadow:0 2px 4px rgba(0,0,0,0.3);
+  margin:0;
+}
+
+.edition{
+  background:linear-gradient(45deg,#00c4f7,#00ffe1);
+  -webkit-background-clip:text;
+  -webkit-text-fill-color:transparent;
+  background-clip:text;
+  font-size:12px;
+  font-weight:600;
+  margin-left:8px;
+}
+
+.tagline{
+  font-size:11px;
+  color:rgba(255,255,255,0.8);
+  font-weight:400;
+  margin-top:2px;
+}
+
+.header-center{
+  flex:1;
+  display:flex;
+  justify-content:center;
+  max-width:500px;
+}
+
+.system-status-bar{
+  display:flex;
+  gap:20px;
+  padding:8px 16px;
+  background:rgba(255,255,255,0.1);
+  border-radius:20px;
+  backdrop-filter:blur(10px);
+}
+
+.status-item{
+  display:flex;
+  align-items:center;
+  gap:6px;
+  font-size:12px;
+  color:rgba(255,255,255,0.9);
+}
+
+.status-icon{
+  font-size:14px;
+  animation:blink 3s infinite;
+}
+
+@keyframes blink {
+  0%, 90% { opacity:1; }
+  95% { opacity:0.3; }
+}
+
+.header-right{
+  display:flex;
+  align-items:center;
+  gap:16px;
+}
+
+.user-profile{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  padding:6px 12px;
+  background:rgba(255,255,255,0.1);
+  border-radius:12px;
+  backdrop-filter:blur(10px);
+}
+
+.user-avatar{
+  width:24px;
+  height:24px;
+  border-radius:50%;
+  background:var(--primary-light);
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  font-size:12px;
+}
+
+.user-info{
+  display:flex;
+  flex-direction:column;
+}
+
+.user-name{
+  font-size:12px;
+  font-weight:600;
+  color:#ffffff;
+}
+
+.user-role{
+  font-size:10px;
+  color:rgba(255,255,255,0.7);
+}
+
+.enterprise-actions{
+  display:flex;
+  align-items:center;
+  gap:8px;
+}
+
+.action-btn{
+  padding:8px 12px;
+  border:1px solid rgba(255,255,255,0.2);
+  border-radius:8px;
+  background:rgba(255,255,255,0.1);
+  color:#ffffff;
+  font-size:12px;
+  cursor:pointer;
+  transition:all 0.3s ease;
+  backdrop-filter:blur(10px);
+}
+
+.action-btn:hover{
+  background:rgba(255,255,255,0.2);
+  border-color:rgba(255,255,255,0.4);
+  transform:translateY(-1px);
+}
+
+.action-btn.primary{
+  background:var(--primary-light);
+  border-color:var(--primary-light);
+}
+
+.action-btn.primary:hover{
+  background:var(--primary);
+  box-shadow:0 4px 12px rgba(0,102,204,0.3);
+}
+
+.dropdown-container{
+  position:relative;
+}
+
+.dropdown-menu{
+  position:absolute;
+  top:100%;
+  right:0;
+  margin-top:4px;
+  background:var(--card);
+  border:1px solid var(--border);
+  border-radius:8px;
+  box-shadow:0 8px 24px rgba(0,0,0,0.3);
+  min-width:180px;
+  z-index:1000;
+  display:none;
+}
+
+.dropdown-container:hover .dropdown-menu,
+.dropdown-menu:hover{
+  display:block;
+}
+
+.dropdown-item{
+  display:block;
+  width:100%;
+  padding:8px 12px;
+  background:none;
+  border:none;
+  color:var(--text);
+  font-size:12px;
+  text-align:left;
+  cursor:pointer;
+  transition:all 0.2s ease;
+  text-decoration:none;
+}
+
+.dropdown-item:hover{
+  background:var(--primary);
+  color:#ffffff;
+}
+
+.dropdown-divider{
+  border:none;
+  height:1px;
+  background:var(--border);
+  margin:4px 0;
+}
+/* Enterprise Navigation Styling */
+.enterprise-nav{
+  display:flex;
+  flex-direction:column;
+  gap:4px;
+  padding:16px;
+  background:linear-gradient(180deg,var(--card),var(--darker));
+  border-bottom:2px solid var(--border);
+  box-shadow:0 4px 12px var(--shadow);
+  overflow-x:auto;
+  scrollbar-width:none;
+  -ms-overflow-style:none;
+}
+
+.enterprise-nav::-webkit-scrollbar{
+  display:none;
+}
+
+.nav-section{
+  margin-bottom:20px;
+}
+
+.nav-category{
+  font-size:11px;
+  font-weight:600;
+  color:var(--muted);
+  text-transform:uppercase;
+  letter-spacing:0.5px;
+  margin-bottom:8px;
+  padding-left:12px;
+}
+
+.nav-item{
+  display:flex;
+  align-items:center;
+  gap:12px;
+  padding:10px 12px;
+  background:transparent;
+  border:1px solid transparent;
+  border-radius:8px;
+  color:var(--text);
+  font-size:13px;
+  cursor:pointer;
+  transition:all 0.3s ease;
+  text-decoration:none;
+  position:relative;
+}
+
+.nav-item:hover{
+  background:var(--glass-bg);
+  border-color:var(--glass-border);
+  transform:translateX(4px);
+}
+
+.nav-item.active{
+  background:var(--primary);
+  border-color:var(--primary-light);
+  color:#ffffff;
+  box-shadow:0 4px 12px rgba(0,102,204,0.3);
+}
+
+.nav-item.active::before{
+  content:'';
+  position:absolute;
+  left:-16px;
+  top:50%;
+  transform:translateY(-50%);
+  width:4px;
+  height:20px;
+  background:var(--primary-light);
+  border-radius:2px;
+}
+
+.nav-icon{
+  font-size:16px;
+  width:20px;
+  text-align:center;
+}
+
+.nav-text{
+  flex:1;
+  font-weight:500;
+}
+
+.nav-badge{
+  background:var(--warn);
+  color:#000;
+  font-size:10px;
+  font-weight:600;
+  padding:2px 6px;
+  border-radius:10px;
+  min-width:18px;
+  text-align:center;
+}
+
+.nav-badge.alert{
+  background:var(--crit);
+  color:#fff;
+  animation:pulse-badge 2s infinite;
+}
+
+@keyframes pulse-badge {
+  0%, 100% { transform:scale(1); }
+  50% { transform:scale(1.1); }
+}
+
+.nav-indicator{
+  width:8px;
+  height:8px;
+  border-radius:50%;
+  background:var(--ok);
+  animation:status-blink 3s infinite;
+}
+
+@keyframes status-blink {
+  0%, 90% { opacity:1; }
+  95% { opacity:0.3; }
+}
+main{padding:20px; max-width:1400px; margin:0 auto;}
+
+.tab{display:none; animation:fadeIn 0.3s ease-in-out;}
+.tab.active{display:block;}
+
+@keyframes fadeIn {
+  from { opacity:0; transform:translateY(10px); }
+  to { opacity:1; transform:translateY(0); }
+}
+
+/* Enterprise AI Panel Styling */
+.enterprise-ai-panel{
+  background:linear-gradient(135deg,var(--card),var(--darker));
+  border:1px solid var(--border-light);
+  border-radius:16px;
+  padding:24px;
+  box-shadow:0 8px 32px var(--shadow);
+  position:relative;
+  overflow:hidden;
+}
+
+.enterprise-ai-panel::before{
+  content:'';
+  position:absolute;
+  top:0;
+  left:0;
+  right:0;
+  height:3px;
+  background:var(--enterprise-gradient);
+}
+
+.ai-header{
+  display:flex;
+  justify-content:space-between;
+  align-items:flex-start;
+  margin-bottom:20px;
+  padding-bottom:16px;
+  border-bottom:1px solid var(--border);
+}
+
+.ai-title h3{
+  font-size:24px;
+  font-weight:700;
+  color:var(--text);
+  margin:0 0 8px 0;
+  text-shadow:0 2px 4px rgba(0,0,0,0.3);
+}
+
+.ai-status-bar{
+  display:flex;
+  gap:12px;
+  align-items:center;
+}
+
+.ai-status{
+  padding:4px 12px;
+  border-radius:12px;
+  font-size:11px;
+  font-weight:600;
+  text-transform:uppercase;
+  letter-spacing:0.5px;
+}
+
+.ai-status.online{
+  background:var(--ok);
+  color:#000;
+  box-shadow:0 0 10px rgba(0,216,132,0.3);
+}
+
+.ai-version{
+  font-size:10px;
+  color:var(--muted);
+  background:var(--glass-bg);
+  padding:2px 8px;
+  border-radius:8px;
+  border:1px solid var(--glass-border);
+}
+
+.ai-uptime{
+  font-family:ui-monospace,monospace;
+  font-size:11px;
+  color:var(--accent);
+  background:var(--darker);
+  padding:4px 8px;
+  border-radius:6px;
+}
+
+.ai-controls{
+  display:flex;
+  gap:8px;
+}
+
+.ai-control-btn{
+  padding:6px 12px;
+  background:var(--glass-bg);
+  border:1px solid var(--glass-border);
+  border-radius:8px;
+  color:var(--text);
+  font-size:11px;
+  cursor:pointer;
+  transition:all 0.3s ease;
+  backdrop-filter:blur(10px);
+}
+
+.ai-control-btn:hover{
+  background:var(--primary);
+  border-color:var(--primary-light);
+  color:#fff;
+  transform:translateY(-1px);
+}
+
+.ai-enterprise-dashboard{
+  margin-bottom:24px;
+}
+
+.ai-metrics-grid{
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(200px,1fr));
+  gap:16px;
+  margin-top:16px;
+}
+
+.ai-metric-card{
+  background:var(--glass-bg);
+  border:1px solid var(--glass-border);
+  border-radius:12px;
+  padding:16px;
+  backdrop-filter:blur(10px);
+  position:relative;
+  overflow:hidden;
+  transition:all 0.3s ease;
+}
+
+.ai-metric-card:hover{
+  transform:translateY(-2px);
+  box-shadow:0 8px 24px rgba(0,102,204,0.2);
+  border-color:var(--primary-light);
+}
+
+.ai-metric-card::before{
+  content:'';
+  position:absolute;
+  top:0;
+  left:0;
+  right:0;
+  height:2px;
+  background:var(--enterprise-gradient);
+}
+
+.metric-icon{
+  font-size:24px;
+  margin-bottom:12px;
+}
+
+.metric-content{
+  display:flex;
+  flex-direction:column;
+  gap:4px;
+}
+
+.metric-value{
+  font-size:20px;
+  font-weight:700;
+  color:var(--text);
+}
+
+.metric-label{
+  font-size:11px;
+  color:var(--muted);
+  text-transform:uppercase;
+  letter-spacing:0.5px;
+}
+
+.metric-trend{
+  font-size:10px;
+  font-weight:600;
+  padding:2px 6px;
+  border-radius:4px;
+  align-self:flex-start;
+}
+
+.metric-trend:contains('+'){
+  background:var(--ok);
+  color:#000;
+}
+
+.ai-quick-actions{
+  margin-bottom:24px;
+}
+
+.ai-quick-actions h4{
+  font-size:16px;
+  font-weight:600;
+  color:var(--text);
+  margin:0 0 12px 0;
+}
+
+.quick-action-grid{
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(160px,1fr));
+  gap:12px;
+}
+
+.quick-action{
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  gap:8px;
+  padding:16px;
+  background:var(--glass-bg);
+  border:1px solid var(--glass-border);
+  border-radius:10px;
+  color:var(--text);
+  font-size:12px;
+  cursor:pointer;
+  transition:all 0.3s ease;
+  backdrop-filter:blur(10px);
+  text-decoration:none;
+}
+
+.quick-action:hover{
+  transform:translateY(-2px);
+  box-shadow:0 6px 20px rgba(0,102,204,0.2);
+}
+
+.quick-action.primary{
+  background:var(--primary);
+  border-color:var(--primary-light);
+  color:#fff;
+}
+
+.quick-action.primary:hover{
+  background:var(--primary-light);
+  box-shadow:0 8px 24px rgba(0,102,204,0.4);
+}
+
+.action-icon{
+  font-size:20px;
+}
+
+.action-text{
+  font-weight:500;
+  text-align:center;
+}
+
+.ai-chat-interface{
+  background:var(--darker);
+  border:1px solid var(--border);
+  border-radius:12px;
+  overflow:hidden;
+  margin-bottom:24px;
+}
+
+.chat-header{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  padding:12px 16px;
+  background:var(--enterprise-gradient);
+  border-bottom:1px solid var(--border);
+}
+
+.chat-header h4{
+  font-size:14px;
+  font-weight:600;
+  color:#fff;
+  margin:0;
+}
+
+.chat-controls{
+  display:flex;
+  gap:8px;
+}
+
+.chat-control{
+  padding:4px 8px;
+  background:rgba(255,255,255,0.1);
+  border:1px solid rgba(255,255,255,0.2);
+  border-radius:6px;
+  color:#fff;
+  font-size:12px;
+  cursor:pointer;
+  transition:all 0.2s ease;
+}
+
+.chat-control:hover{
+  background:rgba(255,255,255,0.2);
+}
+
+.chat-container{
+  display:flex;
+  flex-direction:column;
+  height:300px;
+}
+
+.chat-messages{
+  flex:1;
+  overflow-y:auto;
+  padding:16px;
+  background:var(--darker);
+  scrollbar-width:thin;
+  scrollbar-color:var(--border) transparent;
+}
+
+.chat-messages::-webkit-scrollbar{
+  width:6px;
+}
+
+.chat-messages::-webkit-scrollbar-track{
+  background:transparent;
+}
+
+.chat-messages::-webkit-scrollbar-thumb{
+  background:var(--border);
+  border-radius:3px;
+}
+
+.chat-input-area{
+  display:flex;
+  gap:8px;
+  padding:12px 16px;
+  background:var(--card);
+  border-top:1px solid var(--border);
+}
+
+.chat-input{
+  flex:1;
+  padding:10px 16px;
+  background:var(--darker);
+  border:1px solid var(--border);
+  border-radius:20px;
+  color:var(--text);
+  font-size:13px;
+  resize:none;
+  outline:none;
+  transition:all 0.3s ease;
+}
+
+.chat-input:focus{
+  border-color:var(--primary);
+  box-shadow:0 0 0 2px rgba(0,102,204,0.1);
+}
+
+.send-btn{
+  padding:10px 16px;
+  background:var(--primary);
+  border:1px solid var(--primary-light);
+  border-radius:20px;
+  color:#fff;
+  cursor:pointer;
+  transition:all 0.3s ease;
+  display:flex;
+  align-items:center;
+  gap:6px;
+}
+
+.send-btn:hover{
+  background:var(--primary-light);
+  transform:translateY(-1px);
+  box-shadow:0 4px 12px rgba(0,102,204,0.3);
+}
+
+.ai-training-dashboard{
+  background:var(--card);
+  border:1px solid var(--border);
+  border-radius:12px;
+  padding:20px;
+}
+
+.ai-training-dashboard h4{
+  font-size:18px;
+  font-weight:600;
+  color:var(--text);
+  margin:0 0 20px 0;
+  text-align:center;
+}
+
+.training-section{
+  margin-bottom:24px;
+  padding:16px;
+  background:var(--glass-bg);
+  border:1px solid var(--glass-border);
+  border-radius:10px;
+  backdrop-filter:blur(10px);
+}
+
+.training-section h5{
+  font-size:14px;
+  font-weight:600;
+  color:var(--accent);
+  margin:0 0 12px 0;
+}
+
+.voice-controls{
+  display:flex;
+  flex-direction:column;
+  gap:12px;
+}
+
+.control-btn{
+  padding:8px 16px;
+  background:var(--primary);
+  border:1px solid var(--primary-light);
+  border-radius:8px;
+  color:#fff;
+  font-size:12px;
+  cursor:pointer;
+  transition:all 0.3s ease;
+}
+
+.control-btn:hover{
+  background:var(--primary-light);
+  transform:translateY(-1px);
+}
+
+.voice-sliders{
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(200px,1fr));
+  gap:12px;
+  margin:12px 0;
+}
+
+.voice-sliders label{
+  display:flex;
+  flex-direction:column;
+  gap:4px;
+  font-size:12px;
+  color:var(--text);
+}
+
+.voice-sliders input[type="range"]{
+  width:100%;
+  height:6px;
+  background:var(--border);
+  border-radius:3px;
+  outline:none;
+  -webkit-appearance:none;
+}
+
+.voice-sliders input[type="range"]::-webkit-slider-thumb{
+  -webkit-appearance:none;
+  width:16px;
+  height:16px;
+  background:var(--primary);
+  border-radius:50%;
+  cursor:pointer;
+}
+
+.memory-controls{
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(200px,1fr));
+  gap:12px;
+}
+
+.memory-controls label{
+  display:flex;
+  flex-direction:column;
+  gap:4px;
+  font-size:12px;
+  color:var(--text);
+}
+
+.memory-controls select{
+  padding:8px;
+  background:var(--darker);
+  border:1px solid var(--border);
+  border-radius:6px;
+  color:var(--text);
+  font-size:12px;
+}
+
+.training-actions{
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(140px,1fr));
+  gap:8px;
+}
+
+.primary-btn{
+  padding:10px 16px;
+  background:var(--primary);
+  border:1px solid var(--primary-light);
+  border-radius:8px;
+  color:#fff;
+  font-size:12px;
+  font-weight:600;
+  cursor:pointer;
+  transition:all 0.3s ease;
+}
+
+.primary-btn:hover{
+  background:var(--primary-light);
+  transform:translateY(-1px);
+  box-shadow:0 4px 12px rgba(0,102,204,0.3);
+}
+
+.warning-btn{
+  padding:10px 16px;
+  background:var(--warn);
+  border:1px solid var(--warn);
+  border-radius:8px;
+  color:#000;
+  font-size:12px;
+  font-weight:600;
+  cursor:pointer;
+  transition:all 0.3s ease;
+}
+
+.warning-btn:hover{
+  background:#ff8c00;
+  transform:translateY(-1px);
+  box-shadow:0 4px 12px rgba(255,179,71,0.3);
+}
+
+.advanced-controls{
+  display:flex;
+  flex-direction:column;
+  gap:12px;
+}
+
+.advanced-controls label{
+  display:flex;
+  flex-direction:column;
+  gap:4px;
+  font-size:12px;
+  color:var(--text);
+}
+
+.toggle-controls{
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(180px,1fr));
+  gap:8px;
+  margin-top:8px;
+}
+
+.toggle-controls label{
+  display:flex;
+  flex-direction:row;
+  align-items:center;
+  gap:8px;
+  font-size:12px;
+  color:var(--text);
+  cursor:pointer;
+}
+
+.learning-stats{
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(200px,1fr));
+  gap:12px;
+}
+
+.memory-item{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  padding:8px 12px;
+  background:var(--darker);
+  border:1px solid var(--border);
+  border-radius:6px;
+}
+
+.memory-label{
+  font-size:11px;
+  color:var(--muted);
+  font-weight:500;
+}
+
+.memory-value{
+  font-size:12px;
+  color:var(--accent);
+  font-weight:600;
+}
 .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}
 .card{background:var(--card);border:1px solid #112540;border-radius:14px;padding:12px;box-shadow:0 6px 20px rgba(0,0,0,.25)}
 .card h2{margin:0 0 8px 0;font-size:16px;color:#d1eaff}
@@ -8967,27 +9997,164 @@ textarea#wcontent{width:100%;height:160px;background:#0b1830;color:#d7e3ff;borde
 
 @media (max-width:980px){ .grid{grid-template-columns:1fr}; .security-grid{grid-template-columns:1fr}; .security-controls{flex-direction:column;align-items:stretch} }
 
-/* Full-screen login overlay and lock-state */
-.login{position:fixed;inset:0;background:rgba(0,0,0,.88);display:flex;align-items:center;justify-content:center;z-index:10000}
-.login-card{background:#0c162b;border:1px solid #15345f;border-radius:14px;width:min(92vw,380px);padding:18px;color:#e5f0ff;box-shadow:0 10px 30px rgba(0,0,0,.5)}
-.login-logo{display:flex;align-items:center;gap:10px;margin-bottom:10px}
-.login-title{font-weight:700;letter-spacing:.4px}
-.login-sub{font-size:12px;color:#a9b8d6;margin-bottom:10px}
-.login-card input{width:100%;margin:8px 0;padding:10px;border-radius:10px;border:1px solid #143055;background:#0b1830;color:#d7e3ff}
-.login-card button{width:100%;padding:10px;border-radius:10px;background:#0a1426;border:1px solid #173764;color:#cfe6ff;cursor:pointer}
-.msg{min-height:18px;font-size:12px;color:#fda4af;margin-top:8px}
-.visually-hidden{position:absolute!important;height:1px;width:1px;overflow:hidden;clip:rect(1px,1px,1px,1px);white-space:nowrap;border:0;padding:0;margin:-1px}
-
-/* When login is active: disable and blur everything behind */
-body.login-active{overflow:hidden}
-body.login-active header, body.login-active nav, body.login-active main{
-  filter:blur(6px) brightness(0.6);
-  pointer-events:none;
-  user-select:none;
+/* Enterprise Login Overlay */
+.login{
+  position:fixed;
+  inset:0;
+  background:linear-gradient(135deg,rgba(0,0,0,0.95),rgba(0,26,61,0.85));
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  z-index:10000;
+  backdrop-filter:blur(20px);
 }
 
-/* Small ring used in branding/login */
-.login .ring{width:24px;height:24px}
+.login-card{
+  background:linear-gradient(135deg,var(--card),var(--darker));
+  border:2px solid var(--primary-light);
+  border-radius:20px;
+  width:min(92vw,420px);
+  padding:32px;
+  color:var(--text);
+  box-shadow:0 20px 60px rgba(0,0,0,0.7),0 0 40px rgba(0,102,204,0.2);
+  position:relative;
+  overflow:hidden;
+}
+
+.login-card::before{
+  content:'';
+  position:absolute;
+  top:0;
+  left:0;
+  right:0;
+  height:4px;
+  background:var(--enterprise-gradient);
+}
+
+.login-logo{
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  gap:12px;
+  margin-bottom:20px;
+}
+
+.login-logo .ring{
+  width:32px;
+  height:32px;
+  border-radius:50%;
+  background:var(--enterprise-gradient);
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  box-shadow:0 0 30px rgba(0,102,204,0.5);
+  animation:login-pulse 3s infinite;
+}
+
+@keyframes login-pulse {
+  0%, 100% { box-shadow:0 0 30px rgba(0,102,204,0.5); }
+  50% { box-shadow:0 0 50px rgba(0,102,204,0.8); }
+}
+
+.login-title{
+  font-size:24px;
+  font-weight:700;
+  color:var(--text);
+  text-shadow:0 2px 4px rgba(0,0,0,0.3);
+}
+
+.login-sub{
+  font-size:14px;
+  color:var(--muted);
+  margin-bottom:24px;
+  text-align:center;
+  line-height:1.5;
+}
+
+.login-card input{
+  width:100%;
+  margin:12px 0;
+  padding:14px 16px;
+  border-radius:12px;
+  border:2px solid var(--border);
+  background:var(--darker);
+  color:var(--text);
+  font-size:14px;
+  transition:all 0.3s ease;
+  outline:none;
+}
+
+.login-card input:focus{
+  border-color:var(--primary);
+  box-shadow:0 0 0 4px rgba(0,102,204,0.1);
+  background:var(--card);
+}
+
+.login-card input::placeholder{
+  color:var(--muted);
+}
+
+.login-card button{
+  width:100%;
+  padding:14px;
+  border-radius:12px;
+  background:var(--primary);
+  border:2px solid var(--primary-light);
+  color:#fff;
+  font-size:14px;
+  font-weight:600;
+  cursor:pointer;
+  transition:all 0.3s ease;
+  margin-top:8px;
+}
+
+.login-card button:hover{
+  background:var(--primary-light);
+  transform:translateY(-2px);
+  box-shadow:0 8px 24px rgba(0,102,204,0.4);
+}
+
+.login-card button:active{
+  transform:translateY(0);
+}
+
+.msg{
+  min-height:20px;
+  font-size:13px;
+  color:var(--crit);
+  margin-top:12px;
+  text-align:center;
+  padding:8px;
+  border-radius:8px;
+  background:rgba(255,87,87,0.1);
+  border:1px solid rgba(255,87,87,0.2);
+}
+
+.visually-hidden{
+  position:absolute!important;
+  height:1px;
+  width:1px;
+  overflow:hidden;
+  clip:rect(1px,1px,1px,1px);
+  white-space:nowrap;
+  border:0;
+  padding:0;
+  margin:-1px;
+}
+
+/* Enhanced blur effect when login is active */
+body.login-active{
+  overflow:hidden;
+}
+
+body.login-active .enterprise-header,
+body.login-active .enterprise-nav,
+body.login-active main{
+  filter:blur(8px) brightness(0.5);
+  pointer-events:none;
+  user-select:none;
+  transition:all 0.3s ease;
+}
 
 /* JARVIS-specific styling */
 #chat {
@@ -13122,6 +14289,262 @@ document.addEventListener('DOMContentLoaded', () => {
         threatBtn.onclick = performThreatScan;
     }
     
+    // Initialize enterprise features
+    initializeEnterpriseFeatures();
+    startEnterpriseMetrics();
+    setupAdvancedNavigation();
+});
+
+// Enterprise Features Initialization
+function initializeEnterpriseFeatures() {
+    console.log('🚀 Initializing NovaShield Enterprise features...');
+    
+    // Initialize status indicators
+    updateConnectionStatus();
+    updateSecurityLevel();
+    updateAIStatus();
+    
+    // Initialize AI uptime counter
+    startAIUptimeCounter();
+    
+    // Setup enhanced dropdown functionality
+    setupEnterpriseDropdowns();
+    
+    // Initialize real-time badges
+    updateNavigationBadges();
+    
+    console.log('✅ Enterprise features initialized');
+}
+
+// Update connection status indicator
+function updateConnectionStatus() {
+    const statusEl = $('#connection-status');
+    if (statusEl) {
+        statusEl.querySelector('.status-icon').textContent = '🟢';
+        statusEl.querySelector('.status-text').textContent = 'Connected';
+    }
+}
+
+// Update security level indicator
+function updateSecurityLevel() {
+    const securityEl = $('#security-level');
+    if (securityEl) {
+        securityEl.querySelector('.status-text').textContent = 'Enterprise';
+    }
+}
+
+// Update AI status indicator
+function updateAIStatus() {
+    const aiEl = $('#ai-status');
+    if (aiEl) {
+        aiEl.querySelector('.status-text').textContent = 'JARVIS Online';
+    }
+}
+
+// AI Uptime counter
+let aiStartTime = Date.now();
+function startAIUptimeCounter() {
+    const uptimeEl = $('#ai-uptime');
+    if (!uptimeEl) return;
+    
+    setInterval(() => {
+        const uptime = Date.now() - aiStartTime;
+        const hours = Math.floor(uptime / 3600000);
+        const minutes = Math.floor((uptime % 3600000) / 60000);
+        const seconds = Math.floor((uptime % 60000) / 1000);
+        
+        uptimeEl.textContent = `${hours.toString().padStart(2,'0')}:${minutes.toString().padStart(2,'0')}:${seconds.toString().padStart(2,'0')}`;
+    }, 1000);
+}
+
+// Enhanced dropdown functionality
+function setupEnterpriseDropdowns() {
+    const dropdownTriggers = document.querySelectorAll('.dropdown-trigger');
+    dropdownTriggers.forEach(trigger => {
+        trigger.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const menu = trigger.nextElementSibling;
+            if (menu && menu.classList.contains('dropdown-menu')) {
+                menu.style.display = menu.style.display === 'block' ? 'none' : 'block';
+            }
+        });
+    });
+    
+    // Close dropdowns when clicking outside
+    document.addEventListener('click', () => {
+        document.querySelectorAll('.dropdown-menu').forEach(menu => {
+            menu.style.display = 'none';
+        });
+    });
+}
+
+// Enterprise metrics update system
+function startEnterpriseMetrics() {
+    setInterval(() => {
+        updateAIMetrics();
+        updateNavigationBadges();
+    }, 5000);
+}
+
+// Update AI metrics with simulated data
+function updateAIMetrics() {
+    // Update conversation count
+    const convCount = $('#conversation-count');
+    if (convCount && jarvisMemory) {
+        const count = jarvisMemory.history ? jarvisMemory.history.length : 0;
+        convCount.textContent = count;
+    }
+    
+    // Update AI accuracy (simulated improvement)
+    const accuracyEl = $('#ai-accuracy');
+    if (accuracyEl) {
+        const baseAccuracy = 98.5;
+        const variation = (Math.sin(Date.now() / 10000) * 0.5) + 0.5; // 0-1
+        const accuracy = (baseAccuracy + variation).toFixed(1);
+        accuracyEl.textContent = accuracy + '%';
+    }
+    
+    // Update memory size
+    const memoryEl = $('#memory-size');
+    if (memoryEl && jarvisMemory) {
+        const size = Math.round(JSON.stringify(jarvisMemory).length / 1024);
+        memoryEl.textContent = size + ' KB';
+    }
+}
+
+// Update navigation badges
+function updateNavigationBadges() {
+    // AI conversations badge
+    const aiBadge = $('#ai-conversations');
+    if (aiBadge && jarvisMemory) {
+        const count = jarvisMemory.history ? jarvisMemory.history.length : 0;
+        aiBadge.textContent = count;
+    }
+    
+    // Status indicator
+    const statusIndicator = $('#status-indicator');
+    if (statusIndicator) {
+        statusIndicator.style.color = '#00d884'; // Green for healthy
+    }
+    
+    // Security alerts badge (simulated)
+    const securityBadge = $('#security-alerts');
+    if (securityBadge) {
+        securityBadge.textContent = '0'; // No alerts in demo
+    }
+    
+    // Alert count badge
+    const alertBadge = $('#alert-count');
+    if (alertBadge) {
+        alertBadge.textContent = '0'; // No alerts in demo
+    }
+}
+
+// Enhanced navigation with categories
+function setupAdvancedNavigation() {
+    const navItems = document.querySelectorAll('.nav-item');
+    navItems.forEach(item => {
+        item.addEventListener('click', function() {
+            // Remove active class from all items
+            navItems.forEach(nav => nav.classList.remove('active'));
+            
+            // Add active class to clicked item
+            this.classList.add('active');
+            
+            // Enhanced visual feedback
+            this.style.transform = 'translateX(8px)';
+            setTimeout(() => {
+                this.style.transform = '';
+            }, 200);
+        });
+        
+        // Add hover sound effect (visual feedback)
+        item.addEventListener('mouseenter', function() {
+            this.style.boxShadow = '0 4px 16px rgba(0,102,204,0.2)';
+        });
+        
+        item.addEventListener('mouseleave', function() {
+            if (!this.classList.contains('active')) {
+                this.style.boxShadow = '';
+            }
+        });
+    });
+}
+
+// Enterprise AI control handlers
+function toggleVoiceControl() {
+    const btn = $('#voice-control');
+    if (btn) {
+        const isActive = btn.classList.toggle('active');
+        btn.textContent = isActive ? '🎤 Voice Active' : '🎤 Voice';
+        btn.style.background = isActive ? 'var(--ok)' : '';
+        btn.style.color = isActive ? '#000' : '';
+    }
+}
+
+function toggleLearningMode() {
+    const btn = $('#learning-mode');
+    if (btn) {
+        const isActive = btn.classList.toggle('active');
+        btn.textContent = isActive ? '🧠 Learning On' : '🧠 Learning';
+        btn.style.background = isActive ? 'var(--ok)' : '';
+        btn.style.color = isActive ? '#000' : '';
+    }
+}
+
+function toggleEnterpriseMode() {
+    const btn = $('#enterprise-mode');
+    if (btn) {
+        const isActive = btn.classList.toggle('active');
+        btn.textContent = isActive ? '⚡ Enterprise On' : '⚡ Enterprise';
+        btn.style.background = isActive ? 'var(--primary-light)' : '';
+        
+        if (isActive) {
+            toast('🚀 Enterprise mode activated - Advanced features enabled', 'success');
+            enableEnterpriseFeatures();
+        } else {
+            toast('📊 Standard mode - Enterprise features disabled', 'info');
+        }
+    }
+}
+
+function enableEnterpriseFeatures() {
+    // Show additional metrics
+    document.querySelectorAll('.enterprise-feature').forEach(el => {
+        el.style.display = 'block';
+    });
+    
+    // Enable advanced analytics
+    console.log('🔥 Enterprise features activated');
+}
+
+// Enhanced chat functionality
+function setupEnterpriseChat() {
+    const chatInput = $('#chat-input, #prompt');
+    const sendBtn = $('#chat-send, #send');
+    
+    if (chatInput && sendBtn) {
+        // Enhanced input with suggestions
+        chatInput.addEventListener('focus', function() {
+            this.style.borderColor = 'var(--primary)';
+            this.style.boxShadow = '0 0 0 2px rgba(0,102,204,0.1)';
+        });
+        
+        chatInput.addEventListener('blur', function() {
+            this.style.borderColor = 'var(--border)';
+            this.style.boxShadow = '';
+        });
+        
+        // Enhanced send button
+        sendBtn.addEventListener('click', function() {
+            this.style.transform = 'scale(0.95)';
+            setTimeout(() => {
+                this.style.transform = '';
+            }, 150);
+        });
+    }
+}
+    
     const networkBtn = $('#btn-network-scan');
     if (networkBtn) {
         networkBtn.onclick = performNetworkScan;
@@ -14069,13 +15492,64 @@ function setupEnhancedEventListeners() {
 }
 
 // Start initialization when DOM is ready
-document.addEventListener('DOMContentLoaded', initializeNovaShield);
+document.addEventListener('DOMContentLoaded', () => {
+    initializeNovaShield();
+    
+    // Bind enterprise control events
+    const voiceControl = $('#voice-control');
+    const learningMode = $('#learning-mode');
+    const enterpriseMode = $('#enterprise-mode');
+    
+    if (voiceControl) voiceControl.onclick = toggleVoiceControl;
+    if (learningMode) learningMode.onclick = toggleLearningMode;
+    if (enterpriseMode) enterpriseMode.onclick = toggleEnterpriseMode;
+    
+    // Setup enhanced chat
+    setupEnterpriseChat();
+});
 
 // Also start if DOM is already ready
 if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', initializeNovaShield);
+  document.addEventListener('DOMContentLoaded', () => {
+      initializeNovaShield();
+      
+      // Additional enterprise bindings
+      setTimeout(() => {
+          bindEnterpriseElements();
+      }, 1000);
+  });
 } else {
   initializeNovaShield();
+  bindEnterpriseElements();
+}
+
+function bindEnterpriseElements() {
+    // Bind quick action buttons
+    document.querySelectorAll('.quick-action').forEach(btn => {
+        if (!btn.onclick && btn.dataset.command) {
+            btn.onclick = () => {
+                const command = btn.dataset.command;
+                const input = $('#prompt, #chat-input');
+                if (input) {
+                    input.value = command;
+                    $('#send, #chat-send')?.click();
+                }
+            };
+        }
+    });
+    
+    // Bind enterprise dashboard button
+    const dashboardBtn = $('#btn-enterprise-dashboard');
+    if (dashboardBtn) {
+        dashboardBtn.onclick = () => {
+            // Switch to dashboard tab
+            const dashboardTab = $('[data-tab="dashboard"]');
+            if (dashboardTab) {
+                dashboardTab.click();
+            }
+            toast('📊 Switching to Enterprise Command Center', 'info');
+        };
+    }
 }
 
 // Initialize tab switching functionality
