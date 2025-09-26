@@ -941,7 +941,8 @@ ns_log() {
   if [ ! -d "${NS_HOME}" ]; then
     mkdir -p "${NS_HOME}" 2>/dev/null || {
       # Fallback to system temp if NS_HOME creation fails
-      local fallback_dir="/tmp/novashield-$(whoami)"
+      local fallback_dir
+      fallback_dir="/tmp/novashield-$(whoami)"
       mkdir -p "$fallback_dir" 2>/dev/null || return 0
       echo -e "$(ns_now) [INFO ] $*" | tee -a "$fallback_dir/launcher.log" >&2 2>/dev/null || echo -e "$(ns_now) [INFO ] $*" >&2
       return 0
@@ -1021,10 +1022,12 @@ _security_alert_handler() {
   
   # Store in high-priority security database for long-term analysis
   local security_db="${NS_CTRL}/security_events.json"
-  local timestamp=$(date '+%s')
+  local timestamp
+  timestamp=$(date '+%s')
   
   # Create JSON entry with enhanced metadata
-  local json_entry="{\"timestamp\":$timestamp,\"level\":\"$alert_level\",\"event\":\"$event\",\"source\":\"NovaShield\",\"node\":\"$(hostname 2>/dev/null || echo unknown)\"}"
+  local json_entry
+  json_entry="{\"timestamp\":$timestamp,\"level\":\"$alert_level\",\"event\":\"$event\",\"source\":\"NovaShield\",\"node\":\"$(hostname 2>/dev/null || echo unknown)\"}"
   
   # Atomic append to security database
   (
@@ -1034,7 +1037,11 @@ _security_alert_handler() {
     fi
     
     # Add new entry and maintain last 1000 events for long-term analysis
-    jq --argjson entry "$json_entry" '.security_events += [$entry] | .security_events = .security_events[-1000:]' "$security_db" > "${security_db}.tmp" 2>/dev/null && mv "${security_db}.tmp" "$security_db" || true
+    if jq --argjson entry "$json_entry" '.security_events += [$entry] | .security_events = .security_events[-1000:]' "$security_db" > "${security_db}.tmp" 2>/dev/null; then
+      mv "${security_db}.tmp" "$security_db"
+    else
+      rm -f "${security_db}.tmp" 2>/dev/null
+    fi
   ) 200>"${security_db}.lock"
 }
 
@@ -3755,53 +3762,6 @@ _scan_email_intelligence() {
   _calculate_confidence_score "$results_file" "${#sources[@]}"
 }
 
-_scan_phone_intelligence() {
-  local phone="$1"
-  local results_file="$2"
-  local depth="$3"
-  
-  local sources=("format_validation" "carrier_lookup" "location_analysis")
-  
-  if [ "$depth" = "deep" ]; then
-    sources+=("spam_analysis" "social_profiles" "business_listings")
-  fi
-  
-  for source in "${sources[@]}"; do
-    ns_log "Scanning phone with source: $source"
-    case "$source" in
-      "format_validation")
-        # Basic phone number format validation
-        local clean_phone=$(echo "$phone" | tr -d '()-. ')
-        if [[ "$clean_phone" =~ ^[0-9]{10,15}$ ]]; then
-          _update_scan_results "$results_file" "$source" "Valid phone format" "medium" "passed"
-        else
-          _update_scan_results "$results_file" "$source" "Invalid phone format" "high" "failed"
-        fi
-        ;;
-      "carrier_lookup")
-        # Simulate carrier lookup based on number patterns
-        local area_code=$(echo "$phone" | grep -o '^[+1-]*\([0-9]\{3\}\)' | tr -d '+1-')
-        if [ -n "$area_code" ]; then
-          _update_scan_results "$results_file" "$source" "Area code identified" "low" "$area_code"
-        fi
-        ;;
-      "location_analysis")
-        # Basic location analysis
-        local clean_phone=$(echo "$phone" | tr -d '()-. +')
-        if [[ "$clean_phone" =~ ^1[0-9]{10}$ ]]; then
-          _update_scan_results "$results_file" "$source" "US/Canada number pattern" "low" "North America"
-        elif [[ "$clean_phone" =~ ^44[0-9]{10}$ ]]; then
-          _update_scan_results "$results_file" "$source" "UK number pattern" "low" "United Kingdom"
-        else
-          _update_scan_results "$results_file" "$source" "International number" "low" "International"
-        fi
-        ;;
-    esac
-    sleep 0.5
-  done
-  
-  _calculate_confidence_score "$results_file" "${#sources[@]}"
-}
 
 _scan_comprehensive_intelligence() {
   local target="$1"
