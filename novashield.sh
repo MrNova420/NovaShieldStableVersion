@@ -20614,7 +20614,7 @@ install_all(){
   # Use only the embedded all-in-one installation system
   # Everything is centralized in this single script
   ns_log "Using all-in-one embedded installation system"
-  install_all_embedded "$@"
+  install_all_embedded
 }
 
 # Renamed original function for backward compatibility
@@ -20636,7 +20636,7 @@ install_all_embedded(){
   write_notify_py
   write_server_py
   write_dashboard
-  ensure_auth_bootstrap "$@"
+  ensure_auth_bootstrap
   
   # Long-term optimization setup
   setup_long_term_optimization
@@ -21150,26 +21150,6 @@ PY
   ns_ok "User '$user' added. Enable/confirm auth in config.yaml (security.auth_enabled: true)"
 }
 
-add_user_noninteractive(){
-  local user="$1" pass="$2" salt
-  salt=$(awk -F': ' '/auth_salt:/ {print $2}' "$NS_CONF" | tr -d ' "')
-  [ -z "$salt" ] && salt="change-this-salt"
-  local sha; sha=$(printf '%s' "${salt}:${pass}" | sha256sum | awk '{print $1}')
-  if [ ! -f "$NS_SESS_DB" ]; then echo '{}' >"$NS_SESS_DB"; fi
-  python3 - "$NS_SESS_DB" "$user" "$sha" <<'PY'
-import json,sys
-p,u,s=sys.argv[1],sys.argv[2],sys.argv[3]
-try: j=json.load(open(p))
-except: j={}
-ud=j.get('_userdb',{})
-ud[u]=s
-j['_userdb']=ud
-open(p,'w').write(json.dumps(j))
-print('User stored')
-PY
-  ns_ok "User '$user' added (non-interactive mode)"
-}
-
 enable_2fa(){
   local user secret
   read -rp "Username to set 2FA: " user
@@ -21208,25 +21188,14 @@ PY
 )
   if [ "$have_user" = "yes" ]; then return 0; fi
   
-  # Check if we're in non-interactive mode (check command line args)
-  if echo "$*" | grep -q "non-interactive" || [ "${NON_INTERACTIVE:-}" = "1" ]; then
-    echo
-    ns_warn "SECURITY REQUIREMENT: No web users found but auth_enabled is true."
-    ns_warn "Creating default user for non-interactive installation..."
-    # Create default user for non-interactive mode
-    add_user_noninteractive "admin" "admin123"
-    ns_ok "Default user 'admin' created with password 'admin123' - CHANGE THIS IMMEDIATELY!"
-    echo
-  else
-    echo
-    ns_warn "SECURITY REQUIREMENT: No web users found but auth_enabled is true."
-    ns_warn "This personal security dashboard requires user authentication for protection."
-    echo "Creating the first user for security..."
-    add_user
-    echo
-    read -r -p "Enable 2FA for this user now? [y/N]: " yn
-    case "$yn" in [Yy]*) enable_2fa ;; esac
-  fi
+  echo
+  ns_warn "SECURITY REQUIREMENT: No web users found but auth_enabled is true."
+  ns_warn "This personal security dashboard requires user authentication for protection."
+  echo "Creating the first user for security..."
+  add_user
+  echo
+  read -r -p "Enable 2FA for this user now? [y/N]: " yn
+  case "$yn" in [Yy]*) enable_2fa ;; esac
 }
 
 reset_auth(){
@@ -22243,7 +22212,7 @@ load_config_file
 case "${1:-}" in
   --help|-h) usage; exit 0;;
   --version|-v) echo "NovaShield ${NS_VERSION}"; exit 0;;
-  --install) install_all "$@";;
+  --install) install_all;;
   --start) start_all;;
   --stop) stop_all;;
   --restart-monitors) restart_monitors;;
