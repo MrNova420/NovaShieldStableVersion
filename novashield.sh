@@ -1109,10 +1109,11 @@ storage_maintenance() {
   
   # 1. Clean old backup files (keep last 10)
   if [ -d "${NS_HOME}/backups" ]; then
-    local backup_count=$(ls -1 "${NS_HOME}/backups"/*.tar.gz 2>/dev/null | wc -l || echo 0)
+    local backup_count=$(ls -1 "${NS_HOME}/backups"/*.tar.gz 2>/dev/null | wc -l)
+    backup_count=${backup_count:-0}
     if [ "$backup_count" -gt 10 ]; then
       ns_log "Cleaning old backups (keeping last 10 of $backup_count)"
-      cd "${NS_HOME}/backups" && ls -1t *.tar.gz 2>/dev/null | tail -n +11 | xargs rm -f
+      cd "${NS_HOME}/backups" && ls -1t *.tar.gz 2>/dev/null | tail -n +11 | xargs rm -f || true
     fi
   fi
   
@@ -2117,7 +2118,7 @@ enhanced_performance_optimization() {
       ns_log "Applying performance optimizations..."
       
       # Memory optimization
-      if [ -f /proc/sys/vm/drop_caches ]; then
+      if [ -f /proc/sys/vm/drop_caches ] && [ -w /proc/sys/vm/drop_caches ]; then
         sync && echo 1 > /proc/sys/vm/drop_caches 2>/dev/null || true
       fi
       
