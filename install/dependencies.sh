@@ -7,37 +7,63 @@ install_dependencies(){
   local need=(python3 awk sed grep tar gzip df du ps top uname head tail cut tr sha256sum curl ping find xargs)
   local missing=()
   
-  # Enhanced Termux setup as requested
+  # Enhanced Termux setup - fully automated and universal
   if [ "$IS_TERMUX" -eq 1 ]; then
-    ns_log "Termux detected - performing enhanced mobile setup..."
+    ns_log "Termux detected - performing automated mobile setup..."
     
-    # Essential Termux packages for better experience
-    ns_log "Installing enhanced Termux packages..."
-    PKG_INSTALL termux-tools || true
-    PKG_INSTALL termux-api || true
-    PKG_INSTALL procps || true  # Better ps, top, etc.
-    PKG_INSTALL htop || true    # Enhanced system monitor
-    PKG_INSTALL nano || true    # Text editor
-    PKG_INSTALL vim || true     # Advanced editor
-    PKG_INSTALL git || true     # Version control
-    PKG_INSTALL man || true     # Manual pages
-    PKG_INSTALL which || true   # Which command
-    PKG_INSTALL openssh || true # SSH capabilities
+    # Automated package updates (non-interactive)
+    ns_log "Updating Termux packages (automated)..."
+    pkg update -y >/dev/null 2>&1 || true
+    pkg upgrade -y >/dev/null 2>&1 || true
     
-    # Update packages to latest versions
-    ns_log "Updating Termux packages..."
-    pkg update -y 2>/dev/null || true
-    pkg upgrade -y 2>/dev/null || true
+    # Essential Termux packages for better experience (automated installation)
+    ns_log "Installing essential Termux packages (automated)..."
+    local termux_packages=(
+      "termux-tools"     # Essential Termux utilities
+      "termux-api"       # API access
+      "procps"           # Better ps, top, etc.
+      "htop"             # Enhanced system monitor
+      "nano"             # Text editor
+      "vim"              # Advanced editor
+      "git"              # Version control
+      "man"              # Manual pages
+      "which"            # Which command
+      "openssh"          # SSH capabilities
+      "curl"             # HTTP client
+      "wget"             # Download utility
+      "python"           # Python interpreter
+      "openssl-tool"     # SSL/TLS tools
+      "termux-services"  # Service management
+    )
     
-    # Setup storage access
-    ns_log "Setting up Termux storage access..."
+    for pkg in "${termux_packages[@]}"; do
+      PKG_INSTALL "$pkg" >/dev/null 2>&1 || ns_warn "Failed to install $pkg (non-critical)"
+    done
+    
+    # Automated storage access setup (non-interactive)
+    ns_log "Setting up Termux storage access (automated)..."
     if [ ! -d "$HOME/storage" ]; then
-      termux-setup-storage 2>/dev/null || ns_warn "Storage setup may require manual confirmation"
+      # Create storage directory structure manually if termux-setup-storage fails
+      mkdir -p "$HOME/storage" 2>/dev/null || true
+      # Set environment for automated storage setup
+      export TERMUX_SETUP_STORAGE_NONINTERACTIVE=1
+      termux-setup-storage >/dev/null 2>&1 || {
+        ns_warn "Automated storage setup not available - creating basic structure"
+        mkdir -p "$HOME/storage/shared" 2>/dev/null || true
+        mkdir -p "$HOME/storage/downloads" 2>/dev/null || true
+      }
     fi
     
-    # Enhanced terminal capabilities
-    ns_log "Setting up enhanced terminal..."
-    echo "export TERM=xterm-256color" >> "$HOME/.bashrc" 2>/dev/null || true
+    # Enhanced terminal capabilities (automated)
+    ns_log "Setting up enhanced terminal environment..."
+    {
+      echo "# NovaShield Termux Environment Setup"
+      echo "export TERM=xterm-256color"
+      echo "export NOVASHIELD_TERMUX=1"
+      echo "export PATH=\"\$HOME/.novashield/bin:\$PATH\""
+      echo "alias ll='ls -la'"
+      echo "alias ns='$HOME/.novashield/bin/novashield.sh'"
+    } >> "$HOME/.bashrc" 2>/dev/null || true
     echo "export COLORTERM=truecolor" >> "$HOME/.bashrc" 2>/dev/null || true
   fi
   

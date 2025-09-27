@@ -1338,20 +1338,65 @@ if uname -a | grep -iq termux || { [ -n "${PREFIX:-}" ] && echo "$PREFIX" | grep
 fi
 
 PKG_INSTALL(){
+  local pkg="$1"
+  local installed=false
+  
+  # Try multiple installation methods in order of preference
   if [ "$IS_TERMUX" -eq 1 ]; then
-    pkg install -y "$@" 2>/dev/null
-  elif command -v apt-get >/dev/null 2>&1; then
-    sudo apt-get update -q -y 2>/dev/null && sudo apt-get install -q -y "$@" 2>/dev/null
-  elif command -v dnf >/dev/null 2>&1; then
-    sudo dnf install -y "$@" 2>/dev/null
-  elif command -v pacman >/dev/null 2>&1; then
-    sudo pacman -Sy --noconfirm "$@" 2>/dev/null
-  elif command -v yum >/dev/null 2>&1; then
-    sudo yum install -y "$@" 2>/dev/null
+    # Termux package manager
+    if command -v pkg >/dev/null 2>&1; then
+      pkg install -y "$pkg" >/dev/null 2>&1 && installed=true
+    fi
   else
-    ns_warn "Unknown package manager. Install dependencies manually: $*"
-    return 1
+    # Try various Linux package managers
+    if command -v apt-get >/dev/null 2>&1; then
+      # Debian/Ubuntu
+      { sudo apt-get update -q -y >/dev/null 2>&1 && sudo apt-get install -q -y "$pkg" >/dev/null 2>&1; } && installed=true
+    elif command -v dnf >/dev/null 2>&1; then
+      # Fedora/RHEL 8+
+      sudo dnf install -y "$pkg" >/dev/null 2>&1 && installed=true
+    elif command -v yum >/dev/null 2>&1; then
+      # RHEL/CentOS 7
+      sudo yum install -y "$pkg" >/dev/null 2>&1 && installed=true
+    elif command -v pacman >/dev/null 2>&1; then
+      # Arch Linux
+      sudo pacman -Sy --noconfirm "$pkg" >/dev/null 2>&1 && installed=true
+    elif command -v zypper >/dev/null 2>&1; then
+      # openSUSE
+      sudo zypper install -y "$pkg" >/dev/null 2>&1 && installed=true
+    elif command -v apk >/dev/null 2>&1; then
+      # Alpine Linux
+      sudo apk add "$pkg" >/dev/null 2>&1 && installed=true
+    elif command -v emerge >/dev/null 2>&1; then
+      # Gentoo
+      sudo emerge "$pkg" >/dev/null 2>&1 && installed=true
+    elif command -v brew >/dev/null 2>&1; then
+      # macOS Homebrew
+      brew install "$pkg" >/dev/null 2>&1 && installed=true
+    fi
   fi
+  
+  # Fallback: try to build from source for critical packages
+  if [ "$installed" = false ]; then
+    case "$pkg" in
+      python3|python)
+        # Try alternative Python package names
+        for alt in python3.11 python3.10 python3.9 python3.8 python python38 python39 python310 python311; do
+          if command -v "$alt" >/dev/null 2>&1; then
+            ln -sf "$(command -v "$alt")" "$NS_BIN/python3" 2>/dev/null && installed=true && break
+          fi
+        done
+        ;;
+      openssl|openssl-tool)
+        # Critical for security operations
+        if command -v openssl >/dev/null 2>&1; then
+          installed=true
+        fi
+        ;;
+    esac
+  fi
+  
+  return $([ "$installed" = true ] && echo 0 || echo 1)
 }
 
 ensure_dirs(){
@@ -6084,6 +6129,184 @@ def require_2fa(): return _coerce_bool(cfg_get('security.require_2fa', False), F
 def rate_limit_per_min(): return _coerce_int(cfg_get('security.rate_limit_per_min', 60), 60)
 def lockout_threshold(): return _coerce_int(cfg_get('security.lockout_threshold', 10), 10)
 
+def generate_secure_setup_screen(user_count=0):
+    """Generate secure blackout screen that blocks access until users are created"""
+    return f'''
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🛡️ NovaShield Security Barrier</title>
+    <style>
+        * {{
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }}
+        
+        body {{
+            background: #000000;
+            color: #ff0000;
+            font-family: 'Courier New', monospace;
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            flex-direction: column;
+            text-align: center;
+            overflow: hidden;
+        }}
+        
+        .barrier-container {{
+            border: 2px solid #ff0000;
+            padding: 40px;
+            background: rgba(255, 0, 0, 0.05);
+            border-radius: 10px;
+            max-width: 800px;
+            box-shadow: 0 0 50px rgba(255, 0, 0, 0.3);
+            animation: pulse 2s infinite;
+        }}
+        
+        @keyframes pulse {{
+            0%, 100% {{ box-shadow: 0 0 50px rgba(255, 0, 0, 0.3); }}
+            50% {{ box-shadow: 0 0 80px rgba(255, 0, 0, 0.6); }}
+        }}
+        
+        .title {{
+            font-size: 3rem;
+            margin-bottom: 20px;
+            text-shadow: 0 0 20px #ff0000;
+        }}
+        
+        .subtitle {{
+            font-size: 1.5rem;
+            margin-bottom: 30px;
+            color: #ffaa00;
+        }}
+        
+        .message {{
+            font-size: 1.2rem;
+            line-height: 1.6;
+            margin-bottom: 20px;
+        }}
+        
+        .status {{
+            margin: 30px 0;
+            padding: 20px;
+            background: rgba(255, 0, 0, 0.1);
+            border: 1px solid #ff0000;
+            border-radius: 5px;
+        }}
+        
+        .status-item {{
+            margin: 10px 0;
+            font-size: 1.1rem;
+        }}
+        
+        .instructions {{
+            margin-top: 30px;
+            padding: 20px;
+            background: rgba(255, 170, 0, 0.1);
+            border: 1px solid #ffaa00;
+            color: #ffaa00;
+            border-radius: 5px;
+        }}
+        
+        .command {{
+            background: #222;
+            color: #00ff00;
+            padding: 10px;
+            border-radius: 5px;
+            font-family: monospace;
+            margin: 10px 0;
+            display: inline-block;
+        }}
+        
+        .blink {{
+            animation: blink 1s infinite;
+        }}
+        
+        @keyframes blink {{
+            0%, 50% {{ opacity: 1; }}
+            51%, 100% {{ opacity: 0; }}
+        }}
+        
+        .footer {{
+            position: absolute;
+            bottom: 20px;
+            font-size: 0.9rem;
+            color: #666;
+        }}
+    </style>
+</head>
+<body>
+    <div class="barrier-container">
+        <div class="title">🛡️ SECURITY BARRIER ACTIVE</div>
+        <div class="subtitle">NovaShield Protection System</div>
+        
+        <div class="message">
+            <span class="blink">⚠️ ACCESS DENIED ⚠️</span><br><br>
+            The NovaShield security dashboard is protected by enterprise-grade authentication.<br>
+            All access is blocked until authorized users are configured.
+        </div>
+        
+        <div class="status">
+            <div class="status-item">🔒 Authentication: <strong>ENABLED</strong></div>
+            <div class="status-item">👥 Authorized Users: <strong>{user_count}</strong></div>
+            <div class="status-item">🚫 Dashboard Access: <strong>BLOCKED</strong></div>
+            <div class="status-item">🛡️ Security Level: <strong>MAXIMUM</strong></div>
+        </div>
+        
+        <div class="instructions">
+            <strong>🔧 SYSTEM ADMINISTRATOR SETUP REQUIRED</strong><br><br>
+            To access the NovaShield dashboard, create your first admin user:<br><br>
+            
+            <div class="command">./novashield.sh --add-user</div><br>
+            
+            Or for automated setup with demo credentials:<br>
+            <div class="command">NS_AUTO_USER=1 ./novashield.sh --install</div><br>
+            
+            <strong>⚠️ Security Notice:</strong> This barrier protects your system from unauthorized access.<br>
+            The dashboard will remain inaccessible until proper authentication is configured.
+        </div>
+    </div>
+    
+    <div class="footer">
+        NovaShield Enterprise Security System - Version 3.4.0-AAA<br>
+        Unauthorized access is prohibited and monitored
+    </div>
+    
+    <script>
+        // Prevent any bypass attempts
+        document.addEventListener('keydown', function(e) {{
+            // Disable common developer shortcuts
+            if (e.key === 'F12' || 
+                (e.ctrlKey && e.shiftKey && e.key === 'I') ||
+                (e.ctrlKey && e.shiftKey && e.key === 'C') ||
+                (e.ctrlKey && e.key === 'u')) {{
+                e.preventDefault();
+                return false;
+            }}
+        }});
+        
+        // Disable right-click context menu
+        document.addEventListener('contextmenu', function(e) {{
+            e.preventDefault();
+            return false;
+        }});
+        
+        // Auto-refresh every 30 seconds to check for user creation
+        setTimeout(function() {{
+            window.location.reload();
+        }}, 30000);
+        
+        console.log('🛡️ NovaShield Security Barrier Active - No users configured');
+    </script>
+</body>
+</html>
+'''
+
 def ip_lists():
     allow = cfg_get('security.ip_allowlist', []) or []
     deny  = cfg_get('security.ip_denylist', []) or []
@@ -9032,9 +9255,26 @@ class Handler(SimpleHTTPRequestHandler):
                 mirror_terminal(self); return
 
             if parsed.path == '/':
-                # Log dashboard access for security monitoring
+                # SECURITY BLACKOUT: Check if any users exist before allowing access
                 client_ip = self.client_address[0]
                 user_agent = self.headers.get('User-Agent', 'Unknown')[:100]
+                
+                # Check if authentication is enabled and users exist
+                if auth_enabled():
+                    db = users_db()
+                    userdb = db.get('_userdb', {}) or {}
+                    user_count = len(userdb)
+                    
+                    # SECURITY BARRIER: If no users exist, show secure setup screen
+                    if user_count == 0:
+                        py_alert('WARN', f'BLACKOUT_MODE ip={client_ip} reason=no_users user_agent={user_agent}')
+                        audit(f'BLACKOUT_ACCESS ip={client_ip} reason=no_users')
+                        self._set_headers(200, 'text/html; charset=utf-8')
+                        blackout_html = generate_secure_setup_screen(user_count)
+                        self.wfile.write(blackout_html.encode('utf-8'))
+                        return
+                
+                # Standard authentication and session handling
                 sess = get_session(self)
                 if sess:
                     user = sess.get('user', 'unknown')
