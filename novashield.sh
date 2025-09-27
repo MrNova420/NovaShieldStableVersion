@@ -26905,20 +26905,10 @@ PY
   # Previous versions had NOVASHIELD_SECURE_INSTALL and NS_NON_INTERACTIVE
   # These features have been permanently removed as they bypass security requirements
   
-  # Check if we're in a non-interactive environment
-  if [ ! -t 0 ] || [ "${CI:-}" = "true" ] || [ "${GITHUB_ACTIONS:-}" = "true" ] || [ "${NOVASHIELD_NON_INTERACTIVE:-}" = "1" ]; then
-    echo
-    ns_warn "NON-INTERACTIVE ENVIRONMENT DETECTED"
-    ns_warn "Security dashboard requires user authentication, but cannot prompt for user creation."
-    echo
-    ns_log "🔒 SECURITY STATUS: Authentication enabled but no users configured"
-    ns_log "🛡️ TEMPORARY SOLUTION: Web dashboard will show secure setup screen"
-    ns_log "📋 POST-INSTALLATION: Create users with './novashield.sh --add-user'"
-    echo
-    ns_log "ℹ️  The system will start but dashboard access will be blocked until users are created."
-    ns_log "ℹ️  This maintains security while allowing system testing and validation."
-    return 0
-  fi
+  # SECURITY POLICY: NO NON-INTERACTIVE BYPASSES ALLOWED
+  # All user creation must be interactive for security compliance.
+  # The user has explicitly stated multiple times that any non-interactive
+  # functionality creates security flaws and must be removed.
   
   echo
   ns_warn "SECURITY REQUIREMENT: No web users found but auth_enabled is true."
