@@ -27322,6 +27322,103 @@ cleanup_system_resources(){
   find "${NS_TMP}" -type f -mtime +1 -delete 2>/dev/null || true
 }
 
+# Non-interactive user creation for automated setups
+create_default_admin_user() {
+  local user="admin"
+  local pass="NovaShield123"
+  local salt
+  
+  ns_log "Creating default admin user for initial setup..."
+  
+  # Get authentication salt
+  salt=$(awk -F': ' '/auth_salt:/ {print $2}' "$NS_CONF" 2>/dev/null | tr -d ' "' | head -1)
+  if [ -z "$salt" ]; then
+    ns_err "No authentication salt found in configuration"
+    return 1
+  fi
+  
+  # Create password hash
+  local sha
+  sha=$(echo -n "${pass}${salt}" | sha256sum | cut -d' ' -f1)
+  
+  # Add user to database
+  if python3 - "$NS_SESS_DB" "$user" "$sha" <<'PY'
+import json,sys
+p,u,s=sys.argv[1],sys.argv[2],sys.argv[3]
+try: j=json.load(open(p))
+except: j={}
+ud=j.get('_userdb',{})
+ud[u]=s
+j['_userdb']=ud
+open(p,'w').write(json.dumps(j))
+print('Default admin user created')
+PY
+  then
+    ns_ok "✅ Default admin user created: admin/NovaShield123"
+    ns_warn "⚠️  SECURITY: Change these credentials immediately after first login!"
+    ns_log "💡 Use --add-user to create additional users"
+    ns_log "💡 Use --enable-2fa to enhance security"
+    return 0
+  else
+    ns_err "Failed to create default admin user"
+    return 1
+  fi
+}
+
+# Quick start function for automated setups
+quick_start() {
+  ns_log "🚀 Starting NovaShield Quick Start..."
+  
+  # Ensure all features are enabled
+  enable_all_production_features
+  
+  # Install if needed
+  if [ ! -f "$NS_CONF" ]; then
+    ns_log "Installing NovaShield..."
+    if ! install_all; then
+      ns_err "Installation failed"
+      return 1
+    fi
+  fi
+  
+  # Create default user if no users exist
+  local user_count
+  user_count=$(python3 -c "import json; j=json.load(open('$NS_SESS_DB')) if open('$NS_SESS_DB', 'a').tell() or open('$NS_SESS_DB').read() else {}; print(len(j.get('_userdb',{})))" 2>/dev/null || echo "0")
+  
+  if [ "$user_count" = "0" ]; then
+    ns_log "No users found - creating default admin user..."
+    if ! create_default_admin_user; then
+      ns_err "Failed to create default user"
+      return 1
+    fi
+  fi
+  
+  # Start web server
+  ns_log "Starting web server..."
+  if ! start_web; then
+    ns_err "Failed to start web server"
+    return 1
+  fi
+  
+  # Start monitoring services
+  ns_log "Starting monitoring services..."
+  start_all_monitors >/dev/null 2>&1 &
+  
+  # Display status
+  echo
+  ns_ok "🎯 NovaShield Quick Start Complete!"
+  echo
+  echo "✅ System Status: FULLY OPERATIONAL"
+  echo "🌐 Dashboard: https://127.0.0.1:8765/"
+  echo "🔐 Login: admin / NovaShield123"
+  echo "⚠️  Change default password after first login!"
+  echo
+  echo "🎛️  Commands:"
+  echo "  • Check status: ./novashield.sh --status"
+  echo "  • Add users: ./novashield.sh --add-user"
+  echo "  • Stop system: ./novashield.sh --stop"
+  echo
+}
 add_user(){
   local user pass salt
   
@@ -27627,10 +27724,11 @@ PY
     
     while true; do
       echo "Please select an option:"
-      echo "1) Create first admin user"
-      echo "2) Exit (dashboard will not start)"
+      echo "1) Create first admin user (interactive)"
+      echo "2) Create default admin user (admin/NovaShield123)"
+      echo "3) Exit (dashboard will not start)"
       echo
-      read -r -p "Enter your choice [1-2]: " choice
+      read -r -p "Enter your choice [1-3]: " choice
       
       case "$choice" in
         1)
@@ -27651,12 +27749,21 @@ PY
           fi
           ;;
         2)
+          echo
+          if create_default_admin_user; then
+            return 0
+          else
+            ns_err "Failed to create default user. Please try again."
+            continue
+          fi
+          ;;
+        3)
           ns_warn "⚠️  Dashboard startup cancelled by user"
           ns_log "💡 Dashboard access is BLOCKED until users are created"
           return 1
           ;;
         *)
-          ns_err "Invalid choice. Please enter 1 or 2."
+          ns_err "Invalid choice. Please enter 1, 2, or 3."
           continue
           ;;
       esac
@@ -28553,6 +28660,7 @@ Usage: $0 [OPTION]
 Core Commands:
   --install              Automated installation (no user prompts)
   --start                Start services with interactive user selection
+  --quick-start          Quick start with default admin user (admin/NovaShield123)
   --stop                 Stop all running services
   --status               Show service status and information
   --restart-monitors     Restart all monitoring processes
@@ -28650,7 +28758,8 @@ Production Optimization:
   --system-stabilize               Stabilize system for long-term operation
 
 User Management:
-  --add-user             Add a new web dashboard user
+  --add-user             Add a new web dashboard user (interactive)
+  --create-default-user  Create default admin user (admin/NovaShield123)
   --enable-2fa           Enable 2FA for a user
   --reset-auth           Reset all authentication state
 
@@ -28765,6 +28874,7 @@ case "${1:-}" in
   --help|-h) usage; exit 0;;
   --version|-v) echo "NovaShield ${NS_VERSION}"; exit 0;;
   --install) install_all;;
+  --quick-start) quick_start;;
   --start) start_all;;
   --stop) stop_all;;
   --restart-monitors) restart_monitors;;
@@ -28874,6 +28984,7 @@ case "${1:-}" in
   --web-start) start_web;;
   --web-stop) stop_web;;
   --add-user) add_user;;
+  --create-default-user) create_default_admin_user;;
   --enable-2fa) enable_2fa;;
   --reset-auth) reset_auth;;
   --enable-auto-restart)
