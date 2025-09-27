@@ -23085,6 +23085,19 @@ start_web(){
 _start_web_direct(){
   ns_log "Starting web server with direct method..."
   
+  # Kill any existing processes on the port first
+  local port="${NS_PORT:-8765}"
+  pkill -f "python.*server.py" 2>/dev/null || true
+  sleep 2
+  
+  # Check if port is still in use and wait
+  local attempts=0
+  while netstat -tuln 2>/dev/null | grep -q ":${port} " && [ $attempts -lt 10 ]; do
+    ns_log "Waiting for port ${port} to be available..."
+    sleep 1
+    ((attempts++))
+  done
+  
   # Change to web directory
   cd "${NS_WWW}" || {
     ns_err "Cannot change to web directory: ${NS_WWW}"
