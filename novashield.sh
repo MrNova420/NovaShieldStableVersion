@@ -80,7 +80,9 @@ _rotate_log() {
   local max_lines="${2:-8000}"  # Reduced for storage efficiency
   local compress_after="${3:-5000}"  # Used for cleanup scheduling
   
-  if [ -f "$logfile" ] && [ "$(wc -l < "$logfile" 2>/dev/null || echo 0)" -gt "$max_lines" ]; then
+  if [ -f "$logfile" ] && [ "${logfile_lines:-0}" -gt "$max_lines" ]; then
+    local logfile_lines
+    logfile_lines=$(wc -l < "$logfile" 2>/dev/null || echo 0)
     # Archive old logs with compression for long-term storage
     local archive_dir
     archive_dir="$(dirname "$logfile")/archive"
@@ -406,9 +408,11 @@ _optimize_process_limits() {
     ulimit -v 524288 2>/dev/null || true # Virtual memory (512MB)
   fi
   
-  # CPU niceness for background processes (less aggressive)
-  if [ "$available_memory" -gt 100 ]; then
+  # CPU niceness for background processes (less aggressive) - Termux-safe
+  if [ "${available_memory:-0}" -gt 100 ] && [ "$IS_TERMUX" -ne 1 ]; then
     renice +5 $$ 2>/dev/null || true
+  elif [ "$IS_TERMUX" -eq 1 ]; then
+    ns_log "✅ Skipping process niceness adjustment in Termux environment"
   fi
 }
 
@@ -950,12 +954,17 @@ ns_log() {
   fi
   
   _rotate_log "${NS_HOME}/launcher.log" 4000  # Optimized for storage
-  echo -e "$(ns_now) [INFO ] $*" | tee -a "${NS_HOME}/launcher.log" >&2 2>/dev/null || echo -e "$(ns_now) [INFO ] $*" >&2
+  # Use safer logging for Termux to avoid subprocess issues
+  if [ "$IS_TERMUX" -eq 1 ]; then
+    echo -e "$(ns_now) [INFO ] $*" >> "${NS_HOME}/launcher.log" 2>/dev/null || echo -e "$(ns_now) [INFO ] $*" >&2
+  else
+    echo -e "$(ns_now) [INFO ] $*" | tee -a "${NS_HOME}/launcher.log" >&2 2>/dev/null || echo -e "$(ns_now) [INFO ] $*" >&2
+  fi
   
   # Less frequent memory optimization (every 500 log entries instead of 100)
   local log_count
   log_count=$(wc -l < "${NS_HOME}/launcher.log" 2>/dev/null || echo 0)
-  if [ $((log_count % 500)) -eq 0 ] && [ "$log_count" -gt 0 ]; then
+  if [ "${log_count:-0}" -gt 0 ] && [ $((log_count % 500)) -eq 0 ]; then
     _optimize_memory &
   fi
 }
@@ -972,7 +981,12 @@ ns_warn(){
   fi
   
   _rotate_log "${NS_HOME}/launcher.log" 4000
-  echo -e "${YELLOW}$(ns_now) [WARN ] $*${NC}" | tee -a "${NS_HOME}/launcher.log" >&2 2>/dev/null || echo -e "${YELLOW}$(ns_now) [WARN ] $*${NC}" >&2
+  # Use safer logging for Termux to avoid subprocess issues
+  if [ "$IS_TERMUX" -eq 1 ]; then
+    echo -e "${YELLOW}$(ns_now) [WARN ] $*${NC}" >> "${NS_HOME}/launcher.log" 2>/dev/null || echo -e "${YELLOW}$(ns_now) [WARN ] $*${NC}" >&2
+  else
+    echo -e "${YELLOW}$(ns_now) [WARN ] $*${NC}" | tee -a "${NS_HOME}/launcher.log" >&2 2>/dev/null || echo -e "${YELLOW}$(ns_now) [WARN ] $*${NC}" >&2
+  fi
 }
 ns_err() { 
   # Create directory only once, with better error handling
@@ -23349,7 +23363,7 @@ perform_system_optimization(){
   local available_memory=0
   if command -v free >/dev/null 2>&1; then
     available_memory=$(free -m 2>/dev/null | awk 'NR==2{print $7}' 2>/dev/null || echo 0)
-    if [ "$available_memory" -lt 100 ]; then
+    if [ "${available_memory:-0}" -lt 100 ]; then
       ns_warn "⚠️  Low available memory (${available_memory}MB). Skipping aggressive optimizations."
       return 0
     fi
@@ -23396,13 +23410,16 @@ perform_system_optimization(){
   # SECURITY: Clear sensitive environment variables
   unset PASSWORD PASS SECRET TOKEN API_KEY 2>/dev/null || true
   
-  # PERFORMANCE: Set higher priority for main process (with memory check and fallback)
-  if command -v renice >/dev/null 2>&1 && [ "$available_memory" -gt 150 ]; then
+  # PERFORMANCE: Set higher priority for main process (with memory check and fallback) - Termux-safe
+  if command -v renice >/dev/null 2>&1 && [ "${available_memory:-0}" -gt 150 ] && [ "$IS_TERMUX" -ne 1 ]; then
     renice -n -2 $$ 2>/dev/null || {
       ns_warn "⚠️  Cannot adjust process priority - insufficient resources or permissions"
       # Try less aggressive priority adjustment
       renice -n 0 $$ 2>/dev/null || true
     }
+  elif [ "$IS_TERMUX" -eq 1 ]; then
+    # Skip renice in Termux to avoid mmap failures
+    ns_log "✅ Skipping process priority adjustment in Termux environment"
   fi
   
   ns_log "✅ System optimization complete with enhanced security"
