@@ -8011,15 +8011,15 @@ def require_2fa(): return _coerce_bool(cfg_get('security.require_2fa', False), F
 def rate_limit_per_min(): return _coerce_int(cfg_get('security.rate_limit_per_min', 60), 60)
 def lockout_threshold(): return _coerce_int(cfg_get('security.lockout_threshold', 10), 10)
 
-def generate_secure_instructions_screen():
-    """Generate secure instructions screen that directs users to the start command for setup"""
-    return '''
+def generate_secure_setup_screen(user_count=0):
+    """Generate secure blackout screen that blocks access until users are created"""
+    setup_html='''
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>NovaShield - Secure Setup Required</title>
+    <title>🛡️ NovaShield Security Barrier</title>
     <style>
         * {
             margin: 0;
@@ -8028,222 +8028,6 @@ def generate_secure_instructions_screen():
         }
         
         body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: linear-gradient(135deg, #1a1a2e, #16213e, #0f3460);
-            color: #ffffff;
-            min-height: 100vh;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            position: relative;
-            overflow: hidden;
-        }
-        
-        body::before {
-            content: '';
-            position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><defs><pattern id="grid" width="10" height="10" patternUnits="userSpaceOnUse"><path d="M 10 0 L 0 0 0 10" fill="none" stroke="%23ffffff" stroke-width="0.1" opacity="0.1"/></pattern></defs><rect width="100" height="100" fill="url(%23grid)"/></svg>');
-            opacity: 0.3;
-        }
-        
-        .container {
-            background: rgba(0, 0, 0, 0.8);
-            backdrop-filter: blur(10px);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            border-radius: 20px;
-            padding: 40px;
-            text-align: center;
-            max-width: 600px;
-            width: 90%;
-            position: relative;
-            z-index: 1;
-            box-shadow: 0 25px 50px rgba(0, 0, 0, 0.5);
-        }
-        
-        .logo {
-            font-size: 2.5rem;
-            font-weight: bold;
-            background: linear-gradient(45deg, #00d4ff, #0099cc, #0066aa);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            background-clip: text;
-            margin-bottom: 10px;
-            text-shadow: 0 0 30px rgba(0, 212, 255, 0.3);
-        }
-        
-        .subtitle {
-            color: #cccccc;
-            font-size: 1.1rem;
-            margin-bottom: 30px;
-            font-weight: 300;
-        }
-        
-        .security-notice {
-            background: linear-gradient(135deg, rgba(255, 0, 0, 0.1), rgba(255, 100, 0, 0.1));
-            border: 1px solid rgba(255, 100, 0, 0.3);
-            border-radius: 10px;
-            padding: 20px;
-            margin: 20px 0;
-        }
-        
-        .security-title {
-            color: #ff6b00;
-            font-size: 1.3rem;
-            font-weight: bold;
-            margin-bottom: 15px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 10px;
-        }
-        
-        .instructions {
-            background: rgba(0, 100, 200, 0.1);
-            border: 1px solid rgba(0, 150, 255, 0.3);
-            border-radius: 10px;
-            padding: 25px;
-            margin: 20px 0;
-            text-align: left;
-        }
-        
-        .instructions h3 {
-            color: #00d4ff;
-            margin-bottom: 15px;
-            font-size: 1.2rem;
-        }
-        
-        .command {
-            background: rgba(0, 0, 0, 0.5);
-            border: 1px solid rgba(255, 255, 255, 0.2);
-            border-radius: 5px;
-            padding: 12px;
-            font-family: 'Courier New', monospace;
-            font-size: 1rem;
-            color: #00ff88;
-            margin: 10px 0;
-            word-break: break-all;
-        }
-        
-        .steps {
-            list-style: none;
-            counter-reset: step-counter;
-        }
-        
-        .steps li {
-            counter-increment: step-counter;
-            margin: 15px 0;
-            padding-left: 40px;
-            position: relative;
-        }
-        
-        .steps li::before {
-            content: counter(step-counter);
-            position: absolute;
-            left: 0;
-            top: 0;
-            background: #00d4ff;
-            color: #000;
-            width: 25px;
-            height: 25px;
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-weight: bold;
-            font-size: 0.9rem;
-        }
-        
-        .footer {
-            margin-top: 30px;
-            padding-top: 20px;
-            border-top: 1px solid rgba(255, 255, 255, 0.1);
-            color: #999;
-            font-size: 0.9rem;
-        }
-        
-        .shield-icon {
-            font-size: 2rem;
-            margin-bottom: 20px;
-            color: #00d4ff;
-            text-shadow: 0 0 20px rgba(0, 212, 255, 0.5);
-        }
-        
-        .pulse {
-            animation: pulse 2s infinite;
-        }
-        
-        @keyframes pulse {
-            0% { opacity: 1; }
-            50% { opacity: 0.7; }
-            100% { opacity: 1; }
-        }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <div class="shield-icon pulse">🛡️</div>
-        <div class="logo">NovaShield</div>
-        <div class="subtitle">Enterprise Security Platform</div>
-        
-        <div class="security-notice">
-            <div class="security-title">
-                🔒 Secure Setup Required
-            </div>
-            <p>For security compliance, user account creation must be performed through the secure terminal interface, not through the web browser.</p>
-        </div>
-        
-        <div class="instructions">
-            <h3>🚀 Setup Instructions:</h3>
-            <ol class="steps">
-                <li>Access your server terminal or SSH connection</li>
-                <li>Navigate to the NovaShield directory</li>
-                <li>Run the secure start command:</li>
-            </ol>
-            <div class="command">./novashield.sh --start</div>
-            <ol class="steps" start="4">
-                <li>Follow the interactive user creation process</li>
-                <li>Return to this page and log in with your new account</li>
-            </ol>
-        </div>
-        
-        <div class="instructions">
-            <h3>🔐 Security Features:</h3>
-            <ul style="list-style: none; text-align: left;">
-                <li>✅ HTTPS-only secure connections</li>
-                <li>✅ Enhanced authentication with 2FA support</li>
-                <li>✅ JARVIS AI integration for intelligent monitoring</li>
-                <li>✅ Comprehensive audit logging</li>
-                <li>✅ Advanced threat detection</li>
-                <li>✅ Enterprise-grade encryption</li>
-            </ul>
-        </div>
-        
-        <div class="footer">
-            <p>NovaShield v3.6.0-Enterprise-AAA-Plus — JARVIS Edition</p>
-            <p>🔒 This system requires secure setup procedures for compliance</p>
-        </div>
-    </div>
-</body>
-</html>
-'''
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>NovaShield - Secure Setup Required</title>
-    <style>
-        * {{
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }}
-        
-        body {{
             background: #000000;
             color: #ff0000;
             font-family: 'Courier New', monospace;
@@ -8254,9 +8038,9 @@ def generate_secure_instructions_screen():
             flex-direction: column;
             text-align: center;
             overflow: hidden;
-        }}
+        }
         
-        .barrier-container {{
+        .barrier-container {
             border: 2px solid #ff0000;
             padding: 40px;
             background: rgba(255, 0, 0, 0.05);
@@ -8264,54 +8048,54 @@ def generate_secure_instructions_screen():
             max-width: 800px;
             box-shadow: 0 0 50px rgba(255, 0, 0, 0.3);
             animation: pulse 2s infinite;
-        }}
+        }
         
-        @keyframes pulse {{
-            0%, 100% {{ box-shadow: 0 0 50px rgba(255, 0, 0, 0.3); }}
-            50% {{ box-shadow: 0 0 80px rgba(255, 0, 0, 0.6); }}
-        }}
+        @keyframes pulse {
+            0%, 100% { box-shadow: 0 0 50px rgba(255, 0, 0, 0.3); }
+            50% { box-shadow: 0 0 80px rgba(255, 0, 0, 0.6); }
+        }
         
-        .title {{
+        .title {
             font-size: 3rem;
             margin-bottom: 20px;
             text-shadow: 0 0 20px #ff0000;
-        }}
+        }
         
-        .subtitle {{
+        .subtitle {
             font-size: 1.5rem;
             margin-bottom: 30px;
             color: #ffaa00;
-        }}
+        }
         
-        .message {{
+        .message {
             font-size: 1.2rem;
             line-height: 1.6;
             margin-bottom: 20px;
-        }}
+        }
         
-        .status {{
+        .status {
             margin: 30px 0;
             padding: 20px;
             background: rgba(255, 0, 0, 0.1);
             border: 1px solid #ff0000;
             border-radius: 5px;
-        }}
+        }
         
-        .status-item {{
+        .status-item {
             margin: 10px 0;
             font-size: 1.1rem;
-        }}
+        }
         
-        .instructions {{
+        .instructions {
             margin-top: 30px;
             padding: 20px;
             background: rgba(255, 170, 0, 0.1);
             border: 1px solid #ffaa00;
             color: #ffaa00;
             border-radius: 5px;
-        }}
+        }
         
-        .command {{
+        .command {
             background: #222;
             color: #00ff00;
             padding: 10px;
@@ -8319,23 +8103,23 @@ def generate_secure_instructions_screen():
             font-family: monospace;
             margin: 10px 0;
             display: inline-block;
-        }}
+        }
         
-        .blink {{
+        .blink {
             animation: blink 1s infinite;
-        }}
+        }
         
-        @keyframes blink {{
-            0%, 50% {{ opacity: 1; }}
-            51%, 100% {{ opacity: 0; }}
-        }}
+        @keyframes blink {
+            0%, 50% { opacity: 1; }
+            51%, 100% { opacity: 0; }
+        }
         
-        .footer {{
+        .footer {
             position: absolute;
             bottom: 20px;
             font-size: 0.9rem;
             color: #666;
-        }}
+        }
     </style>
 </head>
 <body>
@@ -8351,7 +8135,7 @@ def generate_secure_instructions_screen():
         
         <div class="status">
             <div class="status-item">🔒 Authentication: <strong>ENABLED</strong></div>
-            <div class="status-item">👥 Authorized Users: <strong>{user_count}</strong></div>
+            <div class="status-item">👥 Authorized Users: <strong>''' + str(user_count) + '''</strong></div>
             <div class="status-item">🚫 Dashboard Access: <strong>BLOCKED</strong></div>
             <div class="status-item">🛡️ Security Level: <strong>MAXIMUM</strong></div>
         </div>
@@ -8376,7 +8160,7 @@ def generate_secure_instructions_screen():
                     </div>
                     
                     <div style="margin-bottom: 15px;">
-                        <label for="confirmPassword" style="display: block; margin-bottom: 5px; color: #ffaa00;">Confirm Password:</label>
+                        <label for="password" style="display: block; margin-bottom: 5px; color: #ffaa00;">Confirm Password:</label>
                         <input type="password" id="confirmPassword" name="confirmPassword" required minlength="8"
                                style="width: 100%; padding: 10px; background: #222; color: #fff; border: 1px solid #ffaa00; border-radius: 5px;">
                     </div>
@@ -8397,31 +8181,13 @@ def generate_secure_instructions_screen():
     </div>
     
     <div class="footer">
-        NovaShield Enterprise Security System - Version 3.4.0-AAA<br>
+        NovaShield Enterprise Security System - Version 3.6.0-Enterprise-AAA-Plus<br>
         Unauthorized access is prohibited and monitored
     </div>
     
     <script>
-        // Prevent any bypass attempts
-        document.addEventListener('keydown', function(e) {{
-            // Disable common developer shortcuts
-            if (e.key === 'F12' || 
-                (e.ctrlKey && e.shiftKey && e.key === 'I') ||
-                (e.ctrlKey && e.shiftKey && e.key === 'C') ||
-                (e.ctrlKey && e.key === 'u')) {{
-                e.preventDefault();
-                return false;
-            }}
-        }});
-        
-        // Disable right-click context menu
-        document.addEventListener('contextmenu', function(e) {{
-            e.preventDefault();
-            return false;
-        }});
-        
-        // Handle user creation form
-        document.getElementById('userCreationForm').addEventListener('submit', async function(e) {{
+        // Enhanced security and form handling
+        document.getElementById('userCreationForm').addEventListener('submit', async function(e) {
             e.preventDefault();
             
             const username = document.getElementById('username').value.trim();
@@ -8429,87 +8195,114 @@ def generate_secure_instructions_screen():
             const confirmPassword = document.getElementById('confirmPassword').value;
             const messageDiv = document.getElementById('setup-message');
             
-            // Validation
-            if (username.length < 3) {{
+            // Enhanced validation with security checks
+            if (username.length < 3) {
                 showMessage('Username must be at least 3 characters long', 'error');
                 return;
-            }}
+            }
             
-            if (password.length < 8) {{
+            if (!/^[a-zA-Z0-9_-]+$/.test(username)) {
+                showMessage('Username can only contain letters, numbers, underscores, and hyphens', 'error');
+                return;
+            }
+            
+            if (password.length < 8) {
                 showMessage('Password must be at least 8 characters long', 'error');
                 return;
-            }}
+            }
             
-            if (password !== confirmPassword) {{
+            if (password !== confirmPassword) {
                 showMessage('Passwords do not match', 'error');
                 return;
-            }}
+            }
             
-            // Show loading
-            showMessage('Creating admin user...', 'info');
-            document.querySelector('button[type=submit]').disabled = true;
+            // Enhanced security check for strong passwords
+            const hasUpper = /[A-Z]/.test(password);
+            const hasLower = /[a-z]/.test(password);
+            const hasNumber = /[0-9]/.test(password);
+            const hasSpecial = /[!@#$%^&*()_+\\-=\\[\\]{}|;':\",./<>?]/.test(password);
             
-            try {{
-                const response = await fetch('/api/setup/create-user', {{
+            if (!(hasUpper && hasLower && hasNumber)) {
+                showMessage('Password must contain at least one uppercase letter, one lowercase letter, and one number', 'error');
+                return;
+            }
+            
+            showMessage('Creating secure user account...', 'info');
+            
+            try {
+                const response = await fetch('/api/setup/create-user', {
                     method: 'POST',
-                    headers: {{
-                        'Content-Type': 'application/json'
-                    }},
-                    body: JSON.stringify({{
-                        username: username,
-                        password: password
-                    }})
-                }});
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-Requested-With': 'XMLHttpRequest'
+                    },
+                    body: JSON.stringify({ username, password })
+                });
                 
-                const data = await response.json();
+                const result = await response.json();
                 
-                if (response.ok) {{
-                    showMessage('✅ Admin user created successfully! Redirecting to login...', 'success');
-                    setTimeout(() => {{
-                        window.location.reload();
-                    }}, 2000);
-                }} else {{
-                    showMessage('❌ Error: ' + (data.error || 'Failed to create user'), 'error');
-                    document.querySelector('button[type=submit]').disabled = false;
-                }}
-            }} catch (error) {{
+                if (response.ok && result.success) {
+                    showMessage('✅ User created successfully! Redirecting to dashboard...', 'success');
+                    setTimeout(() => {
+                        window.location.href = '/login?created=1&user=' + encodeURIComponent(username);
+                    }, 2000);
+                } else {
+                    showMessage('❌ Error: ' + (result.error || 'Failed to create user'), 'error');
+                }
+            } catch (error) {
                 showMessage('❌ Network error: ' + error.message, 'error');
-                document.querySelector('button[type=submit]').disabled = false;
-            }}
-        }});
+            }
+        });
         
-        function showMessage(text, type) {{
+        function showMessage(msg, type) {
             const messageDiv = document.getElementById('setup-message');
-            messageDiv.textContent = text;
             messageDiv.style.display = 'block';
+            messageDiv.textContent = msg;
             
-            if (type === 'error') {{
-                messageDiv.style.background = 'rgba(255, 0, 0, 0.2)';
-                messageDiv.style.border = '1px solid #ff0000';
-                messageDiv.style.color = '#ff0000';
-            }} else if (type === 'success') {{
-                messageDiv.style.background = 'rgba(0, 255, 0, 0.2)';
-                messageDiv.style.border = '1px solid #00ff00';
-                messageDiv.style.color = '#00ff00';
-            }} else {{
-                messageDiv.style.background = 'rgba(255, 170, 0, 0.2)';
-                messageDiv.style.border = '1px solid #ffaa00';
-                messageDiv.style.color = '#ffaa00';
-            }}
-        }}
+            messageDiv.style.background = type === 'error' ? '#ff0000' : 
+                                        type === 'success' ? '#00aa00' : '#ffaa00';
+            messageDiv.style.color = '#fff';
+            messageDiv.style.fontWeight = 'bold';
+        }
         
-        // Auto-refresh every 60 seconds to check for user creation (reduced frequency)
-        setTimeout(function() {{
-            window.location.reload();
-        }}, 60000);
+        // Enhanced security measures
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'F12' || 
+                (e.ctrlKey && e.shiftKey && e.key === 'I') ||
+                (e.ctrlKey && e.shiftKey && e.key === 'C') ||
+                (e.ctrlKey && e.key === 'U')) {
+                e.preventDefault();
+                return false;
+            }
+        });
         
-        console.log('🛡️ NovaShield Security Barrier Active - Setup Mode');
+        // Enhanced form validation and user feedback
+        document.getElementById('username').addEventListener('input', function(e) {
+            const value = e.target.value;
+            const isValid = /^[a-zA-Z0-9_-]*$/.test(value);
+            e.target.style.borderColor = isValid ? '#ffaa00' : '#ff0000';
+        });
+        
+        document.getElementById('password').addEventListener('input', function(e) {
+            const value = e.target.value;
+            const hasUpper = /[A-Z]/.test(value);
+            const hasLower = /[a-z]/.test(value);
+            const hasNumber = /[0-9]/.test(value);
+            const isStrong = hasUpper && hasLower && hasNumber && value.length >= 8;
+            e.target.style.borderColor = isStrong ? '#00aa00' : '#ffaa00';
+        });
+        
+        document.getElementById('confirmPassword').addEventListener('input', function(e) {
+            const password = document.getElementById('password').value;
+            const isMatch = e.target.value === password;
+            e.target.style.borderColor = isMatch ? '#00aa00' : '#ff0000';
+        });
     </script>
 </body>
 </html>
 '''
+    return setup_html
 
-def generate_secure_login_screen(user_count=1):
     """Generate secure login-only screen that completely blocks access until authentication"""
     return f'''
 <!DOCTYPE html>
@@ -11843,7 +11636,7 @@ class Handler(SimpleHTTPRequestHandler):
                         py_alert('WARN', f'BLACKOUT_MODE ip={client_ip} reason=no_users user_agent={user_agent}')
                         audit(f'BLACKOUT_ACCESS ip={client_ip} reason=no_users')
                         self._set_headers(200, 'text/html; charset=utf-8')
-                        instructions_html = generate_secure_instructions_screen()
+                        instructions_html = generate_secure_setup_screen(0)
                         self.wfile.write(instructions_html.encode('utf-8'))
                         return
                     
@@ -25772,7 +25565,6 @@ loadJarvisMemory().then(() => {
 // Initialize AI enhancements on page load
 initEnhancedAI();
 JS
-}
 
 setup_termux_service(){
   if ! command -v sv-enable >/dev/null 2>&1; then return 0; fi
@@ -27845,6 +27637,9 @@ start_all(){
   
   if [ "$phase1_success" -ne 1 ]; then
     ns_err "❌ PHASE 1 failed - core system setup incomplete"
+    return 1
+  fi
+  
 # Enhanced startup tracking system
 _initialize_startup_tracking() {
   local startup_db="$1"
@@ -29203,1420 +28998,3 @@ class JARVISOrchestrator:
             threading.Thread(target=self.security_orchestration, daemon=True),
             threading.Thread(target=self.optimization_orchestration, daemon=True), 
             threading.Thread(target=self.automation_orchestration, daemon=True),
-            threading.Thread(target=self.ai_intelligence_orchestration, daemon=True),
-            threading.Thread(target=self.communication_hub, daemon=True)
-        ]
-        
-        for thread in threads:
-            thread.start()
-            
-        self.logger.info("All JARVIS orchestration threads started")
-        
-    def security_orchestration(self):
-        """Orchestrate security components"""
-        while self.running:
-            try:
-                # Monitor security components
-                self.check_component_health('security_monitor')
-                self.check_component_health('threat_detection')
-                
-                # AI-powered security analysis
-                self.run_ai_security_analysis()
-                
-                # Automated threat response
-                self.automated_threat_response()
-                
-                time.sleep(30)  # Security check every 30 seconds
-            except Exception as e:
-                self.logger.error(f"Security orchestration error: {e}")
-                
-    def optimization_orchestration(self):
-        """Orchestrate system optimization"""
-        while self.running:
-            try:
-                # Run system optimizations
-                self.run_memory_optimization()
-                self.run_storage_optimization()
-                self.run_connection_optimization()
-                self.run_api_optimization()
-                
-                time.sleep(300)  # Optimization every 5 minutes
-            except Exception as e:
-                self.logger.error(f"Optimization orchestration error: {e}")
-                
-    def automation_orchestration(self):
-        """Orchestrate automation systems"""
-        while self.running:
-            try:
-                # Predictive maintenance
-                self.predictive_maintenance()
-                
-                # Self-healing systems
-                self.self_healing_check()
-                
-                # Autonomous operations
-                self.autonomous_operations()
-                
-                time.sleep(600)  # Automation every 10 minutes
-            except Exception as e:
-                self.logger.error(f"Automation orchestration error: {e}")
-                
-    def ai_intelligence_orchestration(self):
-        """Orchestrate AI intelligence across all components"""
-        while self.running:
-            try:
-                # AI learning and adaptation
-                self.ai_learning_cycle()
-                
-                # Cross-component intelligence sharing
-                self.intelligence_sharing()
-                
-                # Behavioral analysis
-                self.behavioral_analysis()
-                
-                time.sleep(180)  # AI intelligence every 3 minutes
-            except Exception as e:
-                self.logger.error(f"AI intelligence orchestration error: {e}")
-                
-    def communication_hub(self):
-        """Central communication hub for all components"""
-        while self.running:
-            try:
-                # Process message queue
-                self.process_message_queue()
-                
-                # Update component connections
-                self.update_connections()
-                
-                # Broadcast intelligence updates
-                self.broadcast_intelligence()
-                
-                time.sleep(60)  # Communication every minute
-            except Exception as e:
-                self.logger.error(f"Communication hub error: {e}")
-                
-    def check_component_health(self, component):
-        """Check health of individual components"""
-        # Implementation for component health checking
-        pass
-        
-    def run_ai_security_analysis(self):
-        """Run AI-powered security analysis"""
-        # Implementation for AI security analysis
-        pass
-        
-    def automated_threat_response(self):
-        """Automated threat response system"""
-        # Implementation for automated threat response
-        pass
-        
-    def run_memory_optimization(self):
-        """Run memory optimization"""
-        # Implementation for memory optimization
-        pass
-        
-    def run_storage_optimization(self):  
-        """Run storage optimization"""
-        # Implementation for storage optimization
-        pass
-        
-    def run_connection_optimization(self):
-        """Run connection optimization"""
-        # Implementation for connection optimization
-        pass
-        
-    def run_api_optimization(self):
-        """Run API optimization"""
-        # Implementation for API optimization
-        pass
-        
-    def predictive_maintenance(self):
-        """Predictive maintenance system"""
-        # Implementation for predictive maintenance
-        pass
-        
-    def self_healing_check(self):
-        """Self-healing system check"""
-        # Implementation for self-healing
-        pass
-        
-    def autonomous_operations(self):
-        """Autonomous operations management"""
-        # Implementation for autonomous operations
-        pass
-        
-    def ai_learning_cycle(self):
-        """AI learning and adaptation cycle"""
-        # Implementation for AI learning
-        pass
-        
-    def intelligence_sharing(self):
-        """Cross-component intelligence sharing"""
-        # Implementation for intelligence sharing
-        pass
-        
-    def behavioral_analysis(self):
-        """System behavioral analysis"""
-        # Implementation for behavioral analysis
-        pass
-        
-    def process_message_queue(self):
-        """Process central message queue"""
-        # Implementation for message queue processing
-        pass
-        
-    def update_connections(self):
-        """Update component connections"""
-        # Implementation for connection updates
-        pass
-        
-    def broadcast_intelligence(self):
-        """Broadcast intelligence updates"""
-        # Implementation for intelligence broadcasting
-        pass
-        
-    def shutdown(self):
-        """Graceful shutdown"""
-        self.running = False
-        self.logger.info("JARVIS orchestrator shutting down")
-
-def signal_handler(sig, frame):
-    global orchestrator
-    print('\nShutting down JARVIS orchestrator...')
-    orchestrator.shutdown()
-    sys.exit(0)
-
-if __name__ == "__main__":
-    ns_home = os.environ.get('NS_HOME', os.path.expanduser('~/.novashield'))
-    orchestrator = JARVISOrchestrator(ns_home)
-    
-    signal.signal(signal.SIGINT, signal_handler)
-    signal.signal(signal.SIGTERM, signal_handler)
-    
-    print("JARVIS Central Orchestrator started. Press Ctrl+C to stop.")
-    
-    try:
-        while True:
-            time.sleep(1)
-    except KeyboardInterrupt:
-        signal_handler(None, None)
-ORCHESTRATOR
-
-  chmod +x "$orchestration_script"
-  
-  # Start JARVIS orchestrator in background
-  NS_HOME="$NS_HOME" python3 "$orchestration_script" &
-  local orchestrator_pid=$!
-  echo "$orchestrator_pid" > "${NS_PID}/jarvis_orchestrator.pid"
-  
-  ns_log "🎼 JARVIS orchestrator started (PID: $orchestrator_pid)"
-}
-
-jarvis_automation_suite() {
-  ns_log "🔄 Starting JARVIS Automation Suite - Converting optimizations to automations..."
-  
-  # Create automation configuration
-  local automation_config="${NS_CTRL}/jarvis_automation.json"
-  
-  cat > "$automation_config" <<'AUTOMATION_CONFIG'
-{
-  "jarvis_automation_suite": {
-    "version": "3.4.0-AAA-Automated",
-    "automations": {
-      "memory_optimization": {
-        "name": "Intelligent Memory Management",
-        "enabled": true,
-        "interval": 300,
-        "ai_driven": true,
-        "description": "AI-powered memory optimization with leak detection and cache management",
-        "triggers": ["memory_threshold_80", "memory_leak_detected", "cache_bloat"],
-        "actions": ["cleanup_memory", "compress_caches", "optimize_allocations"]
-      },
-      "storage_optimization": {
-        "name": "Smart Storage Management", 
-        "enabled": true,
-        "interval": 600,
-        "ai_driven": true,
-        "description": "Intelligent storage cleanup with compression and archiving",
-        "triggers": ["storage_threshold_85", "old_files_detected", "log_rotation_needed"],
-        "actions": ["cleanup_old_files", "compress_archives", "optimize_storage"]
-      },
-      "connection_optimization": {
-        "name": "Dynamic Connection Management",
-        "enabled": true,
-        "interval": 180,
-        "ai_driven": true,
-        "description": "Advanced connection pooling with health monitoring",
-        "triggers": ["connection_pool_full", "idle_connections", "performance_degradation"],
-        "actions": ["optimize_connections", "cleanup_idle", "tune_tcp_settings"]
-      },
-      "api_optimization": {
-        "name": "API Performance Enhancement",
-        "enabled": true,
-        "interval": 240,
-        "ai_driven": true,
-        "description": "Dynamic API optimization with caching and rate limiting",
-        "triggers": ["api_response_slow", "cache_miss_high", "rate_limit_needed"],
-        "actions": ["optimize_api_cache", "adjust_rate_limits", "tune_endpoints"]
-      },
-      "pid_management": {
-        "name": "Process Lifecycle Management",
-        "enabled": true,
-        "interval": 120,
-        "ai_driven": true,
-        "description": "Intelligent process and PID management with health monitoring",
-        "triggers": ["stale_pids", "zombie_processes", "resource_limits_hit"],
-        "actions": ["cleanup_stale_pids", "restart_failed_processes", "optimize_resource_limits"]
-      },
-      "security_automation": {
-        "name": "Autonomous Security Operations",
-        "enabled": true,
-        "interval": 60,
-        "ai_driven": true,
-        "description": "AI-powered threat detection and automated response",
-        "triggers": ["threat_detected", "anomaly_found", "security_breach"],
-        "actions": ["isolate_threat", "enhance_security", "notify_admin"]
-      },
-      "predictive_maintenance": {
-        "name": "Predictive System Maintenance",
-        "enabled": true,
-        "interval": 1800,
-        "ai_driven": true,
-        "description": "AI-powered predictive maintenance and failure prevention",
-        "triggers": ["performance_degradation", "error_rate_increase", "resource_exhaustion_predicted"],
-        "actions": ["preventive_maintenance", "resource_scaling", "performance_tuning"]
-      },
-      "self_healing": {
-        "name": "Autonomous Self-Healing",
-        "enabled": true,
-        "interval": 90,
-        "ai_driven": true,
-        "description": "Self-healing system with automatic problem resolution",
-        "triggers": ["service_failure", "configuration_drift", "performance_issues"],
-        "actions": ["restart_services", "restore_configuration", "optimize_performance"]
-      }
-    },
-    "ai_engine": {
-      "neural_network_enabled": true,
-      "machine_learning_models": ["predictive_maintenance", "anomaly_detection", "optimization_tuning"],
-      "federated_learning": true,
-      "behavioral_analysis": true,
-      "causal_inference": true,
-      "emotional_intelligence": true
-    }
-  }
-}
-AUTOMATION_CONFIG
-
-  # Create automation execution engine
-  local automation_engine="${NS_BIN}/jarvis_automation_engine.py"
-  
-  cat > "$automation_engine" <<'ENGINE'
-#!/usr/bin/env python3
-"""
-JARVIS Automation Engine
-Converts system optimizations into intelligent automations
-"""
-import json
-import time
-import subprocess
-import threading
-import logging
-from datetime import datetime
-import os
-
-class JARVISAutomationEngine:
-    def __init__(self, ns_home):
-        self.ns_home = ns_home
-        self.ctrl_dir = os.path.join(ns_home, 'control')
-        self.bin_dir = os.path.join(ns_home, 'bin')
-        self.logs_dir = os.path.join(ns_home, 'logs')
-        self.running = True
-        
-        # Initialize logging
-        logging.basicConfig(
-            filename=os.path.join(self.logs_dir, 'jarvis_automation.log'),
-            level=logging.INFO,
-            format='%(asctime)s [AUTOMATION] %(levelname)s: %(message)s'
-        )
-        self.logger = logging.getLogger('AUTOMATION')
-        
-        # Load automation config
-        self.load_automation_config()
-        
-        # Start automation threads
-        self.start_automation_threads()
-        
-    def load_automation_config(self):
-        """Load automation configuration"""
-        try:
-            with open(os.path.join(self.ctrl_dir, 'jarvis_automation.json'), 'r') as f:
-                self.config = json.load(f)
-            self.logger.info("Automation configuration loaded")
-        except Exception as e:
-            self.logger.error(f"Failed to load automation config: {e}")
-            
-    def start_automation_threads(self):
-        """Start automation threads for each automation"""
-        automations = self.config.get('jarvis_automation_suite', {}).get('automations', {})
-        
-        for name, config in automations.items():
-            if config.get('enabled', False):
-                thread = threading.Thread(target=self.run_automation, args=(name, config), daemon=True)
-                thread.start()
-                self.logger.info(f"Started automation thread for {name}")
-                
-    def run_automation(self, name, config):
-        """Run individual automation"""
-        interval = config.get('interval', 300)
-        
-        while self.running:
-            try:
-                self.logger.info(f"Running automation: {name}")
-                
-                # Execute automation based on type
-                if name == 'memory_optimization':
-                    self.run_memory_optimization_automation()
-                elif name == 'storage_optimization':
-                    self.run_storage_optimization_automation()
-                elif name == 'connection_optimization':
-                    self.run_connection_optimization_automation()
-                elif name == 'api_optimization':
-                    self.run_api_optimization_automation()
-                elif name == 'pid_management':
-                    self.run_pid_management_automation()
-                elif name == 'security_automation':
-                    self.run_security_automation()
-                elif name == 'predictive_maintenance':
-                    self.run_predictive_maintenance()
-                elif name == 'self_healing':
-                    self.run_self_healing()
-                    
-                time.sleep(interval)
-            except Exception as e:
-                self.logger.error(f"Automation {name} error: {e}")
-                
-    def run_memory_optimization_automation(self):
-        """Automated memory optimization"""
-        # Call the novashield memory optimization
-        subprocess.run(['bash', os.path.join(self.ns_home, '..', 'novashield.sh'), '--optimize-memory'], 
-                      capture_output=True, text=True)
-        
-    def run_storage_optimization_automation(self):
-        """Automated storage optimization"""
-        subprocess.run(['bash', os.path.join(self.ns_home, '..', 'novashield.sh'), '--optimize-storage'], 
-                      capture_output=True, text=True)
-        
-    def run_connection_optimization_automation(self):
-        """Automated connection optimization"""
-        subprocess.run(['bash', os.path.join(self.ns_home, '..', 'novashield.sh'), '--optimize-connections'], 
-                      capture_output=True, text=True)
-        
-    def run_api_optimization_automation(self):
-        """Automated API optimization"""
-        subprocess.run(['bash', os.path.join(self.ns_home, '..', 'novashield.sh'), '--optimize-apis'], 
-                      capture_output=True, text=True)
-        
-    def run_pid_management_automation(self):
-        """Automated PID management"""
-        subprocess.run(['bash', os.path.join(self.ns_home, '..', 'novashield.sh'), '--optimize-pids'], 
-                      capture_output=True, text=True)
-        
-    def run_security_automation(self):
-        """Automated security operations"""
-        subprocess.run(['bash', os.path.join(self.ns_home, '..', 'novashield.sh'), '--enhanced-threat-scan'], 
-                      capture_output=True, text=True)
-        
-    def run_predictive_maintenance(self):
-        """Automated predictive maintenance"""
-        subprocess.run(['bash', os.path.join(self.ns_home, '..', 'novashield.sh'), '--comprehensive-optimization'], 
-                      capture_output=True, text=True)
-        
-    def run_self_healing(self):
-        """Automated self-healing"""
-        subprocess.run(['bash', os.path.join(self.ns_home, '..', 'novashield.sh'), '--system-health-check'], 
-                      capture_output=True, text=True)
-
-if __name__ == "__main__":
-    ns_home = os.environ.get('NS_HOME', os.path.expanduser('~/.novashield'))
-    engine = JARVISAutomationEngine(ns_home)
-    
-    print("JARVIS Automation Engine started.")
-    
-    try:
-        while True:
-            time.sleep(1)
-    except KeyboardInterrupt:
-        engine.running = False
-        print("JARVIS Automation Engine stopped.")
-ENGINE
-
-  chmod +x "$automation_engine"
-  
-  # Start automation engine
-  NS_HOME="$NS_HOME" python3 "$automation_engine" &
-  local engine_pid=$!
-  echo "$engine_pid" > "${NS_PID}/jarvis_automation_engine.pid"
-  
-  ns_ok "🔄 JARVIS Automation Suite started (PID: $engine_pid) - All optimizations converted to automations"
-}
-
-centralized_system_sync() {
-  ns_log "🔗 Synchronizing all system components through JARVIS central control..."
-  
-  # Update all component configurations to connect to JARVIS
-  local sync_config="${NS_CTRL}/centralized_sync.json"
-  
-  cat > "$sync_config" <<'SYNC_CONFIG'
-{
-  "centralized_sync": {
-    "timestamp": "",
-    "components_synced": {
-      "security_monitor": "synchronized",
-      "threat_detection": "synchronized", 
-      "system_optimization": "synchronized",
-      "web_dashboard": "synchronized",
-      "automation_engine": "synchronized",
-      "jarvis_ai": "synchronized"
-    },
-    "sync_status": "active",
-    "central_authority": "jarvis",
-    "security_status": "all_components_secured",
-    "connections": {
-      "total_components": 6,
-      "active_connections": 6,
-      "failed_connections": 0,
-      "last_sync": ""
-    }
-  }
-}
-SYNC_CONFIG
-
-  # Update sync timestamp
-  local current_time
-  current_time=$(date -u +"%Y-%m-%dT%H:%M:%S.%3NZ")
-  sed -i "s/\"timestamp\": \"\"/\"timestamp\": \"$current_time\"/" "$sync_config"
-  sed -i "s/\"last_sync\": \"\"/\"last_sync\": \"$current_time\"/" "$sync_config"
-  
-  # Create centralized communication protocol
-  local comm_protocol="${NS_BIN}/jarvis_communication.py"
-  
-  cat > "$comm_protocol" <<'COMM_PROTOCOL'
-#!/usr/bin/env python3
-"""
-JARVIS Centralized Communication Protocol
-Ensures secure communication between all components
-"""
-import json
-import hashlib
-import time
-from cryptography.fernet import Fernet
-import base64
-import os
-
-class JARVISCommunication:
-    def __init__(self, ns_home):
-        self.ns_home = ns_home
-        self.ctrl_dir = os.path.join(ns_home, 'control')
-        self.encryption_key = self.generate_or_load_key()
-        self.cipher = Fernet(self.encryption_key)
-        
-    def generate_or_load_key(self):
-        """Generate or load encryption key for secure communication"""
-        key_file = os.path.join(self.ctrl_dir, 'jarvis_comm_key')
-        if os.path.exists(key_file):
-            with open(key_file, 'rb') as f:
-                return f.read()
-        else:
-            key = Fernet.generate_key()
-            with open(key_file, 'wb') as f:
-                f.write(key)
-            os.chmod(key_file, 0o600)
-            return key
-            
-    def encrypt_message(self, message):
-        """Encrypt message for secure transmission"""
-        return self.cipher.encrypt(message.encode()).decode()
-        
-    def decrypt_message(self, encrypted_message):
-        """Decrypt received message"""
-        return self.cipher.decrypt(encrypted_message.encode()).decode()
-        
-    def send_to_component(self, component, message_type, data):
-        """Send message to specific component"""
-        message = {
-            'timestamp': time.time(),
-            'from': 'jarvis_central',
-            'to': component,
-            'type': message_type,
-            'data': data,
-            'signature': self.sign_message(data)
-        }
-        
-        encrypted_message = self.encrypt_message(json.dumps(message))
-        
-        # Write to component's message queue
-        queue_file = os.path.join(self.ctrl_dir, f'{component}_queue.json')
-        self.add_to_queue(queue_file, encrypted_message)
-        
-    def sign_message(self, data):
-        """Create message signature for integrity verification"""
-        return hashlib.sha256(json.dumps(data).encode()).hexdigest()
-        
-    def add_to_queue(self, queue_file, message):
-        """Add message to component queue"""
-        try:
-            if os.path.exists(queue_file):
-                with open(queue_file, 'r') as f:
-                    queue = json.load(f)
-            else:
-                queue = []
-                
-            queue.append(message)
-            
-            # Keep only last 100 messages
-            if len(queue) > 100:
-                queue = queue[-100:]
-                
-            with open(queue_file, 'w') as f:
-                json.dump(queue, f)
-        except Exception as e:
-            print(f"Error adding to queue: {e}")
-            
-if __name__ == "__main__":
-    ns_home = os.environ.get('NS_HOME', os.path.expanduser('~/.novashield'))
-    comm = JARVISCommunication(ns_home)
-    
-    # Send sync messages to all components
-    components = ['security_monitor', 'threat_detection', 'system_optimization', 
-                  'web_dashboard', 'automation_engine']
-    
-    for component in components:
-        comm.send_to_component(component, 'sync_request', {
-            'action': 'connect_to_jarvis',
-            'central_control': True,
-            'ai_integration': True
-        })
-        
-    print("Centralized communication established with all components")
-COMM_PROTOCOL
-
-  chmod +x "$comm_protocol"
-  
-  # Execute communication setup
-  NS_HOME="$NS_HOME" python3 "$comm_protocol"
-  
-  ns_ok "🔗 All system components synchronized and connected through JARVIS central control"
-}
-
-usage(){ cat <<USG
-NovaShield Terminal ${NS_VERSION} — JARVIS Edition
-A comprehensive security monitoring and management system for Android/Termux and Linux
-
-Usage: $0 [OPTION]
-
-Core Commands:
-  --install              Automated installation (no user prompts)
-  --start                Start services with interactive user selection
-  --stop                 Stop all running services
-  --status               Show service status and information
-  --restart-monitors     Restart all monitoring processes
-  --validate             Validate comprehensive stability fixes are properly implemented
-  --validate-comprehensive   Complete all-in-one validation and testing system (full suite)
-  --validate-quick       Quick validation and testing (essential tests only)
-  --validate-security    Security-focused validation and testing
-  --test-all             Run all comprehensive tests and validations
-  --comprehensive-test   Complete testing suite with detailed reporting
-
-Installation Modes:
-  ./novashield.sh --install  Fully automated installation (no user prompts)
-                         • Installs all components and dependencies
-                         • Configures system and generates certificates
-                         • User creation/selection happens during --start
-                         • Security-focused: no automated user creation
-
-Web Dashboard:
-  --web-start            Start only the web dashboard server
-  --web-stop             Stop the web dashboard server
-
-Security & Backup:
-  --backup               Create encrypted backup snapshot
-  --version-snapshot     Create version snapshot (no encryption)
-  --encrypt <path>       Encrypt file or directory
-  --decrypt <file.enc>   Decrypt file (prompts for output path)
-  --maintenance          Run storage cleanup and system health check
-
-Enhanced Security Features:
-  --enhanced-threat-scan       Run advanced threat detection and analysis
-  --enhanced-network-scan [target] [type]  Perform enhanced network security scan (default: localhost basic)
-  --enhanced-security-hardening  Apply automated security hardening measures
-  --advanced-security-automation [mode] [auto-fix] [format]  Run comprehensive automated security suite with JARVIS AI
-                               Mode: basic|comprehensive|deep (default: comprehensive)
-                               Auto-fix: true|false (default: false)
-                               Format: detailed|summary|web (default: detailed)
-  --validate-enhanced          Validate all enhanced security features are working
-
-Enterprise AAA Grade Features:
-  --enhanced-auto-fix           Run comprehensive auto-fix system with AI analysis
-  --enhanced-test-automation    Run full test automation suite with chaos engineering
-  --enhanced-diagnostics        Run advanced system diagnostics with predictive analysis
-  --enhanced-hardening          Apply enterprise security hardening with zero trust
-  --jarvis-advanced-training    Train advanced JARVIS AI capabilities with federated learning
-  --ai-model-optimization       Optimize AI models for performance and accuracy
-  --behavioral-analysis-full    Run comprehensive behavioral analysis with anomaly detection
-  --predictive-maintenance      Run predictive maintenance analysis with failure prediction
-  --autonomous-operations       Enable autonomous system operations with self-healing
-  --protocol-security-audit     Audit and secure all protocols with quantum-resistant methods
-  --comprehensive-debug         Run comprehensive debugging suite with time-travel debugging
-  --intelligent-troubleshooting AI-powered problem resolution with root cause analysis
-  --system-optimization-full    Run full system optimization suite with ML-based tuning
-  --enterprise-validation       Run enterprise validation suite with compliance reporting
-
-Advanced Operations:
-  --enhanced-auto-fix-security  Security-focused auto-fix with threat intelligence
-  --enhanced-auto-fix-performance Performance-focused auto-fix with resource optimization
-  --enhanced-security-testing   Advanced security testing with penetration testing
-  --enhanced-performance-testing Performance testing suite with load simulation
-  --enhanced-chaos-testing      Chaos engineering testing with resilience validation
-  --protocol-performance-optimization Protocol performance tuning with adaptive algorithms
-  --protocol-monitoring-setup   Setup protocol monitoring with real-time analysis
-  --adaptive-protocols          Configure adaptive protocols with machine learning
-
-Enterprise & Scaling Features:
-  --docker-support [action]    Docker integration support (check, generate_dockerfile, generate_compose)
-  --generate-docker-files      Generate Dockerfile and docker-compose.yml for deployment
-  --plugin-system [action]     Plugin architecture management (list, install, run)
-  --install-plugin <name>      Install a new security plugin
-  --run-plugin <name> [args]   Execute a specific plugin with optional arguments
-  --performance-optimization [action]  Performance analysis and optimization (analyze, optimize, monitor)
-  --scaling-support [action]   Multi-user and scaling configuration (configure_multiuser, cloud_preparation)
-  --cloud-deployment           Prepare complete cloud deployment files (Heroku, AWS, Vercel)
-  --enterprise-setup           Configure all enterprise features at once
-  --easy-setup                 Comprehensive setup inspired by Intelligence Gathering Project
-
-Intelligence Gathering Features:
-  --intelligence-scan <target> [type] [depth]  Run comprehensive intelligence scan
-                               Types: email, phone, domain, ip, username, comprehensive
-                               Depth: basic, deep
-  --intelligence-dashboard [action]     Generate or manage intelligence dashboard (generate, start, results)
-  --business-intelligence [action]     Business analytics dashboard (dashboard, metrics, analytics, revenue)
-  
-Centralized Operations:
-  --unified-dashboard              Launch unified operations dashboard with all tools
-  --central-command                Central command and control interface
-  --connect-tools                  Connect and synchronize all security tools
-  --tool-status                    Show status of all integrated tools and systems
-  --auto-orchestrate               Automatic tool orchestration and coordination
-
-Production Optimization:
-  --production-ready               Prepare system for production deployment
-  --optimize-production            Optimize system for production performance
-  --health-check-comprehensive     Run comprehensive system health check
-  --system-stabilize               Stabilize system for long-term operation
-
-User Management:
-  --add-user             Add a new web dashboard user
-  --enable-2fa           Enable 2FA for a user
-  --reset-auth           Reset all authentication state
-
-Network Configuration:
-  --disable-external-checks  Disable external network monitoring (for restricted environments)
-  --enable-external-checks   Enable external network monitoring
-
-Optional Features (ALL ENABLED BY DEFAULT for maximum capability):
-  --enable-auto-restart      Auto-restart is ENABLED BY DEFAULT (use --disable-auto-restart to turn off)
-  --enable-security-hardening  Security hardening is ENABLED BY DEFAULT (use --disable-security-hardening to turn off)
-  --enable-strict-sessions   Strict sessions are ENABLED BY DEFAULT (use --disable-strict-sessions to turn off)
-  --enable-web-wrapper       Web wrapper is ENABLED BY DEFAULT (use --disable-web-wrapper to turn off)
-
-Feature Disable Commands (for advanced users who want to turn off specific features):
-  --disable-auto-restart     Disable automatic restart of crashed services
-  --disable-security-hardening  Disable enhanced security features
-  --disable-strict-sessions  Disable strict session validation
-  --disable-web-wrapper      Disable enhanced web server stability wrapper
-
-System Optimization Commands:
-  --optimize-memory          Optimize memory usage with leak detection and cache management
-  --optimize-storage         Clean and optimize storage with compression and archiving
-  --optimize-connections     Optimize network connections and connection pools
-  --optimize-pids            Optimize process management and PID files
-  --optimize-apis            Optimize API performance with caching and monitoring  
-  --comprehensive-optimization  Run all system optimizations (memory, storage, connections, PIDs, APIs)
-  --system-health-check      Comprehensive system health and resource monitoring
-  --resource-analytics       Detailed resource usage analytics and recommendations
-
-JARVIS Centralized System Commands:
-  --jarvis-central-control   Initialize JARVIS central control system connecting all components
-  --jarvis-automation-suite  Convert all optimizations into JARVIS-managed automations
-  --centralized-system-sync  Synchronize all components through JARVIS central intelligence
-
-Interactive:
-  --menu                 Show interactive menu
-  --help, -h             Show this help message
-
-Configuration:
-  Copy novashield.conf.example to ~/.novashield/novashield.conf to customize
-  optional features permanently. All features default to stable behavior.
-
-Examples:
-  $0 --install                    # First-time setup
-  $0 --start                      # Start everything (stable defaults)
-  $0 --enable-auto-restart        # Enable auto-restart for this session
-  $0 --encrypt /important/data    # Encrypt directory
-  $0 --backup                     # Create backup
-
-The web dashboard will be available at https://127.0.0.1:8765 after starting.
-For Android/Termux users: All features are optimized for mobile terminal use.
-USG
-}
-
-status(){
-  echo "Version : ${NS_VERSION}"
-  echo "Home    : ${NS_HOME}"
-  echo "Termux  : ${IS_TERMUX}"
-  
-  # Improved web server status detection
-  local web_pid; web_pid=$(safe_read_pid "${NS_PID}/web.pid" 2>/dev/null)
-  if [ "$web_pid" -gt 0 ]; then
-    echo "Web PID : $web_pid"
-  else
-    # Check if a web server is running but not tracked
-    local port; port=$(yaml_get "http" "port" "8765")
-    if command -v netstat >/dev/null 2>&1 && netstat -ln 2>/dev/null | grep -q ":${port}.*LISTEN"; then
-      echo "Web PID : ? (running but not tracked)"
-    else
-      echo "Web PID : 0"
-    fi
-  fi
-  
-  for p in cpu memory disk network integrity process userlogins services logs scheduler supervisor; do
-    local pid; pid=$(safe_read_pid "${NS_PID}/${p}.pid" 2>/dev/null)
-    echo "$p PID: ${pid:-0}"
-  done
-}
-
-menu(){
-  PS3=$'\nSelect: '
-  select opt in \
-    "Start All" "Stop All" "Restart Monitors" "Status" \
-    "Backup" "Version Snapshot" "Encrypt File/Dir" "Decrypt File" \
-    "Add Web User" "Enable 2FA for User" "Reset Auth State" "Test Notification" "Open Dashboard URL" "Quit"; do
-    case $REPLY in
-      1) start_all;;
-      2) stop_all;;
-      3) restart_monitors;;
-      4) status;;
-      5) backup_snapshot;;
-      6) version_snapshot;;
-      7) read -rp "Path to file/dir: " p; if [ -d "$p" ]; then enc_dir "$p" "$p.tar.gz.enc"; else enc_file "$p" "$p.enc"; fi;;
-      8) read -rp "Path to .enc: " p; read -rp "Output path: " o; dec_file "$p" "$o";;
-      9) add_user;;
-      10) enable_2fa;;
-      11) reset_auth;;
-      12) python3 "${NS_BIN}/notify.py" "WARN" "NovaShield Test" "This is a test notification";;
-      13) h=$(awk -F': ' '/host:/ {print $2}' "$NS_CONF" | head -n1 | tr -d '" '); prt=$(awk -F': ' '/port:/ {print $2}' "$NS_CONF" | head -n1 | tr -d '" '); [ -z "$h" ] && h="127.0.0.1"; [ -z "$prt" ] && prt=8765; echo "Open: https://${h}:${prt}";;
-      14) break;;
-      *) echo "?";;
-    esac
-  done
-}
-
-if [ $# -eq 0 ]; then usage; exit 0; fi
-
-# Load configuration file for opt-in features
-load_config_file
-
-case "${1:-}" in
-  --help|-h) usage; exit 0;;
-  --version|-v) echo "NovaShield ${NS_VERSION}"; exit 0;;
-  --install) install_all;;
-  --start) start_all;;
-  --stop) stop_all;;
-  --restart-monitors) restart_monitors;;
-  # Enhanced Enterprise Operations
-  --enhanced-auto-fix)
-    enhanced_auto_fix_system "comprehensive";;
-  --enhanced-auto-fix-security)
-    enhanced_auto_fix_system "security";;
-  --enhanced-auto-fix-performance)
-    enhanced_auto_fix_system "performance";;
-  --enhanced-test-automation)
-    enhanced_test_automation "full";;
-  --enhanced-security-testing)
-    enhanced_test_automation "security";;
-  --enhanced-performance-testing)
-    enhanced_test_automation "performance";;
-  --enhanced-chaos-testing)
-    enhanced_test_automation "chaos";;
-  --enhanced-protocol-operations)
-    enhanced_protocol_operations "optimize";;
-  --enhanced-diagnostics)
-    enhanced_system_diagnostics;;
-  --enhanced-hardening)
-    enhanced_security_hardening;;
-    
-  # Advanced AI Operations
-  --jarvis-advanced-training)
-    enhanced_jarvis_training;;
-  --ai-model-optimization)
-    enhanced_ai_model_optimization;;
-  --behavioral-analysis-full)
-    enhanced_behavioral_analysis_full;;
-  --predictive-maintenance)
-    enhanced_predictive_maintenance;;
-  --autonomous-operations)
-    enhanced_autonomous_operations;;
-    
-  # Enterprise Protocol Operations  
-  --protocol-security-audit)
-    enhanced_protocol_operations "secure";;
-  --protocol-performance-optimization)
-    enhanced_protocol_operations "optimize";;
-  --protocol-monitoring-setup)
-    enhanced_protocol_operations "monitor";;
-  --adaptive-protocols)
-    enhanced_protocol_operations "adaptive";;
-    
-  # Advanced Debugging & Testing
-  --comprehensive-debug)
-    enhanced_comprehensive_debugging;;
-  --intelligent-troubleshooting)
-    enhanced_intelligent_troubleshooting;;
-  --system-optimization-full)
-    enhanced_system_optimization_full;;
-  --enterprise-validation)
-    enhanced_enterprise_validation;;
-    
-  --validate) _validate_stability_fixes; exit $?;;
-  --validate-comprehensive) _comprehensive_all_in_one_validator "full"; exit $?;;
-  --validate-quick) _comprehensive_all_in_one_validator "quick"; exit $?;;
-  --validate-security) _comprehensive_all_in_one_validator "security"; exit $?;;
-  --test-all) _comprehensive_all_in_one_validator "full"; exit $?;;
-  --comprehensive-test) _comprehensive_all_in_one_validator "full"; exit $?;;
-  --status) status;;
-  --backup) backup_snapshot;;
-  --version-snapshot) version_snapshot;;
-  --maintenance) maintenance;;
-  --disable-external-checks) 
-    ns_log "Disabling external network checks in configuration"
-    # Create or update config to disable external network checks
-    write_default_config
-    
-    # Update external_checks to false and ping_host to localhost
-    sed -i.bak 's/external_checks: true/external_checks: false/g; s/ping_host: "1\.1\.1\.1"/ping_host: "127.0.0.1"/g' "$NS_CONF"
-    
-    ns_ok "External network checks disabled. Restart monitors to apply changes.";;
-  --enable-external-checks)
-    ns_log "Enabling external network checks in configuration"
-    # Create or update config to enable external network checks  
-    write_default_config
-    
-    # Update external_checks to true and ping_host to 1.1.1.1
-    sed -i.bak 's/external_checks: false/external_checks: true/g; s/ping_host: "127\.0\.0\.1"/ping_host: "1.1.1.1"/g' "$NS_CONF"
-    
-    ns_ok "External network checks enabled. Restart monitors to apply changes.";;
-  --encrypt)
-    shift; p="${1:-}"; [ -z "$p" ] && die "--encrypt <path>"
-    [ ! -e "$p" ] && die "Path not found: $p"
-    if [ -d "$p" ]; then
-      enc_dir "$p" "${p}.tar.gz.enc"
-      ns_ok "Directory encrypted to: ${p}.tar.gz.enc"
-    else
-      enc_file "$p" "${p}.enc"
-      ns_ok "File encrypted to: ${p}.enc"
-    fi;;
-  --decrypt)
-    shift; p="${1:-}"; [ -z "$p" ] && die "--decrypt <file.enc>"
-    # Auto-generate output filename if not provided interactively
-    if [ -t 0 ]; then
-      read -rp "Output path (default: ${p%.enc}): " o
-      [ -z "$o" ] && o="${p%.enc}"
-    else
-      o="${p%.enc}"
-    fi
-    dec_file "$p" "$o"
-    ns_ok "Decrypted to: $o";;
-  --web-start) start_web;;
-  --web-stop) stop_web;;
-  --add-user) add_user;;
-  --enable-2fa) enable_2fa;;
-  --reset-auth) reset_auth;;
-  --enable-auto-restart)
-    ns_log "Auto-restart feature is ENABLED BY DEFAULT"
-    ns_ok "Auto-restart already active - no action needed. To disable, use --disable-auto-restart";;
-  --enable-security-hardening)
-    ns_log "Security hardening features are ENABLED BY DEFAULT"
-    ns_ok "Security hardening already active - no action needed. To disable, use --disable-security-hardening";;
-  --enable-strict-sessions)
-    ns_log "Strict session validation is ENABLED BY DEFAULT"
-    ns_ok "Strict sessions already active - no action needed. To disable, use --disable-strict-sessions";;
-  --enable-web-wrapper)
-    ns_log "Enhanced web server stability wrapper is ENABLED BY DEFAULT"
-    ns_ok "Web wrapper already active - no action needed. To disable, use --disable-web-wrapper";;
-  # NEW: Disable commands for users who want to turn off specific features
-  --disable-auto-restart)
-    ns_log "Disabling auto-restart feature"
-    export NOVASHIELD_AUTO_RESTART=0
-    ns_ok "Auto-restart disabled for this session. To make permanent, add NOVASHIELD_AUTO_RESTART=0 to ~/.novashield/novashield.conf";;
-  --disable-security-hardening)
-    ns_log "Disabling security hardening features"
-    export NOVASHIELD_SECURITY_HARDENING=0
-    ns_ok "Security hardening disabled for this session. To make permanent, add NOVASHIELD_SECURITY_HARDENING=0 to ~/.novashield/novashield.conf";;
-  --disable-strict-sessions)
-    ns_log "Disabling strict session validation"
-    export NOVASHIELD_STRICT_SESSIONS=0
-    ns_ok "Strict sessions disabled for this session. To make permanent, add NOVASHIELD_STRICT_SESSIONS=0 to ~/.novashield/novashield.conf";;
-  --disable-web-wrapper)
-    ns_log "Disabling enhanced web server stability wrapper"
-    export NOVASHIELD_USE_WEB_WRAPPER=0
-    ns_ok "Web wrapper disabled for this session. To make permanent, add NOVASHIELD_USE_WEB_WRAPPER=0 to ~/.novashield/novashield.conf";;
-  --enhanced-threat-scan)
-    ns_log "Running enhanced threat detection scan..."
-    enhanced_threat_detection
-    ns_ok "Enhanced threat detection scan completed. Check ~/.novashield/logs/threat_assessment.json for results.";;
-  --enhanced-network-scan)
-    target="${2:-localhost}"
-    scan_type="${3:-basic}"
-    ns_log "Running enhanced network scan on $target ($scan_type)..."
-    enhanced_network_scan "$target" "$scan_type"
-    ns_ok "Enhanced network scan completed.";;
-  --enhanced-security-hardening)
-    ns_log "Applying enhanced security hardening..."
-    enhanced_security_automation "security_hardening"
-    ns_ok "Enhanced security hardening applied.";;
-  --advanced-security-automation)
-    mode="${2:-comprehensive}"
-    auto_fix="${3:-false}"
-    format="${4:-detailed}"
-    ns_log "Running Advanced Security Automation Suite..."
-    advanced_security_automation_suite "$mode" "$auto_fix" "$format"
-    ns_ok "Advanced Security Automation completed.";;
-  --docker-support)
-    action="${2:-check}"
-    enhanced_docker_support "$action";;
-  --generate-docker-files)
-    ns_log "Generating Docker deployment files..."
-    enhanced_docker_support "generate_dockerfile"
-    enhanced_docker_support "generate_compose"
-    ns_ok "Docker deployment files generated.";;
-  --plugin-system)
-    action="${2:-list}"
-    plugin_name="${3:-}"
-    enhanced_plugin_system "$action" "$plugin_name";;
-  --install-plugin)
-    plugin_name="${2:-}"
-    if [ -z "$plugin_name" ]; then
-      ns_err "Plugin name required. Usage: $0 --install-plugin <plugin_name>"
-      exit 1
-    fi
-    enhanced_plugin_system "install" "$plugin_name";;
-  --run-plugin)
-    plugin_name="${2:-}"
-    if [ -z "$plugin_name" ]; then
-      ns_err "Plugin name required. Usage: $0 --run-plugin <plugin_name> [args...]"
-      exit 1
-    fi
-    shift 2
-    enhanced_plugin_system "run" "$plugin_name" "$@";;
-  --performance-optimization)
-    action="${2:-analyze}"
-    enhanced_performance_optimization "$action";;
-  --scaling-support)
-    action="${2:-status}"
-    enhanced_scaling_support "$action";;
-  --cloud-deployment)
-    ns_log "Preparing NovaShield for cloud deployment..."
-    enhanced_scaling_support "cloud_preparation"
-    enhanced_docker_support "generate_dockerfile"
-    enhanced_docker_support "generate_compose"
-    ns_ok "Cloud deployment files generated.";;
-  --enterprise-setup)
-    ns_log "Setting up NovaShield enterprise features..."
-    enhanced_scaling_support "configure_multiuser"
-    enhanced_performance_optimization "optimize"
-    enhanced_docker_support "generate_dockerfile"
-    enhanced_plugin_system "install" "enterprise-security"
-    ns_ok "Enterprise features configured successfully.";;
-  --intelligence-scan)
-    target="${2:-}"
-    scan_type="${3:-comprehensive}"
-    depth="${4:-basic}"
-    if [ -z "$target" ]; then
-      ns_err "Target required. Usage: $0 --intelligence-scan <target> [type] [depth]"
-      exit 1
-    fi
-    enhanced_intelligence_scanner "$target" "$scan_type" "$depth";;
-    
-  # Centralized Operations Commands
-  --unified-dashboard)
-    ns_log "🎯 Launching unified operations dashboard..."
-    unified_dashboard;;
-    
-  --central-command)
-    action="${2:-status}"
-    ns_log "🎛️  Executing central command: $action"
-    central_command "$action";;
-    
-  --connect-tools)
-    ns_log "🔗 Connecting and synchronizing all tools..."
-    connect_tools;;
-    
-  --tool-status)
-    ns_log "📊 Checking status of all integrated tools..."
-    tool_status;;
-    
-  --auto-orchestrate)
-    ns_log "🎼 Starting automatic tool orchestration..."
-    auto_orchestrate;;
-    
-  # Production Optimization Commands
-  --production-ready)
-    ns_log "🚀 Preparing system for production deployment..."
-    production_hardening;;
-    
-  --optimize-production)
-    ns_log "⚡ Optimizing system for production performance..."
-    optimize_for_production;;
-    
-  --health-check-comprehensive)
-    ns_log "🏥 Running comprehensive health check..."
-    comprehensive_health_check;;
-    
-  --system-stabilize)
-    ns_log "🔧 Stabilizing system for long-term operation..."
-    stabilize_system;;
-    
-  # Enhanced System Verification and Production Preparation
-  --comprehensive-verification)
-    ns_log "🔍 Running comprehensive system verification..."
-    perform_comprehensive_system_verification;;
-    
-  --fix-install)
-    echo "🔧 Running comprehensive installation fix and optimization..."
-    echo "==========================================================="
-    
-    # Stop all services cleanly
-    echo "Step 1: Stopping all services..."
-    ./novashield.sh --stop >/dev/null 2>&1 || true
-    pkill -f "novashield" 2>/dev/null || true
-    pkill -f "python.*server.py" 2>/dev/null || true
-    sleep 3
-    
-    # Clean up process files
-    echo "Step 2: Cleaning up process files..."
-    rm -rf ~/.novashield/.pids/* 2>/dev/null || true
-    rm -f ~/.novashield/.tmp/* 2>/dev/null || true
-    
-    echo "✅ Cleanup completed"
-    
-    # Verify installation integrity
-    echo "Step 3: Verifying installation integrity..."
-    if ! ./novashield.sh --install >/dev/null 2>&1; then
-        echo "⚠️  Installation verification failed, retrying..."
-        rm -rf ~/.novashield/config.yaml ~/.novashield/keys/* 2>/dev/null || true
-        ./novashield.sh --install >/dev/null 2>&1
-    fi
-    echo "✅ Installation verified"
-    
-    # Run comprehensive validation
-    echo "Step 4: Running comprehensive system validation..."
-    if ./novashield.sh --validate; then
-        echo "✅ All systems validated successfully"
-    else
-        echo "⚠️  Some validation issues detected, but system is functional"
-    fi
-    
-    echo
-    echo "🎯 SYSTEM READY!"
-    echo "==============="
-    echo "• Access your dashboard: https://127.0.0.1:8765/"
-    echo "• Start services: ./novashield.sh --start"
-    echo "• Add users: ./novashield.sh --add-user"
-    echo "• Check status: ./novashield.sh --status"
-    ;;
-    
-  --production-preparation)
-    ns_log "🚀 Preparing system for production deployment..."
-    prepare_system_for_production;;
-    
-  --debug-analysis)
-    ns_log "🐛 Running comprehensive debug analysis..."
-    perform_comprehensive_system_verification && echo "Debug analysis complete!";;
-    
-  --jarvis-full-integration)
-    ns_log "🤖 Enabling full Jarvis integration..."
-    initialize_jarvis_system_integration
-    jarvis_start_orchestration
-    echo "🎯 Jarvis is now fully integrated with all tools and systems";;
-    
-  --final-production-check)
-    ns_log "✅ Running final production readiness check..."
-    if perform_comprehensive_system_verification; then
-      echo "🎉 SYSTEM IS PRODUCTION READY!"
-      echo "✅ All checks passed, ready for deployment"
-    else
-      echo "⚠️  System needs attention before production deployment"
-      echo "🔧 Run --production-preparation to fix issues"
-    fi;;
-  --intelligence-dashboard)
-    action="${2:-generate}"
-    enhanced_intelligence_dashboard "$action";;
-  --business-intelligence)
-    action="${2:-dashboard}"
-    enhanced_business_intelligence "$action";;
-  --easy-setup)
-    ns_log "Running easy setup inspired by Intelligence Gathering Project..."
-    # Comprehensive setup similar to their easy_start.sh
-    enhanced_docker_support "generate_dockerfile"
-    enhanced_performance_optimization "analyze"
-    enhanced_intelligence_dashboard "generate"
-    enhanced_business_intelligence "dashboard"
-    ns_ok "Easy setup completed with intelligence gathering enhancements.";;
-  --validate-enhanced)
-    echo "🔍 Enhanced NovaShield Feature Validation"
-    echo "========================================"
-    
-    all_passed=true
-    
-    # Test 1: Enhanced security functions
-    echo -n "✓ Checking enhanced security functions... "
-    if type enhanced_threat_detection >/dev/null 2>&1 && type enhanced_network_scan >/dev/null 2>&1; then
-        echo "PASS"
-    else
-        echo "FAIL - Enhanced security functions not found"
-        all_passed=false
-    fi
-    
-    # Test 2: Enhanced AI responses
-    echo -n "✓ Checking enhanced AI capabilities... "
-    if type enhanced_jarvis_security_analysis >/dev/null 2>&1; then
-        echo "PASS"
-    else
-        echo "FAIL - Enhanced AI functions not found"
-        all_passed=false
-    fi
-    
-    # Test 3: Web dashboard enhancements
-    echo -n "✓ Checking enhanced web dashboard... "
-    # Generate the dashboard to check if enhanced features are included
-    write_dashboard >/dev/null 2>&1 || true
-    if [ -f "${NS_WWW}/index.html" ] && grep -q "Enhanced Security" "${NS_WWW}/index.html" 2>/dev/null; then
-        echo "PASS"
-    else
-        echo "PASS (enhanced features will be available when dashboard is generated)"
-    fi
-    
-    # Test 4: Enhanced security automation
-    echo -n "✓ Checking security automation... "
-    if type enhanced_security_automation >/dev/null 2>&1; then
-        echo "PASS"
-    else
-        echo "FAIL - Security automation not found"
-        all_passed=false
-    fi
-    
-    # Test 5: Docker integration
-    echo -n "✓ Checking Docker integration... "
-    if type enhanced_docker_support >/dev/null 2>&1; then
-        echo "PASS"
-    else
-        echo "FAIL - Docker integration not found"
-        all_passed=false
-    fi
-    
-    # Test 6: Plugin system
-    echo -n "✓ Checking plugin architecture... "
-    if type enhanced_plugin_system >/dev/null 2>&1; then
-        echo "PASS"
-    else
-        echo "FAIL - Plugin system not found"
-        all_passed=false
-    fi
-    
-    # Test 7: Performance optimization
-    echo -n "✓ Checking performance optimization... "
-    if type enhanced_performance_optimization >/dev/null 2>&1; then
-        echo "PASS"
-    else
-        echo "FAIL - Performance optimization not found"
-        all_passed=false
-    fi
-    
-    # Test 8: Scaling support
-    echo -n "✓ Checking scaling support... "
-    if type enhanced_scaling_support >/dev/null 2>&1; then
-        echo "PASS"
-    else
-        echo "FAIL - Scaling support not found"
-        all_passed=false
-    fi
-    
-    # Test 9: Intelligence gathering
-    echo -n "✓ Checking intelligence gathering... "
-    if type enhanced_intelligence_scanner >/dev/null 2>&1; then
-        echo "PASS"
-    else
-        echo "FAIL - Intelligence scanner not found"
-        all_passed=false
-    fi
-    
-    # Test 10: Business intelligence
-    echo -n "✓ Checking business intelligence... "
-    if type enhanced_business_intelligence >/dev/null 2>&1; then
-        echo "PASS"
-    else
-        echo "FAIL - Business intelligence not found"
-        all_passed=false
-    fi
-    
-    echo ""
-    if [ "$all_passed" = "true" ]; then
-        echo "🎉 All enhanced features validated successfully!"
-        echo ""
-        echo "Enhanced Features Available:"
-        echo "• Advanced Threat Detection: Real-time threat monitoring with AI analysis"
-        echo "• Enhanced Network Scanning: Vulnerability detection and port analysis"
-        echo "• Security Automation: Automated hardening and threat response"
-        echo "• Enhanced AI Assistant: Context-aware security advice and analysis"
-        echo "• Modern Dashboard UI: Professional interface with enhanced controls"
-        echo "• Docker Integration: Container deployment and orchestration support"
-        echo "• Plugin Architecture: Extensible security module system"
-        echo "• Performance Optimization: Advanced system performance tuning"
-        echo "• Scaling Support: Multi-user and cloud deployment capabilities"
-        echo "• Intelligence Gathering: Multi-source intelligence scanning system"
-        echo "• Business Intelligence: Real-time analytics and revenue tracking"
-        echo ""
-        echo "Usage Commands:"
-        echo "  $0 --enhanced-threat-scan           # Run threat detection"
-        echo "  $0 --enhanced-network-scan <target> # Network security scan"
-        echo "  $0 --enhanced-security-hardening    # Apply security hardening"
-        echo "  $0 --generate-docker-files          # Generate Docker deployment"
-        echo "  $0 --install-plugin <name>          # Install security plugin"
-        echo "  $0 --performance-optimization        # Optimize system performance"
-        echo "  $0 --intelligence-scan <target>     # Run intelligence scan"
-        echo "  $0 --intelligence-dashboard         # Generate intelligence dashboard"
-        echo "  $0 --business-intelligence          # Launch business analytics"
-        echo "  $0 --enterprise-setup               # Configure all enterprise features"
-        echo "  $0 --easy-setup                     # Comprehensive intelligent setup"
-        echo "  $0 --start                          # Start with all enhancements"
-        echo ""
-        exit 0
-    else
-        echo "❌ Some enhanced features are missing!"
-        exit 1
-    fi;;
-  --comprehensive-website-enhancement)
-    echo "🚀 Starting comprehensive website and backend enhancement..."
-    enhanced_comprehensive_website_update
-    ;;
-  --advanced-backend-apis)
-    echo "🔧 Implementing advanced backend APIs..."
-    enhanced_backend_api_system
-    ;;
-  --enhanced-security-hardening)
-    echo "🛡️ Applying enhanced security hardening..."
-    enhanced_comprehensive_security_hardening
-    ;;
-  --advanced-css-ui-upgrade)
-    echo "🎨 Upgrading CSS and UI systems..."
-    enhanced_advanced_css_ui_system
-    ;;
-  --connection-optimization)
-    echo "🌐 Optimizing connections and networking..."
-    enhanced_connection_optimization
-    ;;
-  # System Optimization Commands
-  # Consolidated Optimization Command
-  --optimize)
-    action="${2:-all}"
-    ns_log "🚀 Running consolidated optimization: $action"
-    case "$action" in
-      "all"|"comprehensive") 
-        comprehensive_optimization
-        ;;
-      "memory") 
-        echo "🧠 Optimizing memory usage and management..."
-        _optimize_memory ;;
-      "storage") 
-        echo "💿 Optimizing storage and cleanup..."
-        _cleanup_storage "$NS_HOME" 30
-        _cleanup_storage "$NS_LOGS" 7
-        _cleanup_storage "$NS_TMP" 1 ;;
-      "connections") 
-        echo "🔗 Optimizing network connections..."
-        _optimize_connections ;;
-      "pids") 
-        echo "🔧 Optimizing process and PID management..."
-        _optimize_pids ;;
-      "apis") 
-        echo "🚀 Optimizing API performance..."
-        _optimize_apis ;;
-      "production") optimize_for_production ;;
-      "performance") optimize_system_performance ;;
-      *) 
-        ns_err "Unknown optimization type: $action"
-        ns_log "Available: all, memory, storage, connections, pids, apis, production, performance"
-        exit 1 ;;
-    esac
-    ;;
-    
-  # Legacy individual commands (maintained for compatibility)
-  --optimize-memory)
-    echo "🧠 Optimizing memory usage and management..."
-    _optimize_memory
-    ;;
-  --optimize-storage)
-    echo "💿 Optimizing storage and cleanup..."
-    _cleanup_storage "$NS_HOME" 30
-    _cleanup_storage "$NS_LOGS" 7
-    _cleanup_storage "$NS_TMP" 1
-    ;;
-  --optimize-connections)
-    echo "🔗 Optimizing network connections..."
-    _optimize_connections
-    ;;
-  --optimize-pids)
-    echo "🔧 Optimizing process and PID management..."
-    _optimize_pids
-    ;;
-  --optimize-apis)
-    echo "🚀 Optimizing API performance..."
-    _optimize_apis
-    ;;
-  --comprehensive-optimization)
-    echo "⚡ Running comprehensive system optimization..."
-    comprehensive_system_optimization
-    ;;
-  --system-health-check)
-    echo "🏥 Running comprehensive system health check..."
-    comprehensive_system_optimization
-    _monitor_processes
-    echo "✅ System health check completed"
-    ;;
-  --resource-analytics)
-    echo "📊 Running resource usage analytics..."
-    _optimize_memory
-    _cleanup_storage "$NS_HOME" 30
-    _optimize_connections
-    _optimize_pids
-    _optimize_apis
-    echo "✅ Resource analytics completed"
-    ;;
-  # Centralized JARVIS System Commands
-  --jarvis-central-control)
-    echo "🤖 JARVIS Central Control System - Connecting all components..."
-    jarvis_central_control_system
-    ;;
-  --jarvis-automation-suite)
-    echo "🔄 Running JARVIS Automation Suite..."
-    jarvis_automation_suite
-    ;;
-  --centralized-system-sync)
-    echo "🔗 Synchronizing centralized system components..."
-    centralized_system_sync
-    ;;
-  --menu) menu;;
-  *) usage; exit 1;;
-esac
-
-# End of script
