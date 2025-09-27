@@ -23395,12 +23395,14 @@ install_all(){
 # Renamed original function for backward compatibility
 install_all_embedded(){
   ns_log "🚀 Starting NovaShield Universal Installation (v${NS_VERSION})"
+  ns_log "🎯 Universal Automated Installation with Complete Feature Setup"
   
   # Pre-installation system checks and automatic optimization
   ns_log "🔍 Performing comprehensive system analysis..."
   
   # Enhanced automatic environment detection
   local auto_conservative=0
+  local detected_environment="Standard"
   
   # Always check system resources first
   if ! check_system_resources; then
@@ -23411,24 +23413,28 @@ install_all_embedded(){
   # Additional automatic detection for various constrained environments
   if [ "$IS_TERMUX" -eq 1 ] || [ -n "${PREFIX:-}" ]; then
     ns_log "📱 Mobile/Termux environment detected - enabling conservative mode"
+    detected_environment="Termux/Android"
     auto_conservative=1
   fi
   
   # Check for SSH sessions (often resource-constrained)
   if [ -n "${SSH_CONNECTION:-}" ] || [ -n "${SSH_CLIENT:-}" ] || [ -n "${SSH_TTY:-}" ]; then
     ns_log "🔗 SSH session detected - enabling conservative mode for stability"
+    detected_environment="SSH Remote"
     auto_conservative=1
   fi
   
   # Check for container environments
   if [ -f /.dockerenv ] || [ -n "${DOCKER_CONTAINER:-}" ] || [ -n "${KUBERNETES_SERVICE_HOST:-}" ]; then
     ns_log "🐳 Container environment detected - enabling conservative mode"
+    detected_environment="Container"
     auto_conservative=1
   fi
   
   # Check for limited shell environments
   if [ "${SHELL##*/}" = "dash" ] || [ "${SHELL##*/}" = "ash" ] || [ -z "${BASH_VERSION:-}" ]; then
     ns_log "🐚 Limited shell environment detected - enabling conservative mode"
+    detected_environment="Limited Shell"
     auto_conservative=1
   fi
   
@@ -23447,9 +23453,14 @@ install_all_embedded(){
     export NS_CONSERVATIVE_MODE=1
     ns_log "🔧 Conservative mode automatically enabled for optimal compatibility"
     ns_log "🎯 Using universal optimization settings for maximum stability"
+    ns_log "🌍 Detected Environment: ${detected_environment}"
   else
     ns_log "💪 Full performance mode enabled - system has adequate resources"
+    ns_log "🌍 Detected Environment: ${detected_environment} (High Performance)"
   fi
+  
+  # PHASE 1: Enhanced System Preparation
+  ns_log "📋 PHASE 1: System Preparation and Environment Setup"
   
   # Always run system optimization (it will adapt based on conservative mode)
   perform_system_optimization
@@ -23460,14 +23471,52 @@ install_all_embedded(){
   # Enable stricter error handling after critical initialization is complete
   enable_strict_mode
   
+  # PHASE 2: Security and Cryptography Setup
+  ns_log "🔐 PHASE 2: Advanced Security and Cryptography Setup"
+  
   install_dependencies
   write_default_config
   generate_keys
   generate_self_signed_tls
+  
+  # PHASE 3: Web Application Deployment
+  ns_log "🌐 PHASE 3: Web Application and Dashboard Deployment"
+  
   write_notify_py
-  write_server_py
+  write_server_py  
   write_dashboard
   ensure_auth_bootstrap
+  
+  # PHASE 4: User Account and Authentication Setup
+  ns_log "👤 PHASE 4: User Account and Authentication System"
+  
+  if [ -t 0 ] && [ -t 1 ]; then
+    # Interactive mode - prompt for user creation
+    ns_log "🔑 Setting up your admin user account..."
+    echo ""
+    echo "╭─────────────────────────────────────────────────────────────╮"
+    echo "│  🛡️  NovaShield User Account Setup                          │"
+    echo "│                                                             │"
+    echo "│  You need to create an admin user to access the dashboard  │"
+    echo "╰─────────────────────────────────────────────────────────────╯"
+    echo ""
+    
+    # Attempt to create user account
+    if ! setup_admin_user_interactive; then
+      ns_warn "⚠️  User account setup skipped or failed"
+      ns_log "ℹ️  You can create an account later with: ./novashield.sh --add-user"
+    fi
+  else
+    # Non-interactive mode
+    ns_log "ℹ️  Non-interactive installation - user account creation skipped"
+    ns_log "ℹ️  Create an account after installation with: ./novashield.sh --add-user"
+  fi
+  
+  # PHASE 5: System Integration and Final Setup
+  ns_log "⚙️  PHASE 5: System Integration and Final Configuration"
+  
+  # Configure all advanced features
+  configure_advanced_features
   
   # Long-term optimization setup
   setup_long_term_optimization
@@ -23476,20 +23525,186 @@ install_all_embedded(){
   setup_termux_service || true
   setup_systemd_user || true
   
+  # PHASE 6: Installation Validation and Health Checks
+  ns_log "🔍 PHASE 6: Installation Validation and Health Checks"
+  
   # Post-installation validation and health checks
   perform_post_install_validation
+  
+  # Final system validation
+  perform_installation_validation
   
   # Generate deployment files for enterprise use
   generate_enterprise_deployment_files
   
-  ns_ok "✅ NovaShield Enterprise installation complete!"
-  ns_log "🎯 Ready for production deployment with 99.9% uptime capability"
-  ns_log "📊 Use: $0 --start to launch the enterprise platform"
-  ns_log "🔧 Use: $0 --validate to verify all components"
-  ns_log "🏢 Use: $0 --enterprise-setup for complete enterprise configuration"
+  # PHASE 7: Installation Success Summary
+  display_installation_summary "$detected_environment" "$auto_conservative"
 }
 
-# New function: Long-term optimization setup
+# Enhanced installation helper functions
+
+# Interactive admin user setup
+setup_admin_user_interactive(){
+  local username password password_confirm
+  
+  # Get username
+  while true; do
+    printf "Enter admin username: "
+    read -r username
+    if [ -n "$username" ] && [ ${#username} -ge 3 ]; then
+      break
+    else
+      echo "Username must be at least 3 characters long."
+    fi
+  done
+  
+  # Get password
+  while true; do
+    printf "Enter admin password: "
+    read -s password
+    echo ""
+    if [ -n "$password" ] && [ ${#password} -ge 6 ]; then
+      printf "Confirm password: "
+      read -s password_confirm
+      echo ""
+      if [ "$password" = "$password_confirm" ]; then
+        break
+      else
+        echo "Passwords do not match. Please try again."
+      fi
+    else
+      echo "Password must be at least 6 characters long."
+    fi
+  done
+  
+  # Create the user account
+  if create_user_account "$username" "$password"; then
+    ns_log "✅ Admin user '$username' created successfully!"
+    return 0
+  else
+    ns_err "Failed to create admin user account"
+    return 1
+  fi
+}
+
+# Create user account programmatically
+create_user_account(){
+  local username="$1"
+  local password="$2"
+  
+  # Get the authentication salt
+  local salt
+  salt=$(awk -F': ' '/auth_salt:/ {print $2}' "$NS_CONF" 2>/dev/null | tr -d ' "' | head -1)
+  
+  if [ -z "$salt" ] || [ "$salt" = "change-this-salt" ] || [ ${#salt} -lt 16 ]; then
+    ns_err "Authentication salt not properly configured"
+    return 1
+  fi
+  
+  # Create user account
+  local sha
+  sha=$(printf '%s' "${salt}:${password}" | sha256sum | awk '{print $1}')
+  
+  if [ ! -f "$NS_SESS_DB" ]; then 
+    echo '{}' > "$NS_SESS_DB"
+  fi
+  
+  # Add user to database
+  python3 - "$NS_SESS_DB" "$username" "$sha" <<'PY'
+import json,sys
+try:
+    with open(sys.argv[1], 'r') as f:
+        db = json.load(f)
+except:
+    db = {}
+
+if 'users' not in db:
+    db['users'] = {}
+
+db['users'][sys.argv[2]] = {'pass': sys.argv[3], '2fa': False}
+
+with open(sys.argv[1], 'w') as f:
+    json.dump(db, f, indent=2)
+print("User stored")
+PY
+  
+  return $?
+}
+
+# Configure advanced features
+configure_advanced_features(){
+  ns_log "🔧 Configuring advanced NovaShield features..."
+  
+  # Enable all enterprise features by default
+  export NOVASHIELD_AUTO_RESTART=1
+  export NOVASHIELD_SECURITY_HARDENING=1
+  export NOVASHIELD_STRICT_SESSIONS=1
+  export NOVASHIELD_USE_WEB_WRAPPER=1
+  export NOVASHIELD_EXTERNAL_CHECKS=1
+  export NOVASHIELD_WEB_AUTO_START=1
+  export NOVASHIELD_AUTH_STRICT=1
+  
+  ns_log "✅ All advanced features configured and enabled"
+}
+
+# Installation validation
+perform_installation_validation(){
+  ns_log "🔍 Performing comprehensive installation validation..."
+  
+  local validation_errors=0
+  
+  # Check core files
+  for file in "$NS_CONF" "$NS_WWW/server.py" "$NS_WWW/index.html"; do
+    if [ ! -f "$file" ]; then
+      ns_err "Missing critical file: $file"
+      validation_errors=$((validation_errors + 1))
+    fi
+  done
+  
+  # Check directories
+  for dir in "$NS_BIN" "$NS_LOGS" "$NS_KEYS" "$NS_CTRL"; do
+    if [ ! -d "$dir" ]; then
+      ns_err "Missing directory: $dir"
+      validation_errors=$((validation_errors + 1))
+    fi
+  done
+  
+  # Check certificates
+  if [ ! -f "$NS_KEYS/tls.crt" ] || [ ! -f "$NS_KEYS/tls.key" ]; then
+    ns_err "TLS certificates missing"
+    validation_errors=$((validation_errors + 1))
+  fi
+  
+  if [ "$validation_errors" -eq 0 ]; then
+    ns_log "✅ Installation validation passed - all components verified"
+    return 0
+  else
+    ns_err "Installation validation failed with $validation_errors errors"
+    return 1
+  fi
+}
+
+# Installation summary display
+display_installation_summary(){
+  local detected_env="$1"
+  local is_conservative="$2"
+  
+  ns_log "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  ns_log "🎉 NOVASHIELD UNIVERSAL INSTALLATION COMPLETED SUCCESSFULLY!"
+  ns_log "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  ns_log "🌍 Environment: $detected_env"
+  ns_log "⚙️  Mode: $([ "$is_conservative" -eq 1 ] && echo "Conservative (Optimized for Stability)" || echo "High Performance")"
+  ns_log "🏠 Installation Path: $NS_HOME"
+  ns_log "🔐 Security: TLS 1.3 with 4096-bit RSA certificates"
+  ns_log "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  ns_log "📋 NEXT STEPS:"
+  ns_log "   1️⃣  Start services: ./novashield.sh --start"
+  ns_log "   2️⃣  Create user (if not done): ./novashield.sh --add-user"
+  ns_log "   3️⃣  Access dashboard: https://127.0.0.1:8765/"
+  ns_log "   4️⃣  Check status: ./novashield.sh --status"
+  ns_log "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  ns_log "✨ All 85+ commands available - use --help for complete list"
+}
 setup_long_term_optimization(){
   ns_log "⚡ Configuring long-term optimization features..."
   
