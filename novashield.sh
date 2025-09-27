@@ -27322,128 +27322,64 @@ cleanup_system_resources(){
   find "${NS_TMP}" -type f -mtime +1 -delete 2>/dev/null || true
 }
 
-# Non-interactive user creation for automated setups
-create_default_admin_user() {
-  local user="admin"
-  local pass="NovaShield123"
-  local salt
-  
-  ns_log "Creating default admin user for initial setup..."
-  
-  # Get authentication salt
-  salt=$(awk -F': ' '/auth_salt:/ {print $2}' "$NS_CONF" 2>/dev/null | tr -d ' "' | head -1)
-  if [ -z "$salt" ]; then
-    ns_err "No authentication salt found in configuration"
-    return 1
-  fi
-  
-  # Create password hash
-  local sha
-  sha=$(echo -n "${pass}${salt}" | sha256sum | cut -d' ' -f1)
-  
-  # Add user to database
-  if python3 - "$NS_SESS_DB" "$user" "$sha" <<'PY'
-import json,sys
-p,u,s=sys.argv[1],sys.argv[2],sys.argv[3]
-try: j=json.load(open(p))
-except: j={}
-ud=j.get('_userdb',{})
-ud[u]=s
-j['_userdb']=ud
-open(p,'w').write(json.dumps(j))
-print('Default admin user created')
-PY
-  then
-    ns_ok "✅ Default admin user created: admin/NovaShield123"
-    ns_warn "⚠️  SECURITY: Change these credentials immediately after first login!"
-    ns_log "💡 Use --add-user to create additional users"
-    ns_log "💡 Use --enable-2fa to enhance security"
-    return 0
-  else
-    ns_err "Failed to create default admin user"
-    return 1
-  fi
-}
-
-# Quick start function for automated setups
-quick_start() {
-  ns_log "🚀 Starting NovaShield Quick Start..."
-  
-  # Ensure all features are enabled
-  enable_all_production_features
-  
-  # Install if needed
-  if [ ! -f "$NS_CONF" ]; then
-    ns_log "Installing NovaShield..."
-    if ! install_all; then
-      ns_err "Installation failed"
-      return 1
-    fi
-  fi
-  
-  # Create default user if no users exist
-  local user_count
-  user_count=$(python3 -c "import json; j=json.load(open('$NS_SESS_DB')) if open('$NS_SESS_DB', 'a').tell() or open('$NS_SESS_DB').read() else {}; print(len(j.get('_userdb',{})))" 2>/dev/null || echo "0")
-  
-  if [ "$user_count" = "0" ]; then
-    ns_log "No users found - creating default admin user..."
-    if ! create_default_admin_user; then
-      ns_err "Failed to create default user"
-      return 1
-    fi
-  fi
-  
-  # Start web server
-  ns_log "Starting web server..."
-  if ! start_web; then
-    ns_err "Failed to start web server"
-    return 1
-  fi
-  
-  # Start monitoring services
-  ns_log "Starting monitoring services..."
-  start_all_monitors >/dev/null 2>&1 &
-  
-  # Display status
-  echo
-  ns_ok "🎯 NovaShield Quick Start Complete!"
-  echo
-  echo "✅ System Status: FULLY OPERATIONAL"
-  echo "🌐 Dashboard: https://127.0.0.1:8765/"
-  echo "🔐 Login: admin / NovaShield123"
-  echo "⚠️  Change default password after first login!"
-  echo
-  echo "🎛️  Commands:"
-  echo "  • Check status: ./novashield.sh --status"
-  echo "  • Add users: ./novashield.sh --add-user"
-  echo "  • Stop system: ./novashield.sh --stop"
-  echo
-}
 add_user(){
   local user pass salt
   
-  # Enhanced user input with validation
+  ns_log "🔐 SECURE USER CREATION - Enhanced Security Protocol"
+  ns_log "=============================================="
+  
+  # Enhanced user input with comprehensive validation
   while true; do
-    read -rp "New username (3+ characters): " user
-    if [ -z "$user" ] || [ ${#user} -lt 3 ]; then
+    echo
+    ns_log "Enter new username requirements:"
+    ns_log "• Minimum 3 characters"  
+    ns_log "• Letters, numbers, underscore, and dash only"
+    ns_log "• Must be unique"
+    echo
+    read -rp "New username: " user
+    
+    # Comprehensive input validation
+    if [ -z "$user" ]; then
+      ns_err "Username cannot be empty. Please try again."
+      continue
+    fi
+    
+    if [ ${#user} -lt 3 ]; then
       ns_err "Username must be at least 3 characters long. Please try again."
       continue
     fi
+    
+    if [ ${#user} -gt 32 ]; then
+      ns_err "Username must be 32 characters or less. Please try again."
+      continue
+    fi
+    
     if [[ "$user" =~ [^a-zA-Z0-9_-] ]]; then
       ns_err "Username can only contain letters, numbers, underscore, and dash. Please try again."
       continue
     fi
     
-    # Check if user already exists
+    # Check for reserved usernames
+    local reserved_users="admin root administrator system service daemon guest nobody"
+    if [[ " $reserved_users " == *" $user "* ]] && [ ${#user} -lt 6 ]; then
+      ns_err "Username '$user' is reserved. Please choose a different username."
+      continue
+    fi
+    
+    # Check if user already exists with enhanced error handling
     local existing_users
-    existing_users=$(python3 - "$NS_SESS_DB" <<'PY'
+    existing_users=$(python3 - "$NS_SESS_DB" <<'PY' 2>/dev/null
 import json,sys
-try: j=json.load(open(sys.argv[1]))
-except: j={}
-ud=j.get('_userdb',{}) or {}
+try: 
+    with open(sys.argv[1], 'r') as f:
+        j = json.load(f)
+except: 
+    j = {}
+ud = j.get('_userdb', {}) or {}
 print(' '.join(ud.keys()))
 PY
 )
+    
     if [[ " $existing_users " == *" $user "* ]]; then
       ns_err "Username '$user' already exists. Please choose a different username."
       continue
@@ -27451,17 +27387,50 @@ PY
     break
   done
   
+  # Enhanced secure password creation
+  ns_log "🔑 Password Security Requirements:"
+  ns_log "• Minimum 8 characters"
+  ns_log "• Recommended: Mix of letters, numbers, and symbols"
+  ns_log "• Avoid common passwords and personal information"
+  echo
+  
   while true; do
-    read -rsp "Password (8+ characters, won't echo): " pass; echo
-    if [ -z "$pass" ] || [ ${#pass} -lt 8 ]; then
+    read -rsp "Enter secure password (8+ characters): " pass; echo
+    
+    # Comprehensive password validation
+    if [ -z "$pass" ]; then
+      ns_err "Password cannot be empty. Please try again."
+      continue
+    fi
+    
+    if [ ${#pass} -lt 8 ]; then
       ns_err "Password must be at least 8 characters long. Please try again."
       continue
     fi
+    
+    if [ ${#pass} -gt 128 ]; then
+      ns_err "Password must be 128 characters or less. Please try again."
+      continue
+    fi
+    
+    # Check for weak patterns
+    if [[ "$pass" == *"123"* ]] || [[ "$pass" == *"password"* ]] || [[ "$pass" == *"admin"* ]] || [[ "$pass" == "$user"* ]]; then
+      ns_warn "Password contains weak patterns. Consider using a stronger password."
+      read -rp "Continue with this password? [y/N]: " confirm
+      case "$confirm" in
+        [Yy]*) ;;
+        *) continue ;;
+      esac
+    fi
+    
+    # Password confirmation
     read -rsp "Confirm password: " pass_confirm; echo
     if [ "$pass" != "$pass_confirm" ]; then
       ns_err "Passwords do not match. Please try again."
       continue
     fi
+    
+    ns_ok "Password accepted"
     break
   done
   
@@ -27556,17 +27525,32 @@ with open(p,'w') as f:
 print(f'Enhanced user {u} created with project storage')
 PY
   then
-    ns_ok "✓ User '$user' created successfully with enhanced project storage!"
-    ns_log "🎯 User profile includes:"
-    ns_log "   • Personal project workspace"
-    ns_log "   • Custom script storage"  
-    ns_log "   • Scan result history"
+    # Security audit logging
+    echo "$(ns_now) [SECURITY] [USER_CREATED] User '$user' created by system administrator" >> "$NS_AUDIT" 2>/dev/null || true
+    
+    ns_ok "✓ User '$user' created successfully with enhanced security profile!"
+    echo
+    ns_log "🎯 SECURE USER PROFILE CREATED:"
+    ns_log "   • Username: $user"
+    ns_log "   • Personal project workspace (1GB quota)"
+    ns_log "   • Custom script storage with isolation"
+    ns_log "   • Secure scan result history"
     ns_log "   • Intelligence data storage"
     ns_log "   • Personal notes and bookmarks"
     ns_log "   • Monitoring configurations"
     ns_log "   • Automation rules storage"
-    ns_log "   • 1GB storage quota"
-    ns_log "You can now log in to the web dashboard with these credentials."
+    ns_log "   • Enhanced security permissions"
+    echo
+    ns_log "🔐 SECURITY FEATURES ENABLED:"
+    ns_log "   • Session encryption and fingerprinting"
+    ns_log "   • Brute force protection"
+    ns_log "   • Rate limiting (20 requests/minute)"
+    ns_log "   • IP allowlist protection"
+    ns_log "   • Comprehensive audit logging"
+    echo
+    ns_ok "🌐 User can now securely access dashboard at: https://127.0.0.1:8765/"
+    ns_log "⚠️  Ensure strong password practices and consider enabling 2FA"
+    
     return 0
   else
     ns_err "Failed to create user account. Please check system permissions."
@@ -27707,28 +27691,33 @@ PY
       esac
     done
   else
-    # No users exist - must create first user
-    ns_warn "📋 No authorized users found - you must create your first admin account"
+    # No users exist - must create first user (Enhanced Security Protocol)
     echo
-    ns_log "This is a one-time security setup to protect your NovaShield dashboard."
-    ns_log "Your dashboard will be inaccessible until this user is created."
+    ns_warn "🔐 SECURITY PROTOCOL: FIRST USER SETUP REQUIRED"
+    echo "=============================================="
+    ns_log "NovaShield security requires manual user creation to prevent unauthorized access."
+    ns_log "This is a mandatory one-time security setup to protect your dashboard."
     echo
     
-    # Show current security status
-    ns_log "🛡️  Current Security Status:"
-    ns_log "   • Authentication: ENABLED"
-    ns_log "   • 2FA: Available (optional)"
-    ns_log "   • Dashboard Access: BLOCKED (no users)"
-    ns_log "   • User Count: 0"
+    # Enhanced security status display
+    ns_log "🛡️  CURRENT SECURITY STATUS:"
+    ns_log "   • Authentication: ✅ ENABLED (Required)"
+    ns_log "   • User Database: ❌ EMPTY (Setup Required)"
+    ns_log "   • Dashboard Access: 🚫 BLOCKED (Security Lock)"
+    ns_log "   • 2FA Support: ✅ AVAILABLE (Recommended)"
+    ns_log "   • HTTPS Enforcement: ✅ ACTIVE"
+    ns_log "   • Rate Limiting: ✅ ACTIVE (20 req/min)"
+    ns_log "   • Brute Force Protection: ✅ ACTIVE"
+    ns_log "   • Session Security: ✅ ENHANCED"
+    ns_log "   • Audit Logging: ✅ ENABLED"
     echo
     
     while true; do
       echo "Please select an option:"
-      echo "1) Create first admin user (interactive)"
-      echo "2) Create default admin user (admin/NovaShield123)"
-      echo "3) Exit (dashboard will not start)"
+      echo "1) Create first admin user"
+      echo "2) Exit (dashboard will not start)"
       echo
-      read -r -p "Enter your choice [1-3]: " choice
+      read -r -p "Enter your choice [1-2]: " choice
       
       case "$choice" in
         1)
@@ -27749,21 +27738,12 @@ PY
           fi
           ;;
         2)
-          echo
-          if create_default_admin_user; then
-            return 0
-          else
-            ns_err "Failed to create default user. Please try again."
-            continue
-          fi
-          ;;
-        3)
           ns_warn "⚠️  Dashboard startup cancelled by user"
           ns_log "💡 Dashboard access is BLOCKED until users are created"
           return 1
           ;;
         *)
-          ns_err "Invalid choice. Please enter 1, 2, or 3."
+          ns_err "Invalid choice. Please enter 1 or 2."
           continue
           ;;
       esac
@@ -28660,7 +28640,6 @@ Usage: $0 [OPTION]
 Core Commands:
   --install              Automated installation (no user prompts)
   --start                Start services with interactive user selection
-  --quick-start          Quick start with default admin user (admin/NovaShield123)
   --stop                 Stop all running services
   --status               Show service status and information
   --restart-monitors     Restart all monitoring processes
@@ -28758,8 +28737,7 @@ Production Optimization:
   --system-stabilize               Stabilize system for long-term operation
 
 User Management:
-  --add-user             Add a new web dashboard user (interactive)
-  --create-default-user  Create default admin user (admin/NovaShield123)
+  --add-user             Add a new web dashboard user
   --enable-2fa           Enable 2FA for a user
   --reset-auth           Reset all authentication state
 
@@ -28874,7 +28852,6 @@ case "${1:-}" in
   --help|-h) usage; exit 0;;
   --version|-v) echo "NovaShield ${NS_VERSION}"; exit 0;;
   --install) install_all;;
-  --quick-start) quick_start;;
   --start) start_all;;
   --stop) stop_all;;
   --restart-monitors) restart_monitors;;
@@ -28984,7 +28961,6 @@ case "${1:-}" in
   --web-start) start_web;;
   --web-stop) stop_web;;
   --add-user) add_user;;
-  --create-default-user) create_default_admin_user;;
   --enable-2fa) enable_2fa;;
   --reset-auth) reset_auth;;
   --enable-auto-restart)
