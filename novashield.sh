@@ -10459,7 +10459,13 @@ write_dashboard(){
       </button>
       <button data-tab="intelligence" class="nav-item" type="button">
         <span class="nav-icon">🔍</span>
-        <span class="nav-text">Intelligence Gathering</span>
+        <span class="nav-text">Intelligence Dashboard</span>
+        <span class="nav-indicator" id="intel-indicator">●</span>
+      </button>
+      <button data-tab="business" class="nav-item" type="button">
+        <span class="nav-icon">💼</span>
+        <span class="nav-text">Business Dashboard</span>
+        <span class="nav-indicator" id="business-indicator">●</span>
       </button>
       <button data-tab="analytics" class="nav-item" type="button">
         <span class="nav-icon">📈</span>
