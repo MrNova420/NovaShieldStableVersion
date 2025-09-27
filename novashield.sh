@@ -23,12 +23,30 @@ check_system_resources() {
   local min_memory_mb=50
   local available_memory=0
   
-  if command -v free >/dev/null 2>&1; then
-    available_memory=$(free -m 2>/dev/null | awk 'NR==2{print $7}' 2>/dev/null || echo 0)
-    if [ "$available_memory" -lt "$min_memory_mb" ]; then
-      echo "WARNING: Low memory detected (${available_memory}MB available, ${min_memory_mb}MB minimum recommended)" >&2
-      return 1
+  # Enhanced Termux memory detection
+  if [ "$IS_TERMUX" -eq 1 ]; then
+    # Termux has different memory constraints - be more conservative
+    min_memory_mb=30
+    # Try multiple ways to get memory info in Termux
+    if [ -r /proc/meminfo ]; then
+      available_memory=$(awk '/MemAvailable:/ {print int($2/1024)}' /proc/meminfo 2>/dev/null || echo 0)
+      if [ "$available_memory" -eq 0 ]; then
+        available_memory=$(awk '/MemFree:/ {print int($2/1024)}' /proc/meminfo 2>/dev/null || echo 0)
+      fi
     fi
+  fi
+  
+  if command -v free >/dev/null 2>&1 && [ "$available_memory" -eq 0 ]; then
+    available_memory=$(free -m 2>/dev/null | awk 'NR==2{print $7}' 2>/dev/null || echo 0)
+    if [ "$available_memory" -eq 0 ]; then
+      # Fallback: try to get free memory differently
+      available_memory=$(free -m 2>/dev/null | awk 'NR==2{print $4}' 2>/dev/null || echo 0)
+    fi
+  fi
+  
+  if [ "${available_memory:-0}" -gt 0 ] && [ "${available_memory:-0}" -lt "$min_memory_mb" ]; then
+    echo "WARNING: Low memory detected (${available_memory}MB available, ${min_memory_mb}MB minimum recommended)" >&2
+    return 1
   fi
   return 0
 }
@@ -125,7 +143,12 @@ _optimize_memory() {
     fi
   fi
   
-  local memory_threshold=85  # Increased threshold to be less aggressive
+  # More conservative threshold for Termux and low-memory systems
+  local memory_threshold=85
+  if [ "$IS_TERMUX" -eq 1 ] || [ "${NS_CONSERVATIVE_MODE:-0}" -eq 1 ]; then
+    memory_threshold=90  # Higher threshold for mobile/constrained environments
+  fi
+  
   local current_memory_usage
   
   # Get current memory usage percentage with better error handling
@@ -136,33 +159,33 @@ _optimize_memory() {
     if [ "$current_memory_usage" -gt "$memory_threshold" ] && [ "$current_memory_usage" -lt 100 ]; then
       ns_log "Memory usage at ${current_memory_usage}%, optimizing (threshold: ${memory_threshold}%)"
       
-      # Less aggressive cache clearing - only if safe
-      if [ -w "/proc/sys/vm/drop_caches" ] 2>/dev/null && command -v sync >/dev/null 2>&1; then
-        if sync 2>/dev/null; then
-          echo 1 > /proc/sys/vm/drop_caches 2>/dev/null || true
+      # Termux-safe memory optimization
+      if [ "$IS_TERMUX" -eq 1 ]; then
+        # Only perform the safest operations in Termux
+        history -c 2>/dev/null || true
+        # Skip aggressive cache operations that might cause mmap failures
+        ns_log "📱 Using Termux-safe memory optimization"
+      else
+        # Standard memory optimization for other systems
+        if [ -w "/proc/sys/vm/drop_caches" ] 2>/dev/null && command -v sync >/dev/null 2>&1; then
+          if sync 2>/dev/null; then
+            echo 1 > /proc/sys/vm/drop_caches 2>/dev/null || true
+          fi
+        fi
+        
+        # Clear bash history cache safely
+        history -c 2>/dev/null || true
+        
+        # Clear DNS cache if available (less aggressive)
+        if command -v systemd-resolve >/dev/null 2>&1; then
+          systemd-resolve --flush-caches 2>/dev/null || true
+        fi
+        
+        # Optimize shared memory more conservatively  
+        if [ -d "/dev/shm" ]; then
+          find /dev/shm -user "$(whoami)" -type f -mtime +7 -delete 2>/dev/null || true
         fi
       fi
-      
-      # Clear bash history cache safely
-      history -c 2>/dev/null || true
-      
-      # Skip aggressive signal handling that might cause issues
-      # kill -USR1 $$ 2>/dev/null || true  # Commented out as it can cause instability
-      
-      # Clear DNS cache if available (less aggressive)
-      if command -v systemd-resolve >/dev/null 2>&1; then
-        systemd-resolve --flush-caches 2>/dev/null || true
-      fi
-      
-      # Optimize shared memory more conservatively  
-      if [ -d "/dev/shm" ]; then
-        find /dev/shm -user "$(whoami)" -type f -mtime +7 -delete 2>/dev/null || true
-      fi
-      
-      # Skip memory compaction as it can be resource-intensive
-      # if [ -w "/proc/sys/vm/compact_memory" ] 2>/dev/null; then
-      #   echo 1 > /proc/sys/vm/compact_memory 2>/dev/null || true
-      # fi
       
       ns_log "✅ Memory optimization completed"
     fi
@@ -172,8 +195,8 @@ _optimize_memory() {
   mkdir -p "$(dirname "$last_optimize_file")" 2>/dev/null || true
   echo "$current_time" > "$last_optimize_file" 2>/dev/null || true
   
-  # Memory leak detection and prevention (less frequent)
-  if [ $((current_time % 600)) -eq 0 ]; then  # Every 10 minutes
+  # Memory leak detection and prevention (less frequent, skip in Termux)
+  if [ "$IS_TERMUX" -ne 1 ] && [ $((current_time % 600)) -eq 0 ]; then  # Every 10 minutes, not in Termux
     _detect_memory_leaks
   fi
 }
@@ -394,7 +417,7 @@ _optimize_process_limits() {
   fi
   
   # Set optimal ulimits for the current shell based on available resources
-  if [ "$available_memory" -gt 200 ]; then
+  if [ "${available_memory:-0}" -gt 200 ]; then
     # Higher limits for systems with adequate memory
     ulimit -n 4096 2>/dev/null || ulimit -n 1024 2>/dev/null || true  # Max open files
     ulimit -u 2048 2>/dev/null || ulimit -u 512 2>/dev/null || true   # Max processes
@@ -407,7 +430,7 @@ _optimize_process_limits() {
   fi
   
   # CPU niceness for background processes (less aggressive)
-  if [ "$available_memory" -gt 100 ]; then
+  if [ "${available_memory:-0}" -gt 100 ]; then
     renice +5 $$ 2>/dev/null || true
   fi
 }
@@ -950,13 +973,24 @@ ns_log() {
   fi
   
   _rotate_log "${NS_HOME}/launcher.log" 4000  # Optimized for storage
-  echo -e "$(ns_now) [INFO ] $*" | tee -a "${NS_HOME}/launcher.log" >&2 2>/dev/null || echo -e "$(ns_now) [INFO ] $*" >&2
+  
+  # Safer logging approach to avoid mmap failures in Termux
+  if [ "$IS_TERMUX" -eq 1 ] || [ "${NS_CONSERVATIVE_MODE:-0}" -eq 1 ]; then
+    # Direct echo to avoid subprocess spawning in constrained environments
+    echo -e "$(ns_now) [INFO ] $*" >> "${NS_HOME}/launcher.log" 2>/dev/null || echo -e "$(ns_now) [INFO ] $*" >&2
+  else
+    # Standard logging with tee for other systems
+    echo -e "$(ns_now) [INFO ] $*" | tee -a "${NS_HOME}/launcher.log" >&2 2>/dev/null || echo -e "$(ns_now) [INFO ] $*" >&2
+  fi
   
   # Less frequent memory optimization (every 500 log entries instead of 100)
-  local log_count
-  log_count=$(wc -l < "${NS_HOME}/launcher.log" 2>/dev/null || echo 0)
-  if [ $((log_count % 500)) -eq 0 ] && [ "$log_count" -gt 0 ]; then
-    _optimize_memory &
+  # Skip background optimization in Termux to avoid mmap failures
+  if [ "$IS_TERMUX" -ne 1 ] && [ "${NS_CONSERVATIVE_MODE:-0}" -ne 1 ]; then
+    local log_count
+    log_count=$(wc -l < "${NS_HOME}/launcher.log" 2>/dev/null || echo 0)
+    if [ $((log_count % 500)) -eq 0 ] && [ "$log_count" -gt 0 ]; then
+      _optimize_memory &
+    fi
   fi
 }
 ns_warn(){ 
@@ -966,13 +1000,26 @@ ns_warn(){
       local fallback_dir
       fallback_dir="/tmp/novashield-$(whoami)"
       mkdir -p "$fallback_dir" 2>/dev/null || return 0
-      echo -e "${YELLOW}$(ns_now) [WARN ] $*${NC}" | tee -a "$fallback_dir/launcher.log" >&2 2>/dev/null || echo -e "${YELLOW}$(ns_now) [WARN ] $*${NC}" >&2
+      # Use safer logging in fallback directory too
+      if [ "$IS_TERMUX" -eq 1 ] || [ "${NS_CONSERVATIVE_MODE:-0}" -eq 1 ]; then
+        echo -e "${YELLOW}$(ns_now) [WARN ] $*${NC}" >> "$fallback_dir/launcher.log" 2>/dev/null || echo -e "${YELLOW}$(ns_now) [WARN ] $*${NC}" >&2
+      else
+        echo -e "${YELLOW}$(ns_now) [WARN ] $*${NC}" | tee -a "$fallback_dir/launcher.log" >&2 2>/dev/null || echo -e "${YELLOW}$(ns_now) [WARN ] $*${NC}" >&2
+      fi
       return 0
     }
   fi
   
   _rotate_log "${NS_HOME}/launcher.log" 4000
-  echo -e "${YELLOW}$(ns_now) [WARN ] $*${NC}" | tee -a "${NS_HOME}/launcher.log" >&2 2>/dev/null || echo -e "${YELLOW}$(ns_now) [WARN ] $*${NC}" >&2
+  
+  # Safer logging approach to avoid mmap failures in Termux
+  if [ "$IS_TERMUX" -eq 1 ] || [ "${NS_CONSERVATIVE_MODE:-0}" -eq 1 ]; then
+    # Direct echo to avoid subprocess spawning in constrained environments
+    echo -e "${YELLOW}$(ns_now) [WARN ] $*${NC}" >> "${NS_HOME}/launcher.log" 2>/dev/null || echo -e "${YELLOW}$(ns_now) [WARN ] $*${NC}" >&2
+  else
+    # Standard logging with tee for other systems
+    echo -e "${YELLOW}$(ns_now) [WARN ] $*${NC}" | tee -a "${NS_HOME}/launcher.log" >&2 2>/dev/null || echo -e "${YELLOW}$(ns_now) [WARN ] $*${NC}" >&2
+  fi
 }
 ns_err() { 
   # Create directory only once, with better error handling
@@ -981,13 +1028,26 @@ ns_err() {
       local fallback_dir
       fallback_dir="/tmp/novashield-$(whoami)"
       mkdir -p "$fallback_dir" 2>/dev/null || return 0
-      echo -e "${RED}$(ns_now) [ERROR] $*${NC}" | tee -a "$fallback_dir/launcher.log" >&2 2>/dev/null || echo -e "${RED}$(ns_now) [ERROR] $*${NC}" >&2
+      # Use safer logging in fallback directory too
+      if [ "$IS_TERMUX" -eq 1 ] || [ "${NS_CONSERVATIVE_MODE:-0}" -eq 1 ]; then
+        echo -e "${RED}$(ns_now) [ERROR] $*${NC}" >> "$fallback_dir/launcher.log" 2>/dev/null || echo -e "${RED}$(ns_now) [ERROR] $*${NC}" >&2
+      else
+        echo -e "${RED}$(ns_now) [ERROR] $*${NC}" | tee -a "$fallback_dir/launcher.log" >&2 2>/dev/null || echo -e "${RED}$(ns_now) [ERROR] $*${NC}" >&2
+      fi
       return 0
     }
   fi
   
   _rotate_log "${NS_HOME}/launcher.log" 4000
-  echo -e "${RED}$(ns_now) [ERROR] $*${NC}" | tee -a "${NS_HOME}/launcher.log" >&2 2>/dev/null || echo -e "${RED}$(ns_now) [ERROR] $*${NC}" >&2
+  
+  # Safer logging approach to avoid mmap failures in Termux
+  if [ "$IS_TERMUX" -eq 1 ] || [ "${NS_CONSERVATIVE_MODE:-0}" -eq 1 ]; then
+    # Direct echo to avoid subprocess spawning in constrained environments
+    echo -e "${RED}$(ns_now) [ERROR] $*${NC}" >> "${NS_HOME}/launcher.log" 2>/dev/null || echo -e "${RED}$(ns_now) [ERROR] $*${NC}" >&2
+  else
+    # Standard logging with tee for other systems
+    echo -e "${RED}$(ns_now) [ERROR] $*${NC}" | tee -a "${NS_HOME}/launcher.log" >&2 2>/dev/null || echo -e "${RED}$(ns_now) [ERROR] $*${NC}" >&2
+  fi
 }
 ns_ok()  { echo -e "${GREEN}✓ $*${NC}"; }
 
@@ -23347,12 +23407,28 @@ perform_system_optimization(){
   
   # Check available memory before proceeding with optimization
   local available_memory=0
+  local memory_threshold=100
+  
+  # Adjust thresholds for Termux and low-memory environments
+  if [ "$IS_TERMUX" -eq 1 ]; then
+    memory_threshold=50  # Lower threshold for Termux
+    ns_log "📱 Termux detected - using mobile-optimized settings"
+  fi
+  
+  # Enhanced memory detection with multiple fallbacks
   if command -v free >/dev/null 2>&1; then
     available_memory=$(free -m 2>/dev/null | awk 'NR==2{print $7}' 2>/dev/null || echo 0)
-    if [ "$available_memory" -lt 100 ]; then
-      ns_warn "⚠️  Low available memory (${available_memory}MB). Skipping aggressive optimizations."
-      return 0
+    if [ "$available_memory" -eq 0 ]; then
+      available_memory=$(free -m 2>/dev/null | awk 'NR==2{print $4}' 2>/dev/null || echo 0)
     fi
+  fi
+  
+  # Check for conservative mode or very low memory
+  if [ "${NS_CONSERVATIVE_MODE:-0}" -eq 1 ] || [ "${available_memory:-0}" -lt "$memory_threshold" ]; then
+    ns_warn "⚠️  Low available memory (${available_memory}MB) or conservative mode. Using minimal optimizations."
+    # Run only essential, low-impact optimizations
+    perform_minimal_optimization
+    return 0
   fi
   
   # PERFORMANCE: Memory management optimization
@@ -23375,7 +23451,7 @@ perform_system_optimization(){
   
   # PERFORMANCE: Set optimal system limits for production use (with memory checks)
   if command -v ulimit >/dev/null 2>&1; then
-    if [ "$available_memory" -gt 200 ]; then
+    if [ "${available_memory:-0}" -gt 200 ]; then
       ulimit -n 16384 2>/dev/null || ulimit -n 4096 2>/dev/null || true  # File descriptors
       ulimit -u 8192 2>/dev/null || ulimit -u 2048 2>/dev/null || true   # Process limit
       ulimit -v 4194304 2>/dev/null || true # Virtual memory (4GB)
@@ -23389,7 +23465,7 @@ perform_system_optimization(){
   fi
   
   # PERFORMANCE: Optimize memory usage for long-term operation (only if safe)
-  if [ -f /proc/sys/vm/swappiness ] && [ -w /proc/sys/vm/swappiness ] && [ "$available_memory" -gt 150 ]; then
+  if [ -f /proc/sys/vm/swappiness ] && [ -w /proc/sys/vm/swappiness ] && [ "${available_memory:-0}" -gt 150 ]; then
     echo 10 > /proc/sys/vm/swappiness 2>/dev/null || true
   fi
   
@@ -23397,15 +23473,47 @@ perform_system_optimization(){
   unset PASSWORD PASS SECRET TOKEN API_KEY 2>/dev/null || true
   
   # PERFORMANCE: Set higher priority for main process (with memory check and fallback)
-  if command -v renice >/dev/null 2>&1 && [ "$available_memory" -gt 150 ]; then
-    renice -n -2 $$ 2>/dev/null || {
+  if command -v renice >/dev/null 2>&1 && [ "${available_memory:-0}" -gt 150 ]; then
+    # Use safer renice approach to avoid memory allocation failures
+    if ! renice -n -2 $$ >/dev/null 2>&1; then
       ns_warn "⚠️  Cannot adjust process priority - insufficient resources or permissions"
       # Try less aggressive priority adjustment
-      renice -n 0 $$ 2>/dev/null || true
-    }
+      renice -n 0 $$ >/dev/null 2>&1 || true
+    fi
+  elif [ "$IS_TERMUX" -eq 1 ]; then
+    # Skip renice in Termux if memory is low to avoid mmap failures
+    ns_log "📱 Skipping process priority adjustment in Termux due to memory constraints"
   fi
   
   ns_log "✅ System optimization complete with enhanced security"
+}
+
+# Minimal optimization for low-memory environments and Termux
+perform_minimal_optimization(){
+  ns_log "🔧 Performing minimal system optimization for low-memory environment..."
+  
+  # Only perform essential, low-impact optimizations
+  if command -v sync >/dev/null 2>&1; then
+    sync 2>/dev/null || true  # Flush file system buffers safely
+  fi
+  
+  # Basic directory permissions (without resource-intensive find operations)
+  if [ -d "$NS_HOME" ]; then
+    chmod 750 "$NS_HOME" 2>/dev/null || true
+  fi
+  
+  # Conservative ulimits for Termux and low-memory systems
+  if command -v ulimit >/dev/null 2>&1; then
+    ulimit -n 1024 2>/dev/null || true    # Conservative file descriptors
+    ulimit -u 512 2>/dev/null || true     # Conservative process limit
+    ulimit -s 2048 2>/dev/null || true    # Conservative stack size
+  fi
+  
+  # Clear only essential environment variables
+  unset PASSWORD PASS SECRET TOKEN API_KEY 2>/dev/null || true
+  
+  # Skip process priority adjustment in minimal mode
+  ns_log "✅ Minimal system optimization complete"
 }
 
 # Maintenance scheduling for long-term reliability
