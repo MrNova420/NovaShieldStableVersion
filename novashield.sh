@@ -23541,34 +23541,9 @@ install_all_embedded(){
   display_installation_summary "$detected_environment" "$auto_conservative"
 }
 
-# Check if any users exist in the system
-check_users_exist(){
-  if [ ! -f "$NS_SESS_DB" ]; then
-    return 1  # No database file means no users
-  fi
-  
-  # Check if users exist in the database
-  local user_count
-  user_count=$(python3 -c "
-import json, sys
-try:
-    with open('$NS_SESS_DB', 'r') as f:
-        db = json.load(f)
-    print(len(db.get('users', {})))
-except:
-    print(0)
-" 2>/dev/null || echo 0)
-  
-  if [ "${user_count:-0}" -gt 0 ]; then
-    return 0  # Users exist
-  else
-    return 1  # No users
-  fi
-}
-
-# Auto-fix system to ensure immediate functionality
+# Auto-fix system to ensure service functionality
 auto_fix_system_for_immediate_functionality(){
-  ns_log "🔧 Running final auto-fix for immediate functionality..."
+  ns_log "🔧 Running service auto-fix for optimal functionality..."
   
   # Ensure all services are running
   local services_status=0
@@ -23590,6 +23565,7 @@ auto_fix_system_for_immediate_functionality(){
   # Verify web interface is working
   if curl -k -s -I https://127.0.0.1:8765/ >/dev/null 2>&1; then
     ns_log "✅ Web interface confirmed working at: https://127.0.0.1:8765/"
+    ns_log "🔑 Create your admin user with: ./novashield.sh --add-user"
   else
     ns_warn "⚠️  Web interface may need manual start: ./novashield.sh --web-start"
   fi
@@ -23609,29 +23585,8 @@ auto_fix_system_for_immediate_functionality(){
     ns_log "   $line"
   done
   
-  ns_log "🎉 Auto-fix completed - NovaShield is ready for immediate use!"
-}
-create_default_admin_user(){
-  local default_username="admin"
-  local default_password="novashield123"
-  
-  ns_log "🔑 Creating default admin user for immediate access..."
-  ns_log "👤 Username: admin"
-  ns_log "🔒 Password: novashield123"
-  ns_log "⚠️  SECURITY NOTE: Change this password immediately after first login!"
-  
-  # Create the default user
-  if create_user_account "$default_username" "$default_password"; then
-    ns_log "✅ Default admin user created successfully!"
-    ns_log "🌐 You can now access the dashboard immediately at: https://127.0.0.1:8765/"
-    ns_log "📝 Login with: admin / novashield123"
-    ns_log "🔒 IMPORTANT: Change the password after first login for security!"
-    return 0
-  else
-    ns_err "Failed to create default admin user"
-    ns_log "ℹ️  You can create a user manually with: ./novashield.sh --add-user"
-    return 1
-  fi
+  ns_log "🎉 Service auto-fix completed - NovaShield services are ready!"
+  ns_log "🔒 SECURITY: Create your admin user with: ./novashield.sh --add-user"
 }
 
 # Interactive admin user setup
@@ -24439,15 +24394,8 @@ start_all(){
   ns_log "🔧 Running comprehensive auto-fix system..."
   timeout 30 enhanced_auto_fix_system "comprehensive" 2>/dev/null || ns_warn "Auto-fix system completed with timeout"
   
-  # PHASE 8: Authentication and Session Management with Auto-Setup
+  # PHASE 8: Authentication and Session Management
   ensure_auth_bootstrap
-  
-  # Auto-create default user if none exists (for immediate functionality)
-  if ! check_users_exist; then
-    ns_log "🔑 No users found - creating default admin user for immediate access..."
-    create_default_admin_user
-  fi
-  
   open_session 2>/dev/null || true
   
   # PHASE 9: Start All Services with Enhanced Monitoring
@@ -24493,7 +24441,8 @@ start_all(){
   ns_log "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
   ns_log "🎉 ALL FEATURES ENABLED BY DEFAULT - NovaShield is now running in MAXIMUM CAPABILITY MODE"
   ns_log "ℹ️  No additional setup required - all enhancements, security, and optimizations are ACTIVE"
-  # Final auto-fix to ensure everything works immediately
+  ns_log "🔒 SECURITY: Create your first admin user with: ./novashield.sh --add-user"
+  # Final auto-fix to ensure service functionality
   auto_fix_system_for_immediate_functionality
   ns_log "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 }
