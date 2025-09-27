@@ -2199,7 +2199,8 @@ security:
 **Comprehensive Auto-Setup:**
 ```bash
 # Enhanced Termux Environment Setup
-./novashield.sh --install
+./novashield.sh --install            # Standard installation
+./novashield.sh --install-termux     # Termux-optimized installation (NEW)
 
 # Auto-Installs:
 Core Packages:     termux-tools, termux-api, procps
@@ -3692,6 +3693,10 @@ ss -tlnp | grep novashield            # Service listening check
 pkg update && pkg upgrade            # Update package lists
 pkg install python                  # Install missing packages
 termux-setup-storage                # Fix storage access
+
+# Memory Issues (NEW - Fixed in v3.4.0+)
+./novashield.sh --install-termux     # Use memory-optimized installation
+export NS_CONSERVATIVE_MODE=1       # Enable conservative mode manually
 
 # Keyboard Issues
 # Volume Down + Q = ESC key

@@ -25420,6 +25420,7 @@ Usage: $0 [OPTION]
 
 Core Commands:
   --install              Install NovaShield and dependencies (requires user creation)
+  --install-termux       Install with Termux-optimized settings (automatic conservative mode)
   --start                Start all services (monitors + web dashboard)
   --stop                 Stop all running services
   --status               Show service status and information
@@ -25608,6 +25609,12 @@ case "${1:-}" in
   --help|-h) usage; exit 0;;
   --version|-v) echo "NovaShield ${NS_VERSION}"; exit 0;;
   --install) install_all;;
+  --install-termux) 
+    # Force Termux mode and conservative settings for mobile installation
+    export IS_TERMUX=1
+    export NS_CONSERVATIVE_MODE=1
+    ns_log "🚀 Starting Termux-optimized installation..."
+    install_all;;
   --start) start_all;;
   --stop) stop_all;;
   --restart-monitors) restart_monitors;;
