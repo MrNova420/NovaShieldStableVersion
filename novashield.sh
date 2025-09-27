@@ -4477,9 +4477,19 @@ centralized_intelligence_analysis() {
     threat_indicators=$(grep -c "THREAT\|ATTACK\|BREACH" "${NS_LOGS}/audit.log" 2>/dev/null || echo 0)
   fi
   
+  # Ensure threat_indicators is a valid number
+  if ! [[ "$threat_indicators" =~ ^[0-9]+$ ]]; then
+    threat_indicators=0
+  fi
+  
   # Check security events
   if [ -f "${NS_LOGS}/security.log" ]; then
     security_events=$(grep -c "SECURITY\|ALERT\|VIOLATION" "${NS_LOGS}/security.log" 2>/dev/null || echo 0)
+  fi
+  
+  # Ensure security_events is a valid number
+  if ! [[ "$security_events" =~ ^[0-9]+$ ]]; then
+    security_events=0
   fi
   
   # Calculate anomaly score
@@ -22973,13 +22983,16 @@ start_web(){
     fi
   fi
   
+  # ENHANCEMENT: Ensure all prerequisites are properly set up FIRST
+  ensure_dirs
+  
   # Create lock file with current PID
   echo $$ > "$lock_file"
   
   # Ensure lock file gets cleaned up - use the literal path instead of variable
   trap "rm -f '${NS_PID}/web_start.lock'" EXIT
   
-  # ENHANCEMENT: Ensure all prerequisites are properly set up
+  # Set up additional configuration
   ensure_dirs
   write_default_config
   generate_keys
