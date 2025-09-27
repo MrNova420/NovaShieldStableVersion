@@ -27815,7 +27815,7 @@ A comprehensive security monitoring and management system for Android/Termux and
 Usage: $0 [OPTION]
 
 Core Commands:
-  --install              Install NovaShield and dependencies (requires user creation)
+  --install              Universal installation with smart environment detection
   --start                Start all services (monitors + web dashboard)
   --stop                 Stop all running services
   --status               Show service status and information
@@ -27823,8 +27823,10 @@ Core Commands:
   --validate             Validate comprehensive stability fixes are properly implemented
 
 Installation Modes:
-  ./novashield.sh --install  Standard installation requiring user creation for security
-                         (User selection and creation is MANDATORY - no automation allowed)
+  ./novashield.sh --install  Universal installation compatible with all environments
+                         • Interactive: Prompts for user creation during installation
+                         • Non-interactive: Completes installation, requires manual user creation
+                         • CI/CD compatible: Run './novashield.sh --add-user' after installation
 
 Web Dashboard:
   --web-start            Start only the web dashboard server
