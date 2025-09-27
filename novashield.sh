@@ -26877,22 +26877,18 @@ PY
     return 0
   fi
   
-  # Handle secure non-interactive installation mode
-  if [ "${NOVASHIELD_SECURE_INSTALL:-}" = "1" ]; then
-    ns_warn "🔒 Secure installation mode: System configured for first-time user setup via web interface"
-    ns_warn "💡 Navigate to the web interface to create your first administrator account"
-    ns_warn "🌐 Access the dashboard at https://127.0.0.1:8765 after startup"
-    return 0
-  fi
+  # =============================================================================
+  # SECURITY REQUIREMENT: NO NON-INTERACTIVE USER CREATION ALLOWED
+  # =============================================================================
+  # Non-interactive user creation is DISABLED for security reasons.
+  # This prevents automated compromise and ensures proper authentication setup.
+  # User selection and user creation is MANDATORY for security compliance.
+  # DO NOT re-enable non-interactive modes - this creates security flaws.
+  # =============================================================================
   
-  # Enhanced automated setup - no demo users for security
-  if [ "${NS_NON_INTERACTIVE:-}" = "1" ] || [ ! -t 0 ] || [ "${NOVASHIELD_AUTO_START:-}" = "1" ]; then
-    ns_warn "🔒 SECURITY NOTICE: Authentication enabled but no users exist"
-    ns_warn "💡 Dashboard access is BLOCKED until users are created"
-    ns_warn "📋 Run './novashield.sh --add-user' to create your first admin user"
-    ns_warn "⚠️  SECURITY: No automated user creation - manual setup required for security"
-    return 0
-  fi
+  # REMOVED: All non-interactive installation modes for security compliance
+  # Previous versions had NOVASHIELD_SECURE_INSTALL and NS_NON_INTERACTIVE
+  # These features have been permanently removed as they bypass security requirements
   
   echo
   ns_warn "SECURITY REQUIREMENT: No web users found but auth_enabled is true."
@@ -27778,9 +27774,8 @@ Core Commands:
   --validate             Validate comprehensive stability fixes are properly implemented
 
 Installation Modes:
-  NOVASHIELD_SECURE_INSTALL=1 ./novashield.sh --install
-                         Secure non-interactive installation for production deployment
-                         (Creates system ready for web-based user setup)
+  ./novashield.sh --install  Standard installation requiring user creation for security
+                         (User selection and creation is MANDATORY - no automation allowed)
 
 Web Dashboard:
   --web-start            Start only the web dashboard server
