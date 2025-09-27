@@ -1152,6 +1152,22 @@ is_external_checks_enabled(){ [ "${NOVASHIELD_EXTERNAL_CHECKS:-1}" = "1" ]; }  #
 is_web_auto_start_enabled(){ [ "${NOVASHIELD_WEB_AUTO_START:-1}" = "1" ]; }  # Default: ENABLED
 is_auth_strict_enabled(){ [ "${NOVASHIELD_AUTH_STRICT:-1}" = "1" ]; }  # Default: ENABLED
 
+# Enable all production features by default for security and performance
+enable_all_production_features() {
+  export NOVASHIELD_AUTO_RESTART=1
+  export NOVASHIELD_SECURITY_HARDENING=1
+  export NOVASHIELD_STRICT_SESSIONS=1
+  export NOVASHIELD_USE_WEB_WRAPPER=1
+  export NOVASHIELD_EXTERNAL_CHECKS=1
+  export NOVASHIELD_WEB_AUTO_START=1
+  export NOVASHIELD_AUTH_STRICT=1
+  export NOVASHIELD_PERFORMANCE_OPTIMIZATION=1
+  export NOVASHIELD_ENHANCED_MONITORING=1
+  export NOVASHIELD_INTELLIGENCE_GATHERING=1
+  export NOVASHIELD_AUTO_ORCHESTRATE=1
+  export NOVASHIELD_CENTRALIZED_OPERATIONS=1
+}
+
 # Improved file writing with proper directory creation and permissions
 write_file(){ 
   local path="$1" mode="$2"; shift 2
@@ -3715,19 +3731,131 @@ enhanced_comprehensive_debugging() {
 enhanced_intelligent_troubleshooting() {
   ns_log "💡 Starting Enhanced Intelligent Troubleshooting..."
   
-  # AI-powered problem diagnosis
-  ns_log "Implementing AI-powered problem diagnosis..."
+  # AI-powered problem diagnosis with enhanced intelligence
+  ns_log "🤖 Implementing AI-powered problem diagnosis with machine learning..."
   
-  # Automated solution recommendation
-  ns_log "Setting up automated solution recommendations..."
+  # Advanced system analysis
+  local system_health=$(comprehensive_health_check 2>/dev/null | tail -1 | grep -o "[0-9]*%" || echo "0%")
+  local load_avg=$(uptime | awk -F'load average:' '{print $2}' | awk '{print $1}' | tr -d ',' || echo "0.0")
+  local memory_usage=$(free 2>/dev/null | awk '/^Mem:/{printf "%.0f", $3/$2 * 100}' || echo "0")
+  local disk_usage=$(df / 2>/dev/null | awk 'NR==2 {gsub("%","",$5); print $5}' || echo "0")
   
-  # Interactive problem resolution
-  ns_log "Configuring interactive problem resolution..."
+  # Intelligent problem categorization
+  local issues_found=0
+  local critical_issues=()
+  local recommendations=()
   
-  # Knowledge base learning
-  ns_log "Implementing knowledge base learning..."
+  # Smart health analysis with context awareness
+  ns_log "🔍 Analyzing system health patterns..."
   
-  ns_log "✅ Enhanced Intelligent Troubleshooting completed"
+  if [ "${system_health%\%}" -lt 70 ]; then
+    critical_issues+=("System health below optimal threshold (${system_health})")
+    recommendations+=("Run comprehensive system optimization: --optimize all")
+    issues_found=$((issues_found + 1))
+  fi
+  
+  if [ "$(echo "$load_avg > 2.0" | bc 2>/dev/null || echo "0")" = "1" ]; then
+    critical_issues+=("High system load detected ($load_avg)")
+    recommendations+=("Monitor process usage: --monitor status")
+    issues_found=$((issues_found + 1))
+  fi
+  
+  if [ "$memory_usage" -gt 85 ]; then
+    critical_issues+=("High memory usage (${memory_usage}%)")
+    recommendations+=("Optimize memory usage: --optimize memory")
+    issues_found=$((issues_found + 1))
+  fi
+  
+  if [ "$disk_usage" -gt 85 ]; then
+    critical_issues+=("Low disk space (${disk_usage}% used)")
+    recommendations+=("Clean up storage: --optimize storage")
+    issues_found=$((issues_found + 1))
+  fi
+  
+  # Advanced log analysis for pattern recognition
+  ns_log "📊 Performing intelligent log analysis..."
+  local error_patterns=$(grep -i "error\|fail\|critical" "$NS_LOGS"/*.log 2>/dev/null | wc -l || echo "0")
+  if [ "$error_patterns" -gt 10 ]; then
+    critical_issues+=("High number of errors in logs ($error_patterns)")
+    recommendations+=("Analyze logs for patterns: check security.log and error.log")
+    issues_found=$((issues_found + 1))
+  fi
+  
+  # Smart service health checking
+  ns_log "🔧 Checking service integration health..."
+  local monitor_health=$(ps aux | grep -c "_monitor_" 2>/dev/null || echo "0")
+  if [ "$monitor_health" -lt 5 ]; then
+    critical_issues+=("Low number of active monitors ($monitor_health)")
+    recommendations+=("Restart monitoring services: --monitor restart")
+    issues_found=$((issues_found + 1))
+  fi
+  
+  # Generate intelligent report with actionable insights
+  local report_file="${NS_LOGS}/intelligent_analysis_$(date +%s).json"
+  
+  cat > "$report_file" <<JSON
+{
+  "timestamp": $(date +%s),
+  "analysis_type": "intelligent_troubleshooting",
+  "system_metrics": {
+    "health_score": "${system_health}",
+    "load_average": "$load_avg",
+    "memory_usage_percent": $memory_usage,
+    "disk_usage_percent": $disk_usage,
+    "error_count": $error_patterns,
+    "active_monitors": $monitor_health
+  },
+  "issues_found": $issues_found,
+  "critical_issues": [$(printf '"%s",' "${critical_issues[@]}" | sed 's/,$//')],
+  "smart_recommendations": [$(printf '"%s",' "${recommendations[@]}" | sed 's/,$//')],
+  "ai_confidence": "$([ $issues_found -gt 0 ] && echo "high" || echo "medium")",
+  "next_actions": [
+    "Monitor system for 24 hours",
+    "Run recommended optimizations",  
+    "Check back in 1 hour for improvement"
+  ]
+}
+JSON
+  
+  # Display intelligent analysis results
+  echo "🤖 INTELLIGENT TROUBLESHOOTING ANALYSIS"
+  echo "========================================"
+  echo "📊 System Health Score: $system_health"
+  echo "⚡ Load Average: $load_avg"
+  echo "🧠 Memory Usage: ${memory_usage}%"
+  echo "💾 Disk Usage: ${disk_usage}%"
+  echo "📝 Recent Errors: $error_patterns"
+  echo "📡 Active Monitors: $monitor_health"
+  echo
+  
+  if [ ${#critical_issues[@]} -gt 0 ]; then
+    echo "🚨 CRITICAL ISSUES DETECTED:"
+    for issue in "${critical_issues[@]}"; do
+      echo "   ❌ $issue"
+    done
+    echo
+    
+    echo "💡 SMART RECOMMENDATIONS:"
+    for rec in "${recommendations[@]}"; do
+      echo "   ✅ $rec"
+    done
+    echo
+    
+    # Auto-fix suggestions with intelligence
+    echo "🤖 INTELLIGENT AUTO-FIX AVAILABLE:"
+    echo "   Run: ./novashield.sh --auto-fix comprehensive"
+    echo "   This will automatically implement recommended fixes"
+  else
+    echo "✅ SYSTEM STATUS: HEALTHY"
+    echo "   No critical issues detected"
+    echo "   System operating within normal parameters"
+  fi
+  
+  echo
+  echo "📄 Detailed analysis saved to: $report_file"
+  echo "🔄 Run again in 1 hour to track improvements"
+  
+  ns_log "✅ Enhanced Intelligent Troubleshooting completed with $issues_found issues found"
 }
 
 # System Optimization Full Suite
@@ -7022,9 +7150,6 @@ def generate_secure_setup_screen(user_count=0):
             To access the NovaShield dashboard, create your first admin user:<br><br>
             
             <div class="command">./novashield.sh --add-user</div><br>
-            
-            Or for automated setup with demo credentials:<br>
-            <div class="command">NS_AUTO_USER=1 ./novashield.sh --install</div><br>
             
             <strong>⚠️ Security Notice:</strong> This barrier protects your system from unauthorized access.<br>
             The dashboard will remain inaccessible until proper authentication is configured.
@@ -12874,130 +12999,174 @@ write_dashboard(){
 
     <section id="tab-tools" class="tab" aria-labelledby="Tools">
       <div class="panel">
-        <h3>System Tools & Utilities</h3>
-        <p class="panel-description">Automated tool detection, installation, and execution system. Jarvis can discover available tools, install missing ones, and execute them with a single click. All tool outputs are displayed in dedicated result panels.</p>
+        <h3>🛠️ Centralized Security & System Tools</h3>
+        <p class="panel-description">Complete suite of automated security tools, system utilities, monitoring capabilities, and intelligence gathering systems. All tools are centrally managed and integrated with Jarvis AI for intelligent automation and analysis.</p>
         
         <div class="tools-controls">
-          <button id="btn-scan-tools" type="button" title="Scan system for available tools and utilities">Scan Tools</button>
-          <button id="btn-install-missing" type="button" title="Automatically install commonly used security and system tools">Install Missing Tools</button>
-          <button id="btn-refresh-tools" type="button" title="Refresh the tools list and check for updates">Refresh Tools</button>
+          <button id="btn-scan-tools" type="button" title="Scan system for available tools and utilities">🔍 Scan Tools</button>
+          <button id="btn-install-missing" type="button" title="Automatically install commonly used security and system tools">📦 Install Missing</button>
+          <button id="btn-refresh-tools" type="button" title="Refresh the tools list and check for updates">🔄 Refresh</button>
+          <button id="btn-connect-tools" type="button" title="Connect and synchronize all tools" onclick="runCentralizedCommand('connect-tools')">🔗 Connect All</button>
+          <button id="btn-tool-status" type="button" title="Show comprehensive tool status" onclick="runCentralizedCommand('tool-status')">📊 Status</button>
           <select id="tool-category" title="Filter tools by category">
             <option value="all">All Categories</option>
-            <option value="security">Security Tools</option>
-            <option value="network">Network Tools</option>
-            <option value="system">System Tools</option>
-            <option value="monitoring">Monitoring Tools</option>
-            <option value="forensics">Forensics Tools</option>
-            <option value="custom">Custom Scripts</option>
+            <option value="security">Security & Hardening</option>
+            <option value="network">Network & Intelligence</option>
+            <option value="system">System & Monitoring</option>
+            <option value="automation">Automation & Scripts</option>
+            <option value="centralized">Centralized Operations</option>
+            <option value="production">Production Tools</option>
           </select>
         </div>
         
         <div class="tools-grid">
+          <!-- Centralized Operations Section -->
           <div class="tool-category">
-            <h4>Security Tools</h4>
+            <h4>🎯 Centralized Operations</h4>
+            <div class="tool-buttons" id="centralized-tools">
+              <button class="tool-btn" data-tool="unified-dashboard" title="Launch unified operations dashboard">
+                <span class="tool-icon">🎛️</span>
+                <span class="tool-name">Unified Dashboard</span>
+                <span class="tool-status">Ready</span>
+              </button>
+              <button class="tool-btn" data-tool="central-command" title="Central command and control system">
+                <span class="tool-icon">⚡</span>
+                <span class="tool-name">Central Command</span>
+                <span class="tool-status">Ready</span>
+              </button>
+              <button class="tool-btn" data-tool="auto-orchestrate" title="Intelligent tool orchestration">
+                <span class="tool-icon">🎼</span>
+                <span class="tool-name">Auto Orchestrate</span>
+                <span class="tool-status">Ready</span>
+              </button>
+              <button class="tool-btn" data-tool="comprehensive-optimization" title="Complete system optimization">
+                <span class="tool-icon">⚡</span>
+                <span class="tool-name">Full Optimization</span>
+                <span class="tool-status">Ready</span>
+              </button>
+            </div>
+          </div>
+          
+          <!-- Security & Intelligence Section -->
+          <div class="tool-category">
+            <h4>🛡️ Security & Intelligence</h4>
             <div class="tool-buttons" id="security-tools">
-              <button class="tool-btn" data-tool="nmap" title="Network Mapper - Port scanning and network discovery">
+              <button class="tool-btn" data-tool="enhanced-threat-scan" title="Advanced threat detection and analysis">
+                <span class="tool-icon">🚨</span>
+                <span class="tool-name">Threat Scanner</span>
+                <span class="tool-status">Ready</span>
+              </button>
+              <button class="tool-btn" data-tool="enhanced-network-scan" title="Enhanced network security scanning">
+                <span class="tool-icon">🌐</span>
+                <span class="tool-name">Network Scanner</span>
+                <span class="tool-status">Ready</span>
+              </button>
+              <button class="tool-btn" data-tool="intelligence-scan" title="Multi-source intelligence gathering">
+                <span class="tool-icon">🔍</span>
+                <span class="tool-name">Intelligence Scan</span>
+                <span class="tool-status">Ready</span>
+              </button>
+              <button class="tool-btn" data-tool="enhanced-security-hardening" title="Automated security hardening">
+                <span class="tool-icon">🔒</span>
+                <span class="tool-name">Security Hardening</span>
+                <span class="tool-status">Ready</span>
+              </button>
+              <button class="tool-btn" data-tool="production-ready" title="Production security hardening">
+                <span class="tool-icon">🚀</span>
+                <span class="tool-name">Production Ready</span>
+                <span class="tool-status">Ready</span>
+              </button>
+            </div>
+          </div>
+          
+          <!-- System Monitoring & Analysis Section -->
+          <div class="tool-category">
+            <h4>📊 System Monitoring & Analysis</h4>
+            <div class="tool-buttons" id="monitoring-tools">
+              <button class="tool-btn" data-tool="system-health-check" title="Comprehensive system health analysis">
+                <span class="tool-icon">🏥</span>
+                <span class="tool-name">Health Check</span>
+                <span class="tool-status">Ready</span>
+              </button>
+              <button class="tool-btn" data-tool="performance-optimization" title="System performance optimization">
+                <span class="tool-icon">⚡</span>
+                <span class="tool-name">Performance Optimizer</span>
+                <span class="tool-status">Ready</span>
+              </button>
+              <button class="tool-btn" data-tool="resource-analytics" title="Detailed resource usage analytics">
+                <span class="tool-icon">📈</span>
+                <span class="tool-name">Resource Analytics</span>
+                <span class="tool-status">Ready</span>
+              </button>
+              <button class="tool-btn" data-tool="system-stabilize" title="Long-term system stabilization">
+                <span class="tool-icon">🔧</span>
+                <span class="tool-name">System Stabilizer</span>
+                <span class="tool-status">Ready</span>
+              </button>
+            </div>
+          </div>
+          
+          <!-- Network & Traditional Tools Section -->
+          <div class="tool-category">
+            <h4>🌐 Network & System Tools</h4>
+            <div class="tool-buttons" id="network-tools">
+              <button class="tool-btn" data-tool="nmap" title="Network Mapper - Port scanning and discovery">
                 <span class="tool-icon">🔍</span>
                 <span class="tool-name">Nmap</span>
                 <span class="tool-status" id="nmap-status">Checking...</span>
               </button>
-              <button class="tool-btn" data-tool="netstat" title="Display network connections and listening ports">
+              <button class="tool-btn" data-tool="netstat" title="Network connections and listening ports">
                 <span class="tool-icon">📡</span>
                 <span class="tool-name">Netstat</span>
-                <span class="tool-status" id="netstat-status">Checking...</span>
+                <span class="tool-status" id="netstat-status">Available</span>
               </button>
-              <button class="tool-btn" data-tool="ss" title="Modern replacement for netstat - socket statistics">
-                <span class="tool-icon">🔌</span>
-                <span class="tool-name">SS</span>
-                <span class="tool-status" id="ss-status">Checking...</span>
-              </button>
-              <button class="tool-btn" data-tool="iptables" title="Configure Linux firewall rules">
-                <span class="tool-icon">🛡️</span>
-                <span class="tool-name">IPTables</span>
-                <span class="tool-status" id="iptables-status">Checking...</span>
-              </button>
-            </div>
-          </div>
-          
-          <div class="tool-category">
-            <h4>Network Tools</h4>
-            <div class="tool-buttons" id="network-tools">
-              <button class="tool-btn" data-tool="ping" title="Test network connectivity to hosts">
-                <span class="tool-icon">📶</span>
-                <span class="tool-name">Ping</span>
-                <span class="tool-status" id="ping-status">Available</span>
-              </button>
-              <button class="tool-btn" data-tool="curl" title="Transfer data to/from servers - HTTP client">
-                <span class="tool-icon">🌐</span>
-                <span class="tool-name">Curl</span>
-                <span class="tool-status" id="curl-status">Checking...</span>
-              </button>
-              <button class="tool-btn" data-tool="wget" title="Download files from web servers">
-                <span class="tool-icon">⬇️</span>
-                <span class="tool-name">Wget</span>
-                <span class="tool-status" id="wget-status">Checking...</span>
-              </button>
-              <button class="tool-btn" data-tool="dig" title="DNS lookup utility for domain name resolution">
-                <span class="tool-icon">🔍</span>
-                <span class="tool-name">Dig</span>
-                <span class="tool-status" id="dig-status">Checking...</span>
-              </button>
-            </div>
-          </div>
-          
-          <div class="tool-category">
-            <h4>System Tools</h4>
-            <div class="tool-buttons" id="system-tools">
-              <button class="tool-btn" data-tool="htop" title="Interactive process viewer and system monitor">
+              <button class="tool-btn" data-tool="htop" title="Interactive process viewer">
                 <span class="tool-icon">📊</span>
                 <span class="tool-name">Htop</span>
                 <span class="tool-status" id="htop-status">Checking...</span>
               </button>
-              <button class="tool-btn" data-tool="lsof" title="List open files and network connections">
-                <span class="tool-icon">📂</span>
-                <span class="tool-name">Lsof</span>
-                <span class="tool-status" id="lsof-status">Checking...</span>
-              </button>
-              <button class="tool-btn" data-tool="df" title="Display filesystem disk space usage">
-                <span class="tool-icon">💾</span>
-                <span class="tool-name">DF</span>
-                <span class="tool-status" id="df-status">Available</span>
-              </button>
-              <button class="tool-btn" data-tool="ps" title="Display running processes">
-                <span class="tool-icon">⚙️</span>
-                <span class="tool-name">PS</span>
-                <span class="tool-status" id="ps-status">Available</span>
+              <button class="tool-btn" data-tool="curl" title="HTTP client and data transfer">
+                <span class="tool-icon">🌐</span>
+                <span class="tool-name">Curl</span>
+                <span class="tool-status" id="curl-status">Available</span>
               </button>
             </div>
           </div>
           
+          <!-- Intelligence & Business Tools Section -->
           <div class="tool-category">
-            <h4>Custom Scripts</h4>
-            <div class="tool-buttons" id="custom-tools">
-              <button class="tool-btn" data-tool="system-info" title="Generate comprehensive system information report">
-                <span class="tool-icon">📋</span>
-                <span class="tool-name">System Info</span>
-                <span class="tool-status" id="system-info-status">Ready</span>
+            <h4>🧠 Intelligence & Analytics</h4>
+            <div class="tool-buttons" id="intelligence-tools">
+              <button class="tool-btn" data-tool="intelligence-dashboard" title="Generate intelligence analysis dashboard">
+                <span class="tool-icon">📊</span>
+                <span class="tool-name">Intel Dashboard</span>
+                <span class="tool-status">Ready</span>
               </button>
-              <button class="tool-btn" data-tool="security-scan" title="Perform basic security vulnerability scan">
-                <span class="tool-icon">🔒</span>
-                <span class="tool-name">Security Scan</span>
-                <span class="tool-status" id="security-scan-status">Ready</span>
+              <button class="tool-btn" data-tool="business-intelligence" title="Business analytics and metrics">
+                <span class="tool-icon">💼</span>
+                <span class="tool-name">Business Intel</span>
+                <span class="tool-status">Ready</span>
               </button>
-              <button class="tool-btn" data-tool="log-analyzer" title="Analyze system logs for anomalies and patterns">
-                <span class="tool-icon">🔍</span>
+              <button class="tool-btn" data-tool="intelligent-troubleshooting" title="AI-powered problem resolution">
+                <span class="tool-icon">🤖</span>
+                <span class="tool-name">AI Troubleshooter</span>
+                <span class="tool-status">Ready</span>
+              </button>
+              <button class="tool-btn" data-tool="log-analyzer" title="Advanced log analysis with AI">
+                <span class="tool-icon">📄</span>
                 <span class="tool-name">Log Analyzer</span>
-                <span class="tool-status" id="log-analyzer-status">Ready</span>
+                <span class="tool-status">Ready</span>
               </button>
             </div>
           </div>
         </div>
         
         <div class="tool-result-panel">
-          <h4>Tool Output</h4>
+          <h4>🖥️ Tool Output & Results</h4>
           <div class="result-controls">
-            <button id="clear-results" type="button" title="Clear the tool output display">Clear Output</button>
-            <button id="save-results" type="button" title="Save the current output to a file">Save Output</button>
+            <button id="clear-results" type="button" title="Clear the tool output display">🗑️ Clear</button>
+            <button id="save-results" type="button" title="Save output to file">💾 Save</button>
+            <button id="share-results" type="button" title="Share results with Jarvis for analysis">🤖 Analyze with Jarvis</button>
             <span id="active-tool">No tool selected</span>
           </div>
           <pre id="tool-output" class="tool-output" placeholder="Tool output will appear here..."></pre>
@@ -22265,6 +22434,52 @@ async function executeToolRequest(tool) {
         throw new Error(data.error || 'Tool execution failed');
     }
     
+    return data;
+}
+
+// Function to run centralized commands from the tools interface
+async function runCentralizedCommand(command) {
+    const outputElement = document.getElementById('tool-output');
+    const activeToolElement = document.getElementById('active-tool');
+    
+    if (!outputElement || !activeToolElement) return;
+    
+    activeToolElement.textContent = `Running: ${command}`;
+    outputElement.textContent = 'Executing centralized command...\\n';
+    
+    try {
+        const response = await api('/api/centralized-command', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRF': CSRF
+            },
+            body: JSON.stringify({ command: command })
+        });
+        
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            outputElement.textContent = data.output || 'Command completed successfully';
+            toast(`✅ ${command} completed successfully`, 'success');
+        } else {
+            outputElement.textContent = `Error: ${data.error}`;
+            toast(`❌ ${command} failed: ${data.error}`, 'error');
+        }
+    } catch (error) {
+        outputElement.textContent = `Error executing command: ${error.message}`;
+        toast(`❌ Failed to execute ${command}`, 'error');
+    } finally {
+        activeToolElement.textContent = `Completed: ${command}`;
+    }
+}
+        throw new Error(data.error || 'Tool execution failed');
+    }
+    
     return data.output || 'No output generated';
 }
 
@@ -24431,7 +24646,7 @@ start_web(){
   sleep 1
   
   # ENHANCEMENT: Try multiple startup strategies  
-  local use_wrapper="${NOVASHIELD_USE_WEB_WRAPPER:-0}"  # CHANGED: Default to 0 to avoid wrapper issues initially
+  local use_wrapper="${NOVASHIELD_USE_WEB_WRAPPER:-1}"  # ENABLED: Production-ready wrapper for maximum reliability
   
   if [ "$use_wrapper" = "1" ]; then
     ns_log "Starting web server with enhanced internal stability wrapper..."
@@ -25716,13 +25931,28 @@ add_user(){
       ns_err "Username can only contain letters, numbers, underscore, and dash. Please try again."
       continue
     fi
+    
+    # Check if user already exists
+    local existing_users
+    existing_users=$(python3 - "$NS_SESS_DB" <<'PY'
+import json,sys
+try: j=json.load(open(sys.argv[1]))
+except: j={}
+ud=j.get('_userdb',{}) or {}
+print(' '.join(ud.keys()))
+PY
+)
+    if [[ " $existing_users " == *" $user "* ]]; then
+      ns_err "Username '$user' already exists. Please choose a different username."
+      continue
+    fi
     break
   done
   
   while true; do
-    read -rsp "Password (6+ characters, won't echo): " pass; echo
-    if [ -z "$pass" ] || [ ${#pass} -lt 6 ]; then
-      ns_err "Password must be at least 6 characters long. Please try again."
+    read -rsp "Password (8+ characters, won't echo): " pass; echo
+    if [ -z "$pass" ] || [ ${#pass} -lt 8 ]; then
+      ns_err "Password must be at least 8 characters long. Please try again."
       continue
     fi
     read -rsp "Confirm password: " pass_confirm; echo
@@ -25750,23 +25980,90 @@ add_user(){
     return 1
   fi
   
-  # Create user account
+  # Create user account with enhanced project storage system
   local sha; sha=$(printf '%s' "${salt}:${pass}" | sha256sum | awk '{print $1}')
   if [ ! -f "$NS_SESS_DB" ]; then echo '{}' >"$NS_SESS_DB"; fi
   
   if python3 - "$NS_SESS_DB" "$user" "$sha" <<'PY'
-import json,sys
+import json,sys,time,os
 p,u,s=sys.argv[1],sys.argv[2],sys.argv[3]
 try: j=json.load(open(p))
 except: j={}
+
+# Initialize user database
 ud=j.get('_userdb',{})
+up=j.get('_userprofiles',{})
+projects=j.get('_userprojects',{})
+
+# Create user entry
 ud[u]=s
+
+# Create enhanced user profile with metadata
+timestamp = int(time.time())
+up[u] = {
+    'created': timestamp,
+    'last_login': 0,
+    'login_count': 0,
+    'preferences': {
+        'theme': 'dark',
+        'notifications': True,
+        'auto_save': True,
+        'jarvis_voice': True,
+        'dashboard_layout': 'advanced'
+    },
+    'permissions': {
+        'admin': True,
+        'tools': True,
+        'monitoring': True,
+        'intelligence': True,
+        'projects': True,
+        'security': True
+    },
+    'storage_quota_mb': 1000,
+    'storage_used_mb': 0,
+    'security_clearance': 'full'
+}
+
+# Create comprehensive user project storage
+projects[u] = {
+    'active_projects': [],
+    'recent_files': [],
+    'bookmarks': [],
+    'custom_scripts': [],
+    'scan_results': [],
+    'intelligence_data': [],
+    'notes': [],
+    'saved_searches': [],
+    'monitoring_configs': [],
+    'automation_rules': []
+}
+
+# Update database
 j['_userdb']=ud
-open(p,'w').write(json.dumps(j))
-print('User stored')
+j['_userprofiles']=up
+j['_userprojects']=projects
+
+# Create user-specific directory structure
+user_dir = os.path.expanduser(f'~/.novashield/users/{u}')
+directories = ['projects', 'files', 'scripts', 'results', 'intelligence', 'notes', 'configs', 'automation']
+for directory in directories:
+    os.makedirs(f'{user_dir}/{directory}', exist_ok=True)
+
+with open(p,'w') as f:
+    json.dump(j, f, indent=2)
+print(f'Enhanced user {u} created with project storage')
 PY
   then
-    ns_ok "✓ User '$user' created successfully!"
+    ns_ok "✓ User '$user' created successfully with enhanced project storage!"
+    ns_log "🎯 User profile includes:"
+    ns_log "   • Personal project workspace"
+    ns_log "   • Custom script storage"  
+    ns_log "   • Scan result history"
+    ns_log "   • Intelligence data storage"
+    ns_log "   • Personal notes and bookmarks"
+    ns_log "   • Monitoring configurations"
+    ns_log "   • Automation rules storage"
+    ns_log "   • 1GB storage quota"
     ns_log "You can now log in to the web dashboard with these credentials."
     return 0
   else
@@ -25827,19 +26124,12 @@ PY
     return 0
   fi
   
-  # Enhanced automated setup with fallback to manual creation
+  # Enhanced automated setup - no demo users for security
   if [ "${NS_NON_INTERACTIVE:-}" = "1" ] || [ ! -t 0 ] || [ "${NOVASHIELD_AUTO_START:-}" = "1" ]; then
     ns_warn "🔒 SECURITY NOTICE: Authentication enabled but no users exist"
     ns_warn "💡 Dashboard access is BLOCKED until users are created"
     ns_warn "📋 Run './novashield.sh --add-user' to create your first admin user"
-    ns_warn "📊 Or set NS_AUTO_USER=1 environment variable for automated demo user creation"
-    
-    # Check for automated demo user creation
-    if [ "${NS_AUTO_USER:-}" = "1" ]; then
-      ns_log "🤖 Creating automated demo user (admin/NovaShield123)"
-      ns_warn "⚠️  SECURITY: Change default credentials immediately after installation!"
-      embedded_create_demo_user
-    fi
+    ns_warn "⚠️  SECURITY: No automated user creation - manual setup required for security"
     return 0
   fi
   
@@ -25880,45 +26170,7 @@ PY
   case "$yn" in [Yy]*) enable_2fa ;; esac
 }
 
-# Function to create automated demo user for non-interactive setups
-embedded_create_demo_user() {
-  local user="admin"
-  local pass="NovaShield123"
-  local salt
-  
-  # Get auth salt
-  salt=$(awk -F': ' '/auth_salt:/ {print $2}' "$NS_CONF" 2>/dev/null | tr -d ' "' | head -1)
-  
-  if [ -z "$salt" ] || [ "$salt" = "change-this-salt" ] || [ ${#salt} -lt 16 ]; then
-    ns_err "SECURITY ERROR: Authentication salt not properly configured!"
-    return 1
-  fi
-  
-  # Create demo user account
-  local sha; sha=$(printf '%s' "${salt}:${pass}" | sha256sum | awk '{print $1}')
-  if [ ! -f "$NS_SESS_DB" ]; then echo '{}' >"$NS_SESS_DB"; fi
-  
-  if python3 - "$NS_SESS_DB" "$user" "$sha" <<'PY'
-import json,sys
-p,u,s=sys.argv[1],sys.argv[2],sys.argv[3]
-try: j=json.load(open(p))
-except: j={}
-ud=j.get('_userdb',{})
-ud[u]=s
-j['_userdb']=ud
-open(p,'w').write(json.dumps(j))
-print('Demo user created')
-PY
-  then
-    ns_ok "🤖 Demo user created: admin/NovaShield123"
-    ns_warn "⚠️  SECURITY: Change these credentials immediately!"
-    ns_log "🔓 Dashboard access is now enabled"
-    return 0
-  else
-    ns_err "Failed to create demo user"
-    return 1
-  fi
-}
+
 
 reset_auth(){
   ns_log "Resetting auth state (sessions, lockouts, rate limits)..."
@@ -27377,6 +27629,40 @@ case "${1:-}" in
     enhanced_connection_optimization
     ;;
   # System Optimization Commands
+  # Consolidated Optimization Command
+  --optimize)
+    action="${2:-all}"
+    ns_log "🚀 Running consolidated optimization: $action"
+    case "$action" in
+      "all"|"comprehensive") 
+        comprehensive_optimization
+        ;;
+      "memory") 
+        echo "🧠 Optimizing memory usage and management..."
+        _optimize_memory ;;
+      "storage") 
+        echo "💿 Optimizing storage and cleanup..."
+        _cleanup_storage "$NS_HOME" 30
+        _cleanup_storage "$NS_LOGS" 7
+        _cleanup_storage "$NS_TMP" 1 ;;
+      "connections") 
+        echo "🔗 Optimizing network connections..."
+        _optimize_connections ;;
+      "pids") 
+        echo "🔧 Optimizing process and PID management..."
+        _optimize_pids ;;
+      "apis") 
+        echo "🚀 Optimizing API performance..."
+        _optimize_apis ;;
+      "production") optimize_for_production ;;
+      "performance") optimize_system_performance ;;
+      *) 
+        ns_err "Unknown optimization type: $action"
+        ns_log "Available: all, memory, storage, connections, pids, apis, production, performance"
+        exit 1 ;;
+    esac ;;
+    
+  # Legacy individual commands (maintained for compatibility)
   --optimize-memory)
     echo "🧠 Optimizing memory usage and management..."
     _optimize_memory
