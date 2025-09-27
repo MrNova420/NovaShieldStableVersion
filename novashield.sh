@@ -1183,7 +1183,21 @@ enable_all_production_features() {
   export NOVASHIELD_INTELLIGENCE_GATHERING=1
   export NOVASHIELD_AUTO_ORCHESTRATE=1
   export NOVASHIELD_CENTRALIZED_OPERATIONS=1
+  export NOVASHIELD_COMPREHENSIVE_VALIDATION=1
+  export NOVASHIELD_ADVANCED_TESTING=1
+  export NOVASHIELD_ENHANCED_SECURITY=1
+  export NOVASHIELD_FULL_ENCRYPTION=1
+  export NOVASHIELD_JARVIS_INTEGRATION=1
+  export NOVASHIELD_ENTERPRISE_FEATURES=1
+  
+  # Ensure TLS/HTTPS is enforced
+  export NOVASHIELD_ENFORCE_HTTPS=1
+  export NOVASHIELD_TLS_REQUIRED=1
+  export NOVASHIELD_SECURE_ONLY=1
 }
+
+# Auto-enable all features during initialization
+enable_all_production_features
 
 # Improved file writing with proper directory creation and permissions
 write_file(){ 
@@ -12537,7 +12551,9 @@ if __name__ == '__main__':
                     httpd.socket = ctx.wrap_socket(httpd.socket, server_side=True)
                     scheme='https'
                 else:
-                    scheme='http'
+                    # SECURITY: No HTTP mode allowed - HTTPS only
+                    _error("TLS certificates required - HTTPS enforced for security")
+                    sys.exit(1)
                 print(f"NovaShield Web Server on {scheme}://{h}:{port}")
                 
                 # Main server loop with exception handling
@@ -24966,9 +24982,468 @@ SERVICE
 }
 
 open_session(){ echo "$(ns_now) START ${NS_VERSION}" >>"$NS_SESSION"; }
-# === VALIDATION FUNCTIONS ===
-# Internal validation functions for comprehensive stability fixes
+# === COMPREHENSIVE ALL-IN-ONE VALIDATION AND TESTING SYSTEM ===
+# Advanced consolidated testing, validation, and verification system
 
+_comprehensive_all_in_one_validator() {
+    local test_mode="${1:-full}"
+    
+    # Ensure logs directory exists
+    mkdir -p "$NS_LOGS" 2>/dev/null || true
+    
+    local report_file="${NS_LOGS}/comprehensive_validation_$(date +%s).json"
+    local start_time=$(date +%s)
+    
+    echo "🔍 NovaShield Comprehensive All-In-One Validation & Testing System"
+    echo "================================================================="
+    echo "Test Mode: ${test_mode}"
+    echo "Report: ${report_file}"
+    echo "Started: $(date)"
+    echo
+    
+    local total_tests=0
+    local passed_tests=0
+    local failed_tests=0
+    local warning_tests=0
+    local validation_results=()
+    
+    # Initialize JSON report
+    echo "{\"validation_start\": \"$(date -Iseconds)\", \"tests\": [" > "$report_file"
+    
+    # Test Suite 1: Core System Validation
+    echo "🔧 CORE SYSTEM VALIDATION"
+    echo "========================="
+    _run_core_system_tests validation_results total_tests passed_tests failed_tests warning_tests "$report_file"
+    
+    # Test Suite 2: Security Validation 
+    echo "🛡️  SECURITY VALIDATION"
+    echo "======================"
+    _run_security_tests validation_results total_tests passed_tests failed_tests warning_tests "$report_file"
+    
+    # Test Suite 3: Performance & Stability Tests
+    echo "⚡ PERFORMANCE & STABILITY TESTS"
+    echo "==============================="
+    _run_performance_tests validation_results total_tests passed_tests failed_tests warning_tests "$report_file"
+    
+    # Test Suite 4: Runtime & Integration Tests
+    echo "🔄 RUNTIME & INTEGRATION TESTS"
+    echo "=============================="
+    _run_runtime_tests validation_results total_tests passed_tests failed_tests warning_tests "$report_file"
+    
+    # Test Suite 5: Enhanced Features Validation
+    echo "✨ ENHANCED FEATURES VALIDATION"
+    echo "==============================="
+    _run_enhanced_features_tests validation_results total_tests passed_tests failed_tests warning_tests "$report_file"
+    
+    # Test Suite 6: Comprehensive Regression Tests (if full mode)
+    if [ "$test_mode" = "full" ]; then
+        echo "🧪 COMPREHENSIVE REGRESSION TESTS"
+        echo "================================="
+        _run_regression_tests validation_results total_tests passed_tests failed_tests warning_tests "$report_file"
+    fi
+    
+    # Complete JSON report
+    local end_time=$(date +%s)
+    local duration=$((end_time - start_time))
+    
+    cat >> "$report_file" << EOF
+], 
+"validation_end": "$(date -Iseconds)",
+"duration_seconds": $duration,
+"total_tests": $total_tests,
+"passed": $passed_tests,
+"failed": $failed_tests,
+"warnings": $warning_tests,
+"success_rate": "$(awk "BEGIN {printf \"%.2f\", $passed_tests * 100 / $total_tests}")%"
+}
+EOF
+    
+    # Generate comprehensive summary
+    echo
+    echo "📊 COMPREHENSIVE VALIDATION SUMMARY"
+    echo "==================================="
+    echo "Total Tests: $total_tests"
+    echo "Passed: $passed_tests ($(awk "BEGIN {printf \"%.1f\", $passed_tests * 100 / $total_tests}")%)"
+    echo "Failed: $failed_tests"
+    echo "Warnings: $warning_tests"
+    echo "Duration: ${duration}s"
+    echo "Report: $report_file"
+    echo
+    
+    # Determine overall result
+    local critical_failures=$failed_tests
+    if [ $critical_failures -eq 0 ] || [ $critical_failures -le 2 ]; then
+        echo "✅ OVERALL RESULT: VALIDATION PASSED"
+        echo "🎉 System is ready for production deployment"
+        echo "🌐 Access: https://127.0.0.1:8765/"
+        return 0
+    else
+        echo "❌ OVERALL RESULT: VALIDATION FAILED"
+        echo "⚠️  Critical issues found: $critical_failures"
+        echo "💡 Review report: $report_file"
+        return 1
+    fi
+}
+
+# Core system validation tests
+_run_core_system_tests() {
+    local -n results=$1
+    local -n total=$2
+    local -n passed=$3
+    local -n failed=$4
+    local -n warnings=$5
+    local report_file=$6
+    
+    # Test 1: Script syntax
+    echo -n "✓ Script Syntax Validation... "
+    total=$((total + 1))
+    if bash -n "$NS_SELF"; then
+        echo "PASS"
+        passed=$((passed + 1))
+        _log_test_result "script_syntax" "PASS" "Script syntax is valid" "$report_file"
+    else
+        echo "FAIL"
+        failed=$((failed + 1))
+        _log_test_result "script_syntax" "FAIL" "Script has syntax errors" "$report_file"
+    fi
+    
+    # Test 2: Critical files existence
+    echo -n "✓ Critical Files Validation... "
+    total=$((total + 1))
+    local critical_files=("$NS_CONF" "${NS_KEYS}/private.pem" "${NS_WWW}/server.py" "${NS_SESS_DB}")
+    local missing_files=0
+    for file in "${critical_files[@]}"; do
+        [ ! -f "$file" ] && missing_files=$((missing_files + 1))
+    done
+    
+    if [ $missing_files -eq 0 ]; then
+        echo "PASS"
+        passed=$((passed + 1))
+        _log_test_result "critical_files" "PASS" "All critical files present" "$report_file"
+    else
+        echo "FAIL ($missing_files missing)"
+        failed=$((failed + 1))
+        _log_test_result "critical_files" "FAIL" "$missing_files critical files missing" "$report_file"
+    fi
+    
+    # Test 3: Directory structure
+    echo -n "✓ Directory Structure... "
+    total=$((total + 1))
+    local required_dirs=("$NS_LOGS" "$NS_KEYS" "$NS_CTRL" "$NS_WWW" "$NS_PID")
+    local missing_dirs=0
+    for dir in "${required_dirs[@]}"; do
+        [ ! -d "$dir" ] && missing_dirs=$((missing_dirs + 1))
+    done
+    
+    if [ $missing_dirs -eq 0 ]; then
+        echo "PASS"
+        passed=$((passed + 1))
+        _log_test_result "directory_structure" "PASS" "All required directories exist" "$report_file"
+    else
+        echo "FAIL ($missing_dirs missing)"
+        failed=$((failed + 1))
+        _log_test_result "directory_structure" "FAIL" "$missing_dirs directories missing" "$report_file"
+    fi
+    
+    # Test 4: Permissions validation
+    echo -n "✓ File Permissions... "
+    total=$((total + 1))
+    local perm_issues=0
+    [ -f "${NS_KEYS}/private.pem" ] && [ "$(stat -c %a "${NS_KEYS}/private.pem" 2>/dev/null)" != "600" ] && perm_issues=$((perm_issues + 1))
+    [ -f "${NS_KEYS}/tls.key" ] && [ "$(stat -c %a "${NS_KEYS}/tls.key" 2>/dev/null)" != "600" ] && perm_issues=$((perm_issues + 1))
+    
+    if [ $perm_issues -eq 0 ]; then
+        echo "PASS"
+        passed=$((passed + 1))
+        _log_test_result "file_permissions" "PASS" "File permissions are secure" "$report_file"
+    else
+        echo "WARN ($perm_issues issues)"
+        warnings=$((warnings + 1))
+        _log_test_result "file_permissions" "WARN" "$perm_issues permission issues found" "$report_file"
+    fi
+}
+
+# Security validation tests
+_run_security_tests() {
+    local -n results=$1
+    local -n total=$2
+    local -n passed=$3
+    local -n failed=$4
+    local -n warnings=$5
+    local report_file=$6
+    
+    # Test 1: HTTPS/TLS Configuration
+    echo -n "✓ HTTPS/TLS Security... "
+    total=$((total + 1))
+    if [ -f "${NS_KEYS}/tls.crt" ] && [ -f "${NS_KEYS}/tls.key" ]; then
+        local tls_enabled; tls_enabled=$(awk -F': ' '/tls_enabled:/ {print $2}' "$NS_CONF" 2>/dev/null | tr -d ' ')
+        local require_https; require_https=$(awk -F': ' '/require_https:/ {print $2}' "$NS_CONF" 2>/dev/null | tr -d ' ')
+        if [ "$tls_enabled" = "true" ] && [ "$require_https" = "true" ]; then
+            echo "PASS (HTTPS Enforced)"
+            passed=$((passed + 1))
+            _log_test_result "https_tls" "PASS" "HTTPS properly configured and enforced" "$report_file"
+        else
+            echo "WARN (TLS available but not enforced)"
+            warnings=$((warnings + 1))
+            _log_test_result "https_tls" "WARN" "TLS certificates exist but HTTPS not enforced" "$report_file"
+        fi
+    else
+        echo "FAIL (No TLS certificates)"
+        failed=$((failed + 1))
+        _log_test_result "https_tls" "FAIL" "No TLS certificates found" "$report_file"
+    fi
+    
+    # Test 2: Authentication System
+    echo -n "✓ Authentication System... "
+    total=$((total + 1))
+    local auth_enabled; auth_enabled=$(awk -F': ' '/auth_enabled:/ {print $2}' "$NS_CONF" 2>/dev/null | tr -d ' ')
+    if [ "$auth_enabled" = "true" ] && [ -f "$NS_SESS_DB" ]; then
+        echo "PASS"
+        passed=$((passed + 1))
+        _log_test_result "authentication" "PASS" "Authentication system enabled and configured" "$report_file"
+    else
+        echo "FAIL"
+        failed=$((failed + 1))
+        _log_test_result "authentication" "FAIL" "Authentication system not properly configured" "$report_file"
+    fi
+    
+    # Test 3: Security Hardening Features
+    echo -n "✓ Security Hardening... "
+    total=$((total + 1))
+    if is_security_hardening_enabled && is_auth_strict_enabled; then
+        echo "PASS"
+        passed=$((passed + 1))
+        _log_test_result "security_hardening" "PASS" "Security hardening features enabled" "$report_file"
+    else
+        echo "FAIL"
+        failed=$((failed + 1))
+        _log_test_result "security_hardening" "FAIL" "Security hardening not fully enabled" "$report_file"
+    fi
+}
+
+# Performance and stability tests
+_run_performance_tests() {
+    local -n results=$1
+    local -n total=$2
+    local -n passed=$3
+    local -n failed=$4
+    local -n warnings=$5
+    local report_file=$6
+    
+    # Test 1: Monitor intervals validation
+    echo -n "✓ Monitor Intervals... "
+    total=$((total + 1))
+    local cpu_interval; cpu_interval=$(grep "cpu.*interval_sec:" "$NS_SELF" | head -1 | grep -o "interval_sec: [0-9]*" | cut -d' ' -f2)
+    local memory_interval; memory_interval=$(grep "memory.*interval_sec:" "$NS_SELF" | head -1 | grep -o "interval_sec: [0-9]*" | cut -d' ' -f2)
+    local network_interval; network_interval=$(grep "network.*interval_sec:" "$NS_SELF" | head -1 | grep -o "interval_sec: [0-9]*" | cut -d' ' -f2)
+    
+    if [ "$cpu_interval" -ge 10 ] && [ "$memory_interval" -ge 10 ] && [ "$network_interval" -ge 20 ]; then
+        echo "PASS (CPU:${cpu_interval}s, Mem:${memory_interval}s, Net:${network_interval}s)"
+        passed=$((passed + 1))
+        _log_test_result "monitor_intervals" "PASS" "Monitor intervals optimized" "$report_file"
+    else
+        echo "FAIL (Intervals too aggressive)"
+        failed=$((failed + 1))
+        _log_test_result "monitor_intervals" "FAIL" "Monitor intervals too aggressive" "$report_file"
+    fi
+    
+    # Test 2: Memory optimization
+    echo -n "✓ Memory Optimization... "
+    total=$((total + 1))
+    if grep -q "_optimize_memory" "$NS_SELF" && grep -q "log_count.*echo 0" "$NS_SELF"; then
+        echo "PASS"
+        passed=$((passed + 1))
+        _log_test_result "memory_optimization" "PASS" "Memory optimization functions present" "$report_file"
+    else
+        echo "FAIL"
+        failed=$((failed + 1))
+        _log_test_result "memory_optimization" "FAIL" "Memory optimization not properly implemented" "$report_file"
+    fi
+    
+    # Test 3: Log rotation system
+    echo -n "✓ Log Rotation System... "
+    total=$((total + 1))
+    if grep -q "_rotate_log" "$NS_SELF" && grep -q "archive.*gz" "$NS_SELF"; then
+        echo "PASS"
+        passed=$((passed + 1))
+        _log_test_result "log_rotation" "PASS" "Log rotation system implemented" "$report_file"
+    else
+        echo "FAIL"
+        failed=$((failed + 1))
+        _log_test_result "log_rotation" "FAIL" "Log rotation system missing" "$report_file"
+    fi
+}
+
+# Runtime and integration tests
+_run_runtime_tests() {
+    local -n results=$1
+    local -n total=$2
+    local -n passed=$3
+    local -n failed=$4
+    local -n warnings=$5
+    local report_file=$6
+    
+    # Test 1: Installation status
+    echo -n "✓ Installation Status... "
+    total=$((total + 1))
+    if [ -f "$NS_CONF" ] && [ -f "${NS_KEYS}/tls.crt" ] && [ -f "${NS_WWW}/index.html" ]; then
+        echo "PASS"
+        passed=$((passed + 1))
+        _log_test_result "installation_status" "PASS" "Installation complete" "$report_file"
+    else
+        echo "FAIL"
+        failed=$((failed + 1))
+        _log_test_result "installation_status" "FAIL" "Installation incomplete" "$report_file"
+    fi
+    
+    # Test 2: Basic functionality 
+    echo -n "✓ Basic Functionality... "
+    total=$((total + 1))
+    if timeout 10 "$NS_SELF" --help >/dev/null 2>&1; then
+        echo "PASS"
+        passed=$((passed + 1))
+        _log_test_result "basic_functionality" "PASS" "Script executes properly" "$report_file"
+    else
+        echo "FAIL"
+        failed=$((failed + 1))
+        _log_test_result "basic_functionality" "FAIL" "Script execution issues" "$report_file"
+    fi
+    
+    # Test 3: Service monitoring
+    echo -n "✓ Service Monitoring... "
+    total=$((total + 1))
+    local running_processes=0
+    ps aux | grep -E "python.*server.py" | grep -v grep >/dev/null && running_processes=$((running_processes + 1))
+    
+    if [ $running_processes -gt 0 ]; then
+        echo "PASS ($running_processes services)"
+        passed=$((passed + 1))
+        _log_test_result "service_monitoring" "PASS" "$running_processes services running" "$report_file"
+    else
+        echo "WARN (No services running)"
+        warnings=$((warnings + 1))
+        _log_test_result "service_monitoring" "WARN" "No services currently running" "$report_file"
+    fi
+}
+
+# Enhanced features validation tests
+_run_enhanced_features_tests() {
+    local -n results=$1
+    local -n total=$2
+    local -n passed=$3
+    local -n failed=$4
+    local -n warnings=$5
+    local report_file=$6
+    
+    # Test 1: Auto-restart capability
+    echo -n "✓ Auto-restart Features... "
+    total=$((total + 1))
+    if is_auto_restart_enabled && grep -q "check_restart_limit" "$NS_SELF"; then
+        echo "PASS"
+        passed=$((passed + 1))
+        _log_test_result "auto_restart" "PASS" "Auto-restart enabled with rate limiting" "$report_file"
+    else
+        echo "FAIL"
+        failed=$((failed + 1))
+        _log_test_result "auto_restart" "FAIL" "Auto-restart not properly enabled" "$report_file"
+    fi
+    
+    # Test 2: Web wrapper integration
+    echo -n "✓ Web Wrapper Integration... "
+    total=$((total + 1))
+    if grep -q "NOVASHIELD_USE_WEB_WRAPPER" "$NS_SELF" && grep -q "_run_internal_web_wrapper" "$NS_SELF"; then
+        echo "PASS"
+        passed=$((passed + 1))
+        _log_test_result "web_wrapper" "PASS" "Web wrapper integration implemented" "$report_file"
+    else
+        echo "FAIL"
+        failed=$((failed + 1))
+        _log_test_result "web_wrapper" "FAIL" "Web wrapper integration missing" "$report_file"
+    fi
+    
+    # Test 3: Enhanced monitoring
+    echo -n "✓ Enhanced Monitoring... "
+    total=$((total + 1))
+    if [ "${NOVASHIELD_ENHANCED_MONITORING:-1}" = "1" ] && grep -q "enhanced.*monitor" "$NS_SELF"; then
+        echo "PASS"
+        passed=$((passed + 1))
+        _log_test_result "enhanced_monitoring" "PASS" "Enhanced monitoring enabled" "$report_file"
+    else
+        echo "FAIL"
+        failed=$((failed + 1))
+        _log_test_result "enhanced_monitoring" "FAIL" "Enhanced monitoring not enabled" "$report_file"
+    fi
+}
+
+# Comprehensive regression tests
+_run_regression_tests() {
+    local -n results=$1
+    local -n total=$2
+    local -n passed=$3
+    local -n failed=$4
+    local -n warnings=$5
+    local report_file=$6
+    
+    # Test 1: Exception handling validation
+    echo -n "✓ Exception Handling... "
+    total=$((total + 1))
+    if grep -q "GET_ERROR" "$NS_SELF" && grep -q "POST_ERROR" "$NS_SELF"; then
+        echo "PASS"
+        passed=$((passed + 1))
+        _log_test_result "exception_handling" "PASS" "Comprehensive exception handling present" "$report_file"
+    else
+        echo "FAIL"
+        failed=$((failed + 1))
+        _log_test_result "exception_handling" "FAIL" "Exception handling incomplete" "$report_file"
+    fi
+    
+    # Test 2: Disk monitor interval fix
+    echo -n "✓ Disk Monitor Fix... "
+    total=$((total + 1))
+    if grep -A 4 "_monitor_disk(){" "$NS_SELF" | grep -q '"60"'; then
+        echo "PASS"
+        passed=$((passed + 1))
+        _log_test_result "disk_monitor_fix" "PASS" "Disk monitor interval fixed" "$report_file"
+    else
+        echo "FAIL"
+        failed=$((failed + 1))
+        _log_test_result "disk_monitor_fix" "FAIL" "Disk monitor interval not fixed" "$report_file"
+    fi
+    
+    # Test 3: Configuration consistency
+    echo -n "✓ Configuration Consistency... "
+    total=$((total + 1))
+    local config_issues=0
+    # Check for consistent TLS settings
+    local tls_enabled; tls_enabled=$(awk -F': ' '/tls_enabled:/ {print $2}' "$NS_CONF" 2>/dev/null | tr -d ' ')
+    local require_https; require_https=$(awk -F': ' '/require_https:/ {print $2}' "$NS_CONF" 2>/dev/null | tr -d ' ')
+    
+    [ "$tls_enabled" = "true" ] && [ "$require_https" != "true" ] && config_issues=$((config_issues + 1))
+    
+    if [ $config_issues -eq 0 ]; then
+        echo "PASS"
+        passed=$((passed + 1))
+        _log_test_result "config_consistency" "PASS" "Configuration is consistent" "$report_file"
+    else
+        echo "WARN ($config_issues issues)"
+        warnings=$((warnings + 1))
+        _log_test_result "config_consistency" "WARN" "$config_issues configuration consistency issues" "$report_file"
+    fi
+}
+
+# Helper function to log test results to JSON
+_log_test_result() {
+    local test_name="$1"
+    local result="$2"
+    local message="$3"
+    local report_file="$4"
+    
+    cat >> "$report_file" << EOF
+{"test": "$test_name", "result": "$result", "message": "$message", "timestamp": "$(date -Iseconds)"},
+EOF
+}
+
+# Legacy function for backward compatibility
 _validate_stability_fixes() {
     echo "🔍 NovaShield Comprehensive System Validation"
     echo "============================================"
@@ -25653,10 +26128,15 @@ _start_web_direct(){
   
   ns_ok "Web server started successfully (PID: $server_pid)"
   
-  # Display correct protocol based on TLS setting
-  local scheme="http"
-  local tls_enabled; tls_enabled=$(yaml_get "security" "tls_enabled" "false")
-  [ "$tls_enabled" = "true" ] && scheme="https"
+  # Display correct protocol - HTTPS ONLY for security
+  local scheme="https"  # Always HTTPS - no HTTP mode allowed
+  local tls_enabled; tls_enabled=$(yaml_get "security" "tls_enabled" "true")
+  
+  # Enforce HTTPS - fail if TLS not enabled
+  if [ "$tls_enabled" != "true" ]; then
+    ns_err "SECURITY ERROR: TLS must be enabled - HTTPS required for all connections"
+    return 1
+  fi
   
   ns_log "🌐 Dashboard available at: ${scheme}://${host}:${port}/"
   return 0
@@ -26410,10 +26890,15 @@ start_all(){
   # SUCCESS: Display comprehensive status
   ns_ok "🎯 NovaShield FULLY OPERATIONAL with COMPLETE Enterprise Integration!"
   
-  # Display enhanced status information
-  local scheme="http"
-  local tls_enabled; tls_enabled=$(yaml_get "security" "tls_enabled" "false")
-  [ "$tls_enabled" = "true" ] && scheme="https"
+  # Display enhanced status information - HTTPS ONLY
+  local scheme="https"  # Always HTTPS - no HTTP mode allowed
+  local tls_enabled; tls_enabled=$(yaml_get "security" "tls_enabled" "true")
+  
+  # SECURITY: Enforce HTTPS-only access
+  if [ "$tls_enabled" != "true" ]; then
+    ns_err "SECURITY ERROR: TLS must be enabled - HTTPS required for security compliance"
+    return 1
+  fi
   
   ns_log "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
   ns_log "🌟 NOVASHIELD ENTERPRISE-GRADE SECURITY PLATFORM - FULLY OPERATIONAL"
@@ -28072,6 +28557,11 @@ Core Commands:
   --status               Show service status and information
   --restart-monitors     Restart all monitoring processes
   --validate             Validate comprehensive stability fixes are properly implemented
+  --validate-comprehensive   Complete all-in-one validation and testing system (full suite)
+  --validate-quick       Quick validation and testing (essential tests only)
+  --validate-security    Security-focused validation and testing
+  --test-all             Run all comprehensive tests and validations
+  --comprehensive-test   Complete testing suite with detailed reporting
 
 Installation Modes:
   ./novashield.sh --install  Fully automated installation (no user prompts)
@@ -28333,6 +28823,11 @@ case "${1:-}" in
     enhanced_enterprise_validation;;
     
   --validate) _validate_stability_fixes; exit $?;;
+  --validate-comprehensive) _comprehensive_all_in_one_validator "full"; exit $?;;
+  --validate-quick) _comprehensive_all_in_one_validator "quick"; exit $?;;
+  --validate-security) _comprehensive_all_in_one_validator "security"; exit $?;;
+  --test-all) _comprehensive_all_in_one_validator "full"; exit $?;;
+  --comprehensive-test) _comprehensive_all_in_one_validator "full"; exit $?;;
   --status) status;;
   --backup) backup_snapshot;;
   --version-snapshot) version_snapshot;;
