@@ -112,8 +112,11 @@ install_dependencies(){
     PKG_INSTALL termux-services || ns_warn "termux-services install failed (non-critical)"
   fi
   
-  # Install common security tools
-  PKG_INSTALL nmap || ns_warn "nmap install failed"
+  # Install common security tools with better error handling
+  if ! PKG_INSTALL nmap; then
+    ns_warn "nmap install failed - trying alternative packages"
+    PKG_INSTALL nmap-ncat || PKG_INSTALL nmap-nping || ns_warn "All nmap variants failed - network scanning features limited"
+  fi
   PKG_INSTALL netcat || PKG_INSTALL nc || ns_warn "netcat install failed"
   PKG_INSTALL lsof || ns_warn "lsof install failed"
   
