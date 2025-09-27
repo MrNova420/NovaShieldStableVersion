@@ -6455,7 +6455,7 @@ BANS_DB = os.path.join(NS_CTRL,'bans.json')
 GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11'  # WebSocket
 
 # Environment variable checks
-AUTH_STRICT = os.environ.get('NOVASHIELD_AUTH_STRICT', '0') == '1'
+AUTH_STRICT = os.environ.get('NOVASHIELD_AUTH_STRICT', '1') == '1'  # Default: ENABLED for security
 
 def get_client_ip(handler):
     """Get the real client IP address, supporting X-Forwarded-For when trust_proxy is enabled"""
@@ -7061,6 +7061,377 @@ def generate_secure_setup_screen(user_count=0):
         }}, 30000);
         
         console.log('🛡️ NovaShield Security Barrier Active - No users configured');
+    </script>
+</body>
+</html>
+'''
+
+def generate_secure_login_screen(user_count=1):
+    """Generate secure login-only screen that completely blocks access until authentication"""
+    return f'''
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🛡️ NovaShield Authentication Required</title>
+    <style>
+        * {{
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }}
+        
+        body {{
+            background: linear-gradient(135deg, #0c0c0c 0%, #1a1a2e 50%, #16213e 100%);
+            color: #e0e0e0;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            overflow: hidden;
+        }}
+        
+        .login-container {{
+            background: rgba(0, 0, 0, 0.85);
+            backdrop-filter: blur(10px);
+            border: 1px solid #00ff41;
+            border-radius: 15px;
+            padding: 40px;
+            box-shadow: 0 0 50px rgba(0, 255, 65, 0.3);
+            max-width: 450px;
+            width: 90%;
+            text-align: center;
+            animation: glow 2s ease-in-out infinite alternate;
+        }}
+        
+        @keyframes glow {{
+            from {{ box-shadow: 0 0 30px rgba(0, 255, 65, 0.3); }}
+            to {{ box-shadow: 0 0 60px rgba(0, 255, 65, 0.5); }}
+        }}
+        
+        .logo {{
+            margin-bottom: 30px;
+        }}
+        
+        .logo-icon {{
+            font-size: 4rem;
+            color: #00ff41;
+            text-shadow: 0 0 20px rgba(0, 255, 65, 0.8);
+            margin-bottom: 10px;
+        }}
+        
+        .title {{
+            font-size: 2rem;
+            color: #00ff41;
+            margin-bottom: 10px;
+            text-shadow: 0 0 10px rgba(0, 255, 65, 0.5);
+        }}
+        
+        .subtitle {{
+            color: #ccc;
+            margin-bottom: 30px;
+            font-size: 1.1rem;
+        }}
+        
+        .security-notice {{
+            background: rgba(255, 0, 0, 0.1);
+            border: 1px solid #ff4444;
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 30px;
+            color: #ff6666;
+        }}
+        
+        .form-group {{
+            margin-bottom: 20px;
+            text-align: left;
+        }}
+        
+        .form-group label {{
+            display: block;
+            margin-bottom: 8px;
+            color: #00ff41;
+            font-weight: 500;
+        }}
+        
+        .form-group input {{
+            width: 100%;
+            padding: 12px 15px;
+            background: rgba(0, 0, 0, 0.7);
+            border: 1px solid #333;
+            border-radius: 8px;
+            color: #fff;
+            font-size: 1rem;
+            transition: all 0.3s ease;
+        }}
+        
+        .form-group input:focus {{
+            outline: none;
+            border-color: #00ff41;
+            box-shadow: 0 0 10px rgba(0, 255, 65, 0.3);
+        }}
+        
+        .login-btn {{
+            width: 100%;
+            padding: 12px;
+            background: linear-gradient(135deg, #00ff41, #00cc33);
+            border: none;
+            border-radius: 8px;
+            color: #000;
+            font-size: 1.1rem;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            margin-bottom: 20px;
+        }}
+        
+        .login-btn:hover {{
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(0, 255, 65, 0.4);
+        }}
+        
+        .login-btn:disabled {{
+            opacity: 0.6;
+            cursor: not-allowed;
+        }}
+        
+        .status-info {{
+            margin-top: 20px;
+            padding: 15px;
+            background: rgba(0, 255, 65, 0.1);
+            border: 1px solid #00ff41;
+            border-radius: 8px;
+            font-size: 0.9rem;
+        }}
+        
+        .status-row {{
+            display: flex;
+            justify-content: space-between;
+            margin: 5px 0;
+        }}
+        
+        .error-message {{
+            color: #ff4444;
+            margin-top: 10px;
+            font-size: 0.9rem;
+        }}
+        
+        .success-message {{
+            color: #00ff41;
+            margin-top: 10px;
+            font-size: 0.9rem;
+        }}
+        
+        .footer {{
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            font-size: 0.8rem;
+            color: #666;
+            text-align: center;
+        }}
+        
+        /* Security overlay to prevent interaction with anything else */
+        .security-overlay {{
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.95);
+            z-index: 9999;
+        }}
+    </style>
+</head>
+<body>
+    <div class="security-overlay"></div>
+    <div class="login-container">
+        <div class="logo">
+            <div class="logo-icon">🛡️</div>
+            <div class="title">NovaShield</div>
+            <div class="subtitle">Authentication Required</div>
+        </div>
+        
+        <div class="security-notice">
+            <strong>🔒 SECURE ACCESS REQUIRED</strong><br>
+            This security dashboard requires authentication. All access is blocked until you log in.
+        </div>
+        
+        <form id="loginForm" onsubmit="return handleLogin(event)">
+            <div class="form-group">
+                <label for="username">Username</label>
+                <input type="text" id="username" name="username" required autocomplete="username" placeholder="Enter your username">
+            </div>
+            
+            <div class="form-group">
+                <label for="password">Password</label>
+                <input type="password" id="password" name="password" required autocomplete="current-password" placeholder="Enter your password">
+            </div>
+            
+            <div class="form-group" id="twofa-group" style="display: none;">
+                <label for="twofa">2FA Code</label>
+                <input type="text" id="twofa" name="twofa" autocomplete="one-time-code" placeholder="Enter 2FA code (if enabled)">
+            </div>
+            
+            <button type="submit" class="login-btn" id="loginBtn">
+                🔑 Authenticate & Access Dashboard
+            </button>
+        </form>
+        
+        <div id="message" class="error-message" style="display: none;"></div>
+        
+        <div class="status-info">
+            <div class="status-row">
+                <span>Security Level:</span>
+                <span style="color: #00ff41;">MAXIMUM</span>
+            </div>
+            <div class="status-row">
+                <span>Authorized Users:</span>
+                <span style="color: #00ff41;">{user_count}</span>
+            </div>
+            <div class="status-row">
+                <span>Access Status:</span>
+                <span style="color: #ff4444;">BLOCKED</span>
+            </div>
+        </div>
+    </div>
+    
+    <div class="footer">
+        NovaShield Enterprise Security System<br>
+        Unauthorized access attempts are logged and monitored
+    </div>
+    
+    <script>
+        // Prevent any bypass attempts and disable developer tools
+        document.addEventListener('keydown', function(e) {{
+            // Disable F12, Ctrl+Shift+I, Ctrl+Shift+C, Ctrl+U, Ctrl+S
+            if (e.key === 'F12' || 
+                (e.ctrlKey && e.shiftKey && (e.key === 'I' || e.key === 'C')) ||
+                (e.ctrlKey && (e.key === 'u' || e.key === 's'))) {{
+                e.preventDefault();
+                e.stopPropagation();
+                return false;
+            }}
+        }});
+        
+        // Disable right-click context menu completely
+        document.addEventListener('contextmenu', function(e) {{
+            e.preventDefault();
+            e.stopPropagation();
+            return false;
+        }});
+        
+        // Disable text selection
+        document.onselectstart = function() {{ return false; }};
+        document.onmousedown = function() {{ return false; }};
+        
+        // Focus on username field
+        document.getElementById('username').focus();
+        
+        // Handle login form submission
+        function handleLogin(event) {{
+            event.preventDefault();
+            
+            const username = document.getElementById('username').value;
+            const password = document.getElementById('password').value;
+            const twofa = document.getElementById('twofa').value;
+            const messageDiv = document.getElementById('message');
+            const loginBtn = document.getElementById('loginBtn');
+            
+            if (!username || !password) {{
+                showMessage('Please enter both username and password', 'error');
+                return false;
+            }}
+            
+            // Disable form during submission
+            loginBtn.disabled = true;
+            loginBtn.textContent = '🔐 Authenticating...';
+            
+            // Prepare form data
+            const formData = new FormData();
+            formData.append('username', username);
+            formData.append('password', password);
+            if (twofa) {{
+                formData.append('totp', twofa);
+            }}
+            
+            // Submit login request
+            fetch('/api/login', {{
+                method: 'POST',
+                body: formData,
+                credentials: 'same-origin'
+            }})
+            .then(response => response.json())
+            .then(data => {{
+                if (data.success) {{
+                    showMessage('Authentication successful! Redirecting...', 'success');
+                    setTimeout(() => {{
+                        window.location.href = '/';
+                    }}, 1000);
+                }} else {{
+                    if (data.require_2fa) {{
+                        document.getElementById('twofa-group').style.display = 'block';
+                        document.getElementById('twofa').focus();
+                        showMessage('2FA code required', 'error');
+                    }} else {{
+                        showMessage(data.error || 'Authentication failed', 'error');
+                    }}
+                    loginBtn.disabled = false;
+                    loginBtn.textContent = '🔑 Authenticate & Access Dashboard';
+                }}
+            }})
+            .catch(error => {{
+                console.error('Login error:', error);
+                showMessage('Authentication failed. Please try again.', 'error');
+                loginBtn.disabled = false;
+                loginBtn.textContent = '🔑 Authenticate & Access Dashboard';
+            }});
+            
+            return false;
+        }}
+        
+        function showMessage(text, type) {{
+            const messageDiv = document.getElementById('message');
+            messageDiv.textContent = text;
+            messageDiv.className = type === 'success' ? 'success-message' : 'error-message';
+            messageDiv.style.display = 'block';
+            
+            if (type === 'error') {{
+                setTimeout(() => {{
+                    messageDiv.style.display = 'none';
+                }}, 5000);
+            }}
+        }}
+        
+        // Allow Enter key navigation
+        document.getElementById('username').addEventListener('keypress', function(e) {{
+            if (e.key === 'Enter') {{
+                document.getElementById('password').focus();
+            }}
+        }});
+        
+        document.getElementById('password').addEventListener('keypress', function(e) {{
+            if (e.key === 'Enter') {{
+                const twofaField = document.getElementById('twofa');
+                if (twofaField.style.display !== 'none' && twofaField.offsetParent !== null) {{
+                    twofaField.focus();
+                }} else {{
+                    handleLogin(e);
+                }}
+            }}
+        }});
+        
+        // Prevent any form of navigation away from login
+        window.addEventListener('beforeunload', function(e) {{
+            // Don't prevent unload, but ensure we come back to login
+        }});
+        
+        // Console warning
+        console.warn('🛡️ NovaShield Security System - Unauthorized access attempts are monitored');
+        console.warn('🔒 This system requires proper authentication');
     </script>
 </body>
 </html>
@@ -10014,7 +10385,7 @@ class Handler(SimpleHTTPRequestHandler):
                 mirror_terminal(self); return
 
             if parsed.path == '/':
-                # SECURITY BLACKOUT: Check if any users exist before allowing access
+                # ENHANCED SECURITY BLACKOUT: Complete access control system
                 client_ip = self.client_address[0]
                 user_agent = self.headers.get('User-Agent', 'Unknown')[:100]
                 
@@ -10024,7 +10395,7 @@ class Handler(SimpleHTTPRequestHandler):
                     userdb = db.get('_userdb', {}) or {}
                     user_count = len(userdb)
                     
-                    # SECURITY BARRIER: If no users exist, show secure setup screen
+                    # SECURITY BARRIER 1: If no users exist, show secure setup screen
                     if user_count == 0:
                         py_alert('WARN', f'BLACKOUT_MODE ip={client_ip} reason=no_users user_agent={user_agent}')
                         audit(f'BLACKOUT_ACCESS ip={client_ip} reason=no_users')
@@ -10032,33 +10403,37 @@ class Handler(SimpleHTTPRequestHandler):
                         blackout_html = generate_secure_setup_screen(user_count)
                         self.wfile.write(blackout_html.encode('utf-8'))
                         return
-                
-                # Standard authentication and session handling
-                sess = get_session(self)
-                if sess:
+                    
+                    # SECURITY BARRIER 2: Users exist but not authenticated - show login screen ONLY
+                    sess = get_session(self)
+                    if not sess:
+                        py_alert('WARN', f'LOGIN_REQUIRED ip={client_ip} reason=no_session user_count={user_count} user_agent={user_agent}')
+                        audit(f'LOGIN_REQUIRED ip={client_ip} reason=no_session')
+                        self._set_headers(200, 'text/html; charset=utf-8', {'Set-Cookie': 'NSSESS=deleted; Path=/; HttpOnly; Max-Age=0; SameSite=Strict; Secure'})
+                        login_html = generate_secure_login_screen(user_count)
+                        self.wfile.write(login_html.encode('utf-8'))
+                        return
+                    
+                    # SECURITY BARRIER 3: Session exists but might be invalid or expired
                     user = sess.get('user', 'unknown')
+                    if user == 'unknown' or user not in userdb:
+                        py_alert('WARN', f'INVALID_SESSION ip={client_ip} user={user} user_agent={user_agent}')
+                        audit(f'INVALID_SESSION ip={client_ip} user={user}')
+                        self._set_headers(200, 'text/html; charset=utf-8', {'Set-Cookie': 'NSSESS=deleted; Path=/; HttpOnly; Max-Age=0; SameSite=Strict; Secure'})
+                        login_html = generate_secure_login_screen(user_count)
+                        self.wfile.write(login_html.encode('utf-8'))
+                        return
+                    
+                    # Valid authentication - allow access to dashboard
                     py_alert('INFO', f'DASHBOARD_ACCESS user={user} ip={client_ip} user_agent={user_agent}')
                     audit(f'DASHBOARD_ACCESS user={user} ip={client_ip}')
                 else:
-                    py_alert('INFO', f'UNAUTHORIZED_ACCESS ip={client_ip} user_agent={user_agent}')
-                    audit(f'UNAUTHORIZED_ACCESS ip={client_ip}')
+                    # Authentication disabled - allow access (legacy mode)
+                    py_alert('INFO', f'UNPROTECTED_ACCESS ip={client_ip} user_agent={user_agent}')
+                    audit(f'UNPROTECTED_ACCESS ip={client_ip}')
                 
-                # Enhanced session handling with force_login_on_reload support
-                # Note: Jarvis memory is stored separately from sessions and persists across session clears
-                force_login_on_reload = _coerce_bool(cfg_get('security.force_login_on_reload', False), False)
-                
-                # Check if this is a fresh page load (not an AJAX request) by looking at headers
-                is_page_load = self.headers.get('Accept', '').startswith('text/html')
-                
-                # If AUTH_STRICT is enabled and no valid session, clear session cookie
-                if AUTH_STRICT and not sess:
-                    self._set_headers(200, 'text/html; charset=utf-8', {'Set-Cookie': 'NSSESS=deleted; Path=/; HttpOnly; Max-Age=0; SameSite=Strict; Secure'})
-                # If force_login_on_reload is enabled, clear session cookie on fresh page loads without session
-                # This ensures login prompt appears on refresh while preserving API access after successful login
-                elif force_login_on_reload and not sess and is_page_load:
-                    self._set_headers(200, 'text/html; charset=utf-8', {'Set-Cookie': 'NSSESS=deleted; Path=/; HttpOnly; Max-Age=0; SameSite=Strict; Secure'})
-                else:
-                    self._set_headers(200, 'text/html; charset=utf-8')
+                # Serve the dashboard for authenticated users or when auth is disabled
+                self._set_headers(200, 'text/html; charset=utf-8')
                 html = read_text(INDEX, '<h1>NovaShield</h1>')
                 self.wfile.write(html.encode('utf-8')); return
 
@@ -10156,6 +10531,8 @@ class Handler(SimpleHTTPRequestHandler):
                 self._set_headers(200); self.wfile.write(json.dumps(data).encode('utf-8')); return
 
             if parsed.path == '/api/whoami':
+                # SECURITY: Require authentication for system information
+                if not require_auth(self): return
                 info = {
                     'ns_home': NS_HOME,
                     'ns_www': NS_WWW,
