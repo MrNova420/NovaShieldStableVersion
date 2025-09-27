@@ -26232,7 +26232,12 @@ start_all(){
   timeout 30 enhanced_auto_fix_system "comprehensive" || ns_warn "Auto-fix system completed with timeout"
   
   # PHASE 8: Authentication and Session Management
-  ensure_auth_bootstrap
+  if ! interactive_user_management; then
+    ns_err "❌ User authentication setup failed or was cancelled"
+    ns_err "💡 Dashboard cannot start without proper user authentication"
+    ns_err "🔒 Please run './novashield.sh --start' again to configure users"
+    return 1
+  fi
   open_session
   
   # PHASE 9: Start All Services with Enhanced Monitoring
@@ -26863,9 +26868,177 @@ PY
   ns_ok "2FA set for '$user'. Set security.require_2fa: true to enforce."
 }
 
+# Interactive user selection and management for start command
+interactive_user_management(){
+  local enabled; enabled=$(awk -F': ' '/auth_enabled:/ {print $2}' "$NS_CONF" | tr -d ' ' | tr 'A-Z' 'a-z')
+  [ "$enabled" = "true" ] || return 0
+  
+  # Initialize session database if it doesn't exist
+  if [ ! -f "$NS_SESS_DB" ]; then echo '{}' >"$NS_SESS_DB"; fi
+  
+  # Get current users
+  local user_list user_count
+  user_list=$(python3 - "$NS_SESS_DB" <<'PY'
+import json,sys
+p=sys.argv[1]
+try: j=json.load(open(p))
+except: j={}
+ud=j.get('_userdb',{}) or {}
+for user in ud.keys():
+    print(user)
+PY
+)
+  user_count=$(echo "$user_list" | grep -c . 2>/dev/null || echo 0)
+  
+  echo
+  ns_log "🔐 SECURITY AUTHENTICATION REQUIRED"
+  ns_log "🛡️  Dashboard authentication is ENABLED for security"
+  echo
+  
+  if [ "$user_count" -gt 0 ]; then
+    ns_log "📋 Found $user_count registered user(s):"
+    echo "$user_list" | while read -r user; do
+      [ -n "$user" ] && echo "   • $user"
+    done
+    echo
+    
+    while true; do
+      echo "Please select an option:"
+      echo "1) Select existing user"
+      echo "2) Create new user" 
+      echo "3) List all users"
+      echo "4) Exit (dashboard will not start)"
+      echo
+      read -r -p "Enter your choice [1-4]: " choice
+      
+      case "$choice" in
+        1)
+          echo
+          echo "Available users:"
+          local i=1
+          echo "$user_list" | while read -r user; do
+            if [ -n "$user" ]; then
+              echo "$i) $user"
+              i=$((i + 1))
+            fi
+          done
+          echo
+          read -r -p "Enter username to select: " selected_user
+          
+          # Verify user exists
+          if echo "$user_list" | grep -q "^${selected_user}$"; then
+            ns_ok "✅ User '$selected_user' selected for dashboard access"
+            echo
+            read -r -p "Enable 2FA for enhanced security? [Y/n]: " yn
+            case "$yn" in 
+              [Nn]*) ns_log "2FA skipped - you can enable it later with --enable-2fa" ;;
+              *) enable_2fa ;;
+            esac
+            return 0
+          else
+            ns_err "User '$selected_user' not found. Please try again."
+            continue
+          fi
+          ;;
+        2)
+          echo
+          ns_log "Creating new user..."
+          if add_user; then
+            ns_ok "✅ New user created successfully!"
+            echo
+            read -r -p "Enable 2FA for enhanced security? [Y/n]: " yn
+            case "$yn" in 
+              [Nn]*) ns_log "2FA skipped - you can enable it later with --enable-2fa" ;;
+              *) enable_2fa ;;
+            esac
+            return 0
+          else
+            ns_err "Failed to create user. Please try again."
+            continue
+          fi
+          ;;
+        3)
+          echo
+          ns_log "📋 All registered users ($user_count total):"
+          echo "$user_list" | while read -r user; do
+            [ -n "$user" ] && echo "   • $user"
+          done
+          echo
+          continue
+          ;;
+        4)
+          ns_warn "⚠️  Dashboard startup cancelled by user"
+          ns_log "💡 Dashboard access is BLOCKED until user authentication is configured"
+          return 1
+          ;;
+        *)
+          ns_err "Invalid choice. Please enter 1, 2, 3, or 4."
+          continue
+          ;;
+      esac
+    done
+  else
+    # No users exist - must create first user
+    ns_warn "📋 No authorized users found - you must create your first admin account"
+    echo
+    ns_log "This is a one-time security setup to protect your NovaShield dashboard."
+    ns_log "Your dashboard will be inaccessible until this user is created."
+    echo
+    
+    # Show current security status
+    ns_log "🛡️  Current Security Status:"
+    ns_log "   • Authentication: ENABLED"
+    ns_log "   • 2FA: Available (optional)"
+    ns_log "   • Dashboard Access: BLOCKED (no users)"
+    ns_log "   • User Count: 0"
+    echo
+    
+    while true; do
+      echo "Please select an option:"
+      echo "1) Create first admin user"
+      echo "2) Exit (dashboard will not start)"
+      echo
+      read -r -p "Enter your choice [1-2]: " choice
+      
+      case "$choice" in
+        1)
+          echo
+          ns_log "Creating your first admin user..."
+          if add_user; then
+            ns_ok "✅ First admin user created successfully!"
+            echo
+            read -r -p "Enable 2FA for enhanced security? [Y/n]: " yn
+            case "$yn" in 
+              [Nn]*) ns_log "2FA skipped - you can enable it later with --enable-2fa" ;;
+              *) enable_2fa ;;
+            esac
+            return 0
+          else
+            ns_err "Failed to create user. Please try again."
+            continue
+          fi
+          ;;
+        2)
+          ns_warn "⚠️  Dashboard startup cancelled by user"
+          ns_log "💡 Dashboard access is BLOCKED until users are created"
+          return 1
+          ;;
+        *)
+          ns_err "Invalid choice. Please enter 1 or 2."
+          continue
+          ;;
+      esac
+    done
+  fi
+}
+
 ensure_auth_bootstrap(){
   local enabled; enabled=$(awk -F': ' '/auth_enabled:/ {print $2}' "$NS_CONF" | tr -d ' ' | tr 'A-Z' 'a-z')
   [ "$enabled" = "true" ] || return 0
+  
+  # Initialize session database if it doesn't exist
+  if [ ! -f "$NS_SESS_DB" ]; then echo '{}' >"$NS_SESS_DB"; fi
+  
   local have_user
   have_user=$(python3 - "$NS_SESS_DB" <<'PY'
 import json,sys
@@ -26893,87 +27066,18 @@ PY
   fi
   
   # =============================================================================
-  # UNIVERSAL INSTALLATION SUPPORT - Enhanced for all environments
+  # AUTOMATED INSTALLATION - No user prompts during installation
   # =============================================================================
-  # Check for non-interactive environment (CI/CD, automated deployments, etc.)
-  # In non-interactive environments, complete the installation but require
-  # manual user creation afterward for security compliance.
+  # Installation is fully automated. User creation/selection happens at start time
+  # for security reasons. This ensures proper interactive user management.
   # =============================================================================
   
-  # Detect non-interactive environment
-  if [ "${NS_NON_INTERACTIVE:-}" = "1" ] || [ ! -t 0 ] || [ "${NOVASHIELD_AUTO_START:-}" = "1" ]; then
-    # Non-interactive environment detected
-    ns_warn "🔒 SECURITY NOTICE: Authentication enabled but no users exist"
-    ns_warn "💡 Dashboard access is BLOCKED until users are created"
-    ns_warn "📋 Run './novashield.sh --add-user' to create your first admin user"
-    ns_warn "🌐 Installation completed successfully - user creation required for dashboard access"
-    echo
-    ns_log "🎯 NON-INTERACTIVE INSTALLATION COMPLETE:"
-    ns_log "   • NovaShield installed successfully"
-    ns_log "   • All components configured and ready"
-    ns_log "   • Dashboard authentication is ENABLED"
-    ns_log "   • User creation required: Run './novashield.sh --add-user'"
-    ns_log "   • After creating users, access dashboard at: https://localhost:8765"
-    return 0
-  fi
+  ns_log "🔒 SECURITY NOTICE: Authentication enabled but no users exist"
+  ns_log "💡 Dashboard access will be BLOCKED until users are created"
+  ns_log "📋 User creation/selection will be handled when starting the service"
+  ns_log "🌐 Installation completed successfully - use './novashield.sh --start' to begin"
   
-  # Interactive environment - proceed with user creation
-  echo
-  ns_warn "🔐 SECURITY REQUIREMENT: Dashboard authentication is enabled"
-  ns_warn "📋 No authorized users found - creating your first admin account"
-  echo
-  ns_log "This is a one-time security setup to protect your NovaShield dashboard."
-  ns_log "Your dashboard will be inaccessible until this user is created."
-  echo
-  
-  # Show current security status
-  ns_log "🛡️  Current Security Status:"
-  ns_log "   • Authentication: ENABLED"
-  ns_log "   • 2FA: Available (optional)"
-  ns_log "   • Dashboard Access: BLOCKED (no users)"
-  ns_log "   • User Count: 0"
-  echo
-  echo "Creating the first user for security..."
-  
-  # Check if add_user function is available (it should be since we're embedded)
-  if command -v add_user >/dev/null 2>&1 || type add_user >/dev/null 2>&1; then
-    # Add retry logic for user creation
-    local retry_count=0
-    local max_retries=3
-    while [ $retry_count -lt $max_retries ]; do
-      if add_user; then
-        echo
-        read -r -p "Enable 2FA for enhanced security? [Y/n]: " yn
-        case "$yn" in 
-          [Nn]*) ns_log "2FA skipped - you can enable it later with --enable-2fa" ;;
-          *) enable_2fa ;;
-        esac
-        
-        # Show final security status
-        echo
-        ns_ok "✅ Security setup complete!"
-        ns_log "🔓 Dashboard access is now enabled for authorized users"
-        ns_log "🌐 Access your dashboard at: https://localhost:8765"
-        return 0
-      else
-        retry_count=$((retry_count + 1))
-        if [ $retry_count -lt $max_retries ]; then
-          echo
-          ns_warn "User creation failed. Please try again. (Attempt $((retry_count + 1)) of $max_retries)"
-          echo
-        else
-          echo
-          ns_err "User creation failed after $max_retries attempts."
-          ns_err "Please run './novashield.sh --add-user' after installation to create your first user."
-          return 1
-        fi
-      fi
-    done
-  else
-    # Fallback if add_user function is not available
-    ns_err "❌ User creation function not available during installation"
-    ns_err "💡 Complete installation will proceed, then run: './novashield.sh --add-user'"
-  fi
+  return 0
 }
 
 
@@ -27815,18 +27919,19 @@ A comprehensive security monitoring and management system for Android/Termux and
 Usage: $0 [OPTION]
 
 Core Commands:
-  --install              Universal installation with smart environment detection
-  --start                Start all services (monitors + web dashboard)
+  --install              Automated installation (no user prompts)
+  --start                Start services with interactive user selection
   --stop                 Stop all running services
   --status               Show service status and information
   --restart-monitors     Restart all monitoring processes
   --validate             Validate comprehensive stability fixes are properly implemented
 
 Installation Modes:
-  ./novashield.sh --install  Universal installation compatible with all environments
-                         • Interactive: Prompts for user creation during installation
-                         • Non-interactive: Completes installation, requires manual user creation
-                         • CI/CD compatible: Run './novashield.sh --add-user' after installation
+  ./novashield.sh --install  Fully automated installation (no user prompts)
+                         • Installs all components and dependencies
+                         • Configures system and generates certificates
+                         • User creation/selection happens during --start
+                         • Security-focused: no automated user creation
 
 Web Dashboard:
   --web-start            Start only the web dashboard server
