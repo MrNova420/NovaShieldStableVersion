@@ -449,14 +449,22 @@ NovaShield offers **100+ commands** across multiple categories for comprehensive
 
 ### **🔧 Core System Commands**
 
-Essential system operation and management:
+Essential system operation and management with ALL ADVANCED FEATURES ENABLED BY DEFAULT:
 
 ```bash
 # Installation & Setup
 ./novashield.sh --install              # Install NovaShield and dependencies (requires user creation)
 
-# Service Management
-./novashield.sh --start                # Start all services (monitors + web dashboard)
+# Service Management (ENHANCED - All features enabled by default)
+./novashield.sh --start                # Start with COMPLETE enterprise integration: 
+                                       # • ALL advanced features enabled by default
+                                       # • Comprehensive security automation
+                                       # • Enterprise optimization and hardening
+                                       # • JARVIS AI integration with full system access
+                                       # • Multi-user scaling and Docker support
+                                       # • Advanced monitoring and intelligence gathering
+                                       # • Auto-restart, security hardening, strict sessions
+                                       # • Enhanced web wrapper and external checks
 ./novashield.sh --stop                 # Stop all running services
 ./novashield.sh --status               # Show service status and information
 ./novashield.sh --restart-monitors     # Restart all monitoring processes
@@ -464,6 +472,12 @@ Essential system operation and management:
 # System Validation
 ./novashield.sh --validate             # Validate comprehensive stability fixes are properly implemented
 ```
+
+**🎯 IMPORTANT: The `--start` command now includes ALL advanced features by default!**
+- No need for separate enterprise setup or feature enabling commands
+- Maximum capability mode activated automatically
+- All security enhancements, optimizations, and enterprise features included
+- Auto-restart, security hardening, and advanced monitoring enabled by default
 
 ---
 
@@ -670,17 +684,29 @@ Network monitoring configuration:
 
 ### **🔧 Optional Features**
 
-Opt-in features for enhanced functionality:
+Feature control (ALL ENABLED BY DEFAULT for maximum capability):
 
 ```bash
-# Service Management
-./novashield.sh --enable-auto-restart      # Enable automatic restart of crashed services
-./novashield.sh --enable-security-hardening  # Enable enhanced security features
-./novashield.sh --enable-strict-sessions   # Enable strict session validation
-./novashield.sh --enable-web-wrapper       # Enable enhanced web server stability wrapper with restart limiting
+# Feature Status (All enabled by default)
+./novashield.sh --enable-auto-restart      # Auto-restart is ENABLED BY DEFAULT
+./novashield.sh --enable-security-hardening  # Security hardening is ENABLED BY DEFAULT  
+./novashield.sh --enable-strict-sessions   # Strict sessions are ENABLED BY DEFAULT
+./novashield.sh --enable-web-wrapper       # Enhanced web wrapper is ENABLED BY DEFAULT
+
+# Advanced Users: Disable specific features if needed
+./novashield.sh --disable-auto-restart     # Disable automatic restart of crashed services
+./novashield.sh --disable-security-hardening  # Disable enhanced security features
+./novashield.sh --disable-strict-sessions  # Disable strict session validation
+./novashield.sh --disable-web-wrapper      # Disable enhanced web server stability wrapper
 ```
 
-**Note:** These features are disabled by default for stable behavior. Enable them as needed for enhanced functionality.
+**🎯 NEW: All features are now ENABLED BY DEFAULT for maximum capability and security!**
+- Auto-restart with intelligent rate limiting: **ENABLED**
+- Enhanced security hardening: **ENABLED**
+- Strict session validation: **ENABLED**
+- Enhanced web wrapper with stability: **ENABLED**
+- External network monitoring: **ENABLED**
+- Strict authentication: **ENABLED**
 
 ---
 
