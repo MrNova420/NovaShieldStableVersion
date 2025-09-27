@@ -424,6 +424,366 @@ NovaShield now includes a sophisticated **Advanced Security Automation Suite** w
 
 This Advanced Security Automation Suite represents a quantum leap in automated security analysis, bringing enterprise-grade capabilities to NovaShield with the intelligence and adaptability of JARVIS AI integration.
 
+## 📚 **COMPLETE COMMAND REFERENCE** — *All Commands & Options*
+
+### **📋 Command Categories Overview**
+
+NovaShield offers **100+ commands** across multiple categories for comprehensive system management:
+
+- **🔧 Core System Commands** (8 commands)
+- **🌐 Web Dashboard Commands** (2 commands)  
+- **🔒 Security & Backup Commands** (5 commands)
+- **🛡️ Enhanced Security Features** (4 commands)
+- **🚀 Enterprise AAA Grade Features** (12 commands)
+- **⚙️ Advanced Operations** (8 commands)
+- **📈 Enterprise & Scaling Features** (9 commands)
+- **🕵️ Intelligence Gathering Features** (3 commands)
+- **👥 User Management Commands** (3 commands)
+- **🌐 Network Configuration** (2 commands)
+- **🔧 Optional Features** (4 commands)
+- **⚡ System Optimization Commands** (7 commands)
+- **🤖 JARVIS Centralized System** (3 commands)
+- **🎛️ Interactive & Configuration** (3 commands)
+
+---
+
+### **🔧 Core System Commands**
+
+Essential system operation and management:
+
+```bash
+# Installation & Setup
+./novashield.sh --install              # Install NovaShield and dependencies (requires user creation)
+
+# Service Management
+./novashield.sh --start                # Start all services (monitors + web dashboard)
+./novashield.sh --stop                 # Stop all running services
+./novashield.sh --status               # Show service status and information
+./novashield.sh --restart-monitors     # Restart all monitoring processes
+
+# System Validation
+./novashield.sh --validate             # Validate comprehensive stability fixes are properly implemented
+```
+
+---
+
+### **🌐 Web Dashboard Commands**
+
+Web interface management:
+
+```bash
+# Dashboard Control
+./novashield.sh --web-start            # Start only the web dashboard server
+./novashield.sh --web-stop             # Stop the web dashboard server
+```
+
+**Web Dashboard Access:** https://127.0.0.1:8765 (HTTPS-only)
+
+---
+
+### **🔒 Security & Backup Commands**
+
+Data protection and system maintenance:
+
+```bash
+# Backup & Recovery
+./novashield.sh --backup               # Create encrypted backup snapshot
+./novashield.sh --version-snapshot     # Create version snapshot (no encryption)
+
+# Encryption/Decryption
+./novashield.sh --encrypt <path>       # Encrypt file or directory
+./novashield.sh --decrypt <file.enc>   # Decrypt file (prompts for output path)
+
+# System Maintenance
+./novashield.sh --maintenance          # Run storage cleanup and system health check
+```
+
+---
+
+### **🛡️ Enhanced Security Features**
+
+Advanced security analysis and hardening:
+
+```bash
+# Threat Detection
+./novashield.sh --enhanced-threat-scan       # Run advanced threat detection and analysis
+
+# Network Security
+./novashield.sh --enhanced-network-scan [target] [type]  
+                                        # Perform enhanced network security scan
+                                        # target: IP/domain (default: localhost)
+                                        # type: basic|comprehensive (default: basic)
+
+# Security Hardening
+./novashield.sh --enhanced-security-hardening  # Apply automated security hardening measures
+
+# Advanced Security Automation Suite ⭐ NEW!
+./novashield.sh --advanced-security-automation [mode] [auto-fix] [format]
+                                        # Run comprehensive automated security suite with JARVIS AI
+                                        # mode: basic|comprehensive|deep (default: comprehensive)
+                                        # auto-fix: true|false (default: false)
+                                        # format: detailed|summary|web (default: detailed)
+
+# Validation
+./novashield.sh --validate-enhanced    # Validate all enhanced security features are working
+```
+
+**Advanced Security Automation Features:**
+- **🦠 Malware & Backdoor Detection**: 11 signature patterns, obfuscation detection
+- **🔍 Comprehensive Leak Detection**: API keys, credentials, PII data scanning
+- **🔬 Multi-Tool Cross-Validation**: 3-tool consensus with confidence scoring
+- **🧠 JARVIS AI Analysis**: Threat assessment and security recommendations
+
+---
+
+### **🚀 Enterprise AAA Grade Features**
+
+Professional-grade enterprise capabilities:
+
+```bash
+# Auto-Fix Systems
+./novashield.sh --enhanced-auto-fix           # Run comprehensive auto-fix system with AI analysis
+
+# Testing & Diagnostics
+./novashield.sh --enhanced-test-automation    # Run full test automation suite with chaos engineering
+./novashield.sh --enhanced-diagnostics        # Run advanced system diagnostics with predictive analysis
+./novashield.sh --comprehensive-debug         # Run comprehensive debugging suite with time-travel debugging
+
+# Security & Hardening
+./novashield.sh --enhanced-hardening          # Apply enterprise security hardening with zero trust
+./novashield.sh --protocol-security-audit     # Audit and secure all protocols with quantum-resistant methods
+
+# AI & Machine Learning
+./novashield.sh --jarvis-advanced-training    # Train advanced JARVIS AI capabilities with federated learning
+./novashield.sh --ai-model-optimization       # Optimize AI models for performance and accuracy
+./novashield.sh --behavioral-analysis-full    # Run comprehensive behavioral analysis with anomaly detection
+
+# System Operations
+./novashield.sh --predictive-maintenance      # Run predictive maintenance analysis with failure prediction
+./novashield.sh --autonomous-operations       # Enable autonomous system operations with self-healing
+./novashield.sh --intelligent-troubleshooting # AI-powered problem resolution with root cause analysis
+./novashield.sh --system-optimization-full    # Run full system optimization suite with ML-based tuning
+./novashield.sh --enterprise-validation       # Run enterprise validation suite with compliance reporting
+```
+
+---
+
+### **⚙️ Advanced Operations**
+
+Specialized operational commands:
+
+```bash
+# Security-Focused Operations
+./novashield.sh --enhanced-auto-fix-security  # Security-focused auto-fix with threat intelligence
+./novashield.sh --enhanced-security-testing   # Advanced security testing with penetration testing
+
+# Performance Operations
+./novashield.sh --enhanced-auto-fix-performance # Performance-focused auto-fix with resource optimization
+./novashield.sh --enhanced-performance-testing  # Performance testing suite with load simulation
+
+# Resilience Testing
+./novashield.sh --enhanced-chaos-testing      # Chaos engineering testing with resilience validation
+
+# Protocol Management
+./novashield.sh --protocol-performance-optimization # Protocol performance tuning with adaptive algorithms
+./novashield.sh --protocol-monitoring-setup   # Setup protocol monitoring with real-time analysis
+./novashield.sh --adaptive-protocols          # Configure adaptive protocols with machine learning
+```
+
+---
+
+### **📈 Enterprise & Scaling Features**
+
+Deployment and scaling capabilities:
+
+```bash
+# Docker Support
+./novashield.sh --docker-support [action]    # Docker integration support
+                                        # actions: check, generate_dockerfile, generate_compose
+./novashield.sh --generate-docker-files      # Generate Dockerfile and docker-compose.yml for deployment
+
+# Plugin System
+./novashield.sh --plugin-system [action]     # Plugin architecture management
+                                        # actions: list, install, run
+./novashield.sh --install-plugin <name>      # Install a new security plugin
+./novashield.sh --run-plugin <name> [args]   # Execute a specific plugin with optional arguments
+
+# Performance & Scaling
+./novashield.sh --performance-optimization [action]  # Performance analysis and optimization
+                                        # actions: analyze, optimize, monitor
+./novashield.sh --scaling-support [action]   # Multi-user and scaling configuration
+                                        # actions: configure_multiuser, cloud_preparation
+
+# Deployment
+./novashield.sh --cloud-deployment           # Prepare complete cloud deployment files (Heroku, AWS, Vercel)
+./novashield.sh --enterprise-setup           # Configure all enterprise features at once
+./novashield.sh --easy-setup                 # Comprehensive setup inspired by Intelligence Gathering Project
+```
+
+---
+
+### **🕵️ Intelligence Gathering Features**
+
+Advanced intelligence and reconnaissance:
+
+```bash
+# Intelligence Scanning
+./novashield.sh --intelligence-scan <target> [type] [depth]  # Run comprehensive intelligence scan
+                                        # types: email, phone, domain, ip, username, comprehensive
+                                        # depth: basic, deep
+
+# Dashboard Management
+./novashield.sh --intelligence-dashboard [action]     # Generate or manage intelligence dashboard
+                                        # actions: generate, start, results
+
+# Business Intelligence
+./novashield.sh --business-intelligence [action]     # Business analytics dashboard
+                                        # actions: dashboard, metrics, analytics, revenue
+```
+
+---
+
+### **👥 User Management**
+
+User account and authentication management:
+
+```bash
+# User Operations
+./novashield.sh --add-user             # Add a new web dashboard user
+./novashield.sh --enable-2fa           # Enable 2FA for a user
+./novashield.sh --reset-auth           # Reset all authentication state
+```
+
+---
+
+### **🌐 Network Configuration**
+
+Network monitoring configuration:
+
+```bash
+# External Network Control
+./novashield.sh --disable-external-checks  # Disable external network monitoring (for restricted environments)
+./novashield.sh --enable-external-checks   # Enable external network monitoring
+```
+
+---
+
+### **🔧 Optional Features**
+
+Opt-in features for enhanced functionality:
+
+```bash
+# Service Management
+./novashield.sh --enable-auto-restart      # Enable automatic restart of crashed services
+./novashield.sh --enable-security-hardening  # Enable enhanced security features
+./novashield.sh --enable-strict-sessions   # Enable strict session validation
+./novashield.sh --enable-web-wrapper       # Enable enhanced web server stability wrapper with restart limiting
+```
+
+**Note:** These features are disabled by default for stable behavior. Enable them as needed for enhanced functionality.
+
+---
+
+### **⚡ System Optimization Commands**
+
+Performance optimization and resource management:
+
+```bash
+# Individual Optimizations
+./novashield.sh --optimize-memory          # Optimize memory usage with leak detection and cache management
+./novashield.sh --optimize-storage         # Clean and optimize storage with compression and archiving
+./novashield.sh --optimize-connections     # Optimize network connections and connection pools
+./novashield.sh --optimize-pids            # Optimize process management and PID files
+./novashield.sh --optimize-apis            # Optimize API performance with caching and monitoring
+
+# Comprehensive Optimization
+./novashield.sh --comprehensive-optimization  # Run all system optimizations (memory, storage, connections, PIDs, APIs)
+
+# Health & Analytics
+./novashield.sh --system-health-check      # Comprehensive system health and resource monitoring
+./novashield.sh --resource-analytics       # Detailed resource usage analytics and recommendations
+```
+
+---
+
+### **🤖 JARVIS Centralized System**
+
+AI-powered centralized control and automation:
+
+```bash
+# Central Control
+./novashield.sh --jarvis-central-control   # Initialize JARVIS central control system connecting all components
+./novashield.sh --jarvis-automation-suite  # Convert all optimizations into JARVIS-managed automations
+./novashield.sh --centralized-system-sync  # Synchronize all components through JARVIS central intelligence
+```
+
+---
+
+### **🎛️ Interactive & Configuration**
+
+User interface and configuration management:
+
+```bash
+# Interactive Interface
+./novashield.sh --menu                 # Show interactive menu
+./novashield.sh --help, -h             # Show comprehensive help message
+
+# Configuration
+# Copy novashield.conf.example to ~/.novashield/novashield.conf to customize
+# optional features permanently. All features default to stable behavior.
+```
+
+---
+
+### **💡 Usage Examples**
+
+**Quick Start:**
+```bash
+./novashield.sh --install                    # First-time setup
+./novashield.sh --start                      # Start everything (stable defaults)
+./novashield.sh --status                     # Check system status
+```
+
+**Security Operations:**
+```bash
+./novashield.sh --advanced-security-automation comprehensive true detailed  # Full security scan with auto-fix
+./novashield.sh --enhanced-threat-scan       # Advanced threat detection
+./novashield.sh --backup                     # Create secure backup
+```
+
+**Performance Optimization:**
+```bash
+./novashield.sh --comprehensive-optimization # Optimize all systems
+./novashield.sh --system-health-check        # Check system health
+./novashield.sh --resource-analytics         # Analyze resource usage
+```
+
+**Enterprise Operations:**
+```bash
+./novashield.sh --enterprise-setup           # Configure enterprise features
+./novashield.sh --jarvis-central-control     # Initialize JARVIS AI control
+./novashield.sh --cloud-deployment           # Prepare cloud deployment
+```
+
+---
+
+### **🔗 Web Dashboard Access**
+
+After starting NovaShield, access the web dashboard at:
+- **URL:** https://127.0.0.1:8765
+- **Security:** HTTPS-only with TLS 1.2+
+- **Features:** Full AI chat, tools, monitoring, and management
+
+---
+
+### **📱 Platform Support**
+
+- **Linux:** Full feature support
+- **Android (Termux):** Optimized for mobile terminal use
+- **Unix-like Systems:** Compatible with most Unix environments
+
+This comprehensive command reference covers all 100+ commands available in NovaShield, organized by functionality for easy navigation and usage.
+
 ---
 
 **Ready for full production deployment and actual use!** 🚀

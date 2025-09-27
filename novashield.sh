@@ -3860,14 +3860,17 @@ advanced_code_quality_scan() {
   
   # Shell script analysis
   if command -v shellcheck >/dev/null 2>&1; then
-    scan_results+="shellcheck_analysis: $(shellcheck -f json "$target_file" 2>/dev/null | head -100)"
+    local shellcheck_result=$(shellcheck -f json "$target_file" 2>/dev/null | head -100 || echo '[]')
+    scan_results="shellcheck_analysis: $shellcheck_result"
+  else
+    scan_results="shellcheck_analysis: 'not_available'"
   fi
   
   # Syntax validation
   if bash -n "$target_file" >/dev/null 2>&1; then
-    scan_results+=", syntax_validation: 'PASS'"
+    scan_results="$scan_results, syntax_validation: 'PASS'"
   else
-    scan_results+=", syntax_validation: 'FAIL'"
+    scan_results="$scan_results, syntax_validation: 'FAIL'"
   fi
   
   # Security pattern analysis
@@ -3884,17 +3887,17 @@ advanced_code_quality_scan() {
   local pattern_matches=0
   for pattern in "${security_patterns[@]}"; do
     if grep -q "$pattern" "$target_file" 2>/dev/null; then
-      ((pattern_matches++))
+      pattern_matches=$((pattern_matches + 1))
     fi
   done
   
-  scan_results+=", security_patterns_found: $pattern_matches"
+  scan_results="$scan_results, security_patterns_found: $pattern_matches"
   
   # Code complexity analysis
   local function_count=$(grep -c "^[a-zA-Z_][a-zA-Z0-9_]*\s*()" "$target_file" 2>/dev/null || echo 0)
   local line_count=$(wc -l < "$target_file" 2>/dev/null || echo 0)
   
-  scan_results+=", complexity: {functions: $function_count, lines: $line_count}"
+  scan_results="$scan_results, complexity: {functions: $function_count, lines: $line_count}"
   
   echo "{$scan_results}"
 }
