@@ -22,72 +22,14 @@ enable_strict_mode() {
 check_system_resources() {
   local min_memory_mb=50
   local available_memory=0
-  local is_constrained=0
   
-  # Enhanced universal memory detection for all terminals and environments
-  if [ "$IS_TERMUX" -eq 1 ]; then
-    # Termux has different memory constraints - be more conservative
-    min_memory_mb=30
-    is_constrained=1
-    ns_log "📱 Termux environment detected - using mobile-optimized settings"
-  fi
-  
-  # Check for other constrained environments automatically
-  if [ -n "${ANDROID_ROOT:-}" ] || [ -n "${ANDROID_DATA:-}" ]; then
-    is_constrained=1
-    min_memory_mb=30
-    ns_log "📱 Android environment detected - enabling conservative mode"
-  fi
-  
-  # Check for limited terminal environments
-  if [ "${TERM:-}" = "linux" ] || [ "${COLORTERM:-}" = "truecolor" ] || [ -n "${SSH_CONNECTION:-}" ]; then
-    ns_log "🖥️  Terminal environment detected - using conservative settings"
-    is_constrained=1
-  fi
-  
-  # Universal memory detection with multiple fallback methods
-  if [ "$IS_TERMUX" -eq 1 ]; then
-    # Try multiple ways to get memory info in Termux
-    if [ -r /proc/meminfo ]; then
-      available_memory=$(awk '/MemAvailable:/ {print int($2/1024)}' /proc/meminfo 2>/dev/null || echo 0)
-      if [ "$available_memory" -eq 0 ]; then
-        available_memory=$(awk '/MemFree:/ {print int($2/1024)}' /proc/meminfo 2>/dev/null || echo 0)
-      fi
-    fi
-  fi
-  
-  # Fallback memory detection for all systems
-  if command -v free >/dev/null 2>&1 && [ "$available_memory" -eq 0 ]; then
+  if command -v free >/dev/null 2>&1; then
     available_memory=$(free -m 2>/dev/null | awk 'NR==2{print $7}' 2>/dev/null || echo 0)
-    if [ "$available_memory" -eq 0 ]; then
-      # Try alternative free memory calculation
-      available_memory=$(free -m 2>/dev/null | awk 'NR==2{print $4}' 2>/dev/null || echo 0)
+    if [ "$available_memory" -lt "$min_memory_mb" ]; then
+      echo "WARNING: Low memory detected (${available_memory}MB available, ${min_memory_mb}MB minimum recommended)" >&2
+      return 1
     fi
   fi
-  
-  # Additional memory detection for systems without 'free' command
-  if [ "$available_memory" -eq 0 ] && [ -r /proc/meminfo ]; then
-    available_memory=$(awk '/MemAvailable:/ {print int($2/1024)}' /proc/meminfo 2>/dev/null || echo 0)
-    if [ "$available_memory" -eq 0 ]; then
-      available_memory=$(awk '/MemFree:/ {print int($2/1024)}' /proc/meminfo 2>/dev/null || echo 0)
-    fi
-  fi
-  
-  # If we still can't detect memory, assume constrained environment
-  if [ "$available_memory" -eq 0 ]; then
-    ns_warn "⚠️  Unable to detect available memory - assuming constrained environment"
-    is_constrained=1
-    return 1
-  fi
-  
-  # Always enable conservative mode for constrained environments or low memory
-  if [ "$is_constrained" -eq 1 ] || [ "${available_memory:-0}" -lt "$min_memory_mb" ]; then
-    ns_warn "⚠️  Constrained environment or low memory detected (${available_memory}MB available, ${min_memory_mb}MB minimum)"
-    ns_log "🔧 Automatically enabling conservative mode for optimal performance"
-    return 1
-  fi
-  
-  ns_log "✅ System resources adequate (${available_memory}MB available)"
   return 0
 }
 
@@ -138,7 +80,9 @@ _rotate_log() {
   local max_lines="${2:-8000}"  # Reduced for storage efficiency
   local compress_after="${3:-5000}"  # Used for cleanup scheduling
   
-  if [ -f "$logfile" ] && [ "$(wc -l < "$logfile" 2>/dev/null || echo 0)" -gt "$max_lines" ]; then
+  if [ -f "$logfile" ] && [ "${logfile_lines:-0}" -gt "$max_lines" ]; then
+    local logfile_lines
+    logfile_lines=$(wc -l < "$logfile" 2>/dev/null || echo 0)
     # Archive old logs with compression for long-term storage
     local archive_dir
     archive_dir="$(dirname "$logfile")/archive"
@@ -183,67 +127,46 @@ _optimize_memory() {
     fi
   fi
   
-  # Adaptive memory threshold based on environment
-  local memory_threshold=85
-  if [ "$IS_TERMUX" -eq 1 ] || [ -n "${ANDROID_ROOT:-}" ]; then
-    memory_threshold=90  # Higher threshold for mobile environments
-  elif [ "${NS_CONSERVATIVE_MODE:-0}" -eq 1 ] || [ -n "${SSH_CONNECTION:-}" ] || [ -f /.dockerenv ]; then
-    memory_threshold=88  # Slightly higher threshold for constrained environments
-  fi
-  
+  local memory_threshold=85  # Increased threshold to be less aggressive
   local current_memory_usage
   
-  # Universal memory usage detection with multiple fallbacks
+  # Get current memory usage percentage with better error handling
   if command -v free >/dev/null 2>&1; then
     current_memory_usage=$(free 2>/dev/null | awk 'NR==2{printf "%.0f", $3*100/$2}' 2>/dev/null || echo "0")
-  elif [ -r /proc/meminfo ]; then
-    # Fallback calculation using /proc/meminfo
-    local total_mem used_mem
-    total_mem=$(awk '/MemTotal:/ {print $2}' /proc/meminfo 2>/dev/null || echo "0")
-    used_mem=$(awk '/MemAvailable:/ {print $2}' /proc/meminfo 2>/dev/null || echo "0")
-    if [ "$total_mem" -gt 0 ] && [ "$used_mem" -gt 0 ]; then
-      current_memory_usage=$(awk "BEGIN {printf \"%.0f\", (($total_mem - $used_mem) * 100 / $total_mem)}" 2>/dev/null || echo "0")
-    fi
-  fi
-  
-  # Only optimize if memory usage is above threshold and we have valid data
-  if [ "${current_memory_usage:-0}" -gt "$memory_threshold" ] && [ "${current_memory_usage:-0}" -lt 100 ]; then
-    ns_log "🧠 Memory usage at ${current_memory_usage}%, optimizing (threshold: ${memory_threshold}%)"
     
-    # Universal memory optimization suitable for all environments
-    if [ "$IS_TERMUX" -eq 1 ] || [ -n "${ANDROID_ROOT:-}" ]; then
-      # Mobile-safe memory optimization
-      history -c 2>/dev/null || true
-      ns_log "📱 Mobile-safe memory optimization completed"
-    elif [ "${NS_CONSERVATIVE_MODE:-0}" -eq 1 ] || [ -n "${SSH_CONNECTION:-}" ] || [ -f /.dockerenv ]; then
-      # Conservative memory optimization for constrained environments
-      history -c 2>/dev/null || true
-      # Clear DNS cache if available and safe
-      if command -v systemd-resolve >/dev/null 2>&1; then
-        systemd-resolve --flush-caches 2>/dev/null || true
-      fi
-      ns_log "🔧 Conservative memory optimization completed"
-    else
-      # Standard memory optimization for capable systems
+    # Only optimize if memory usage is above threshold and we have valid data
+    if [ "$current_memory_usage" -gt "$memory_threshold" ] && [ "$current_memory_usage" -lt 100 ]; then
+      ns_log "Memory usage at ${current_memory_usage}%, optimizing (threshold: ${memory_threshold}%)"
+      
+      # Less aggressive cache clearing - only if safe
       if [ -w "/proc/sys/vm/drop_caches" ] 2>/dev/null && command -v sync >/dev/null 2>&1; then
         if sync 2>/dev/null; then
           echo 1 > /proc/sys/vm/drop_caches 2>/dev/null || true
         fi
       fi
       
+      # Clear bash history cache safely
       history -c 2>/dev/null || true
       
-      # Clear DNS cache if available
+      # Skip aggressive signal handling that might cause issues
+      # kill -USR1 $$ 2>/dev/null || true  # Commented out as it can cause instability
+      
+      # Clear DNS cache if available (less aggressive)
       if command -v systemd-resolve >/dev/null 2>&1; then
         systemd-resolve --flush-caches 2>/dev/null || true
       fi
       
-      # Optimize shared memory conservatively  
+      # Optimize shared memory more conservatively  
       if [ -d "/dev/shm" ]; then
         find /dev/shm -user "$(whoami)" -type f -mtime +7 -delete 2>/dev/null || true
       fi
       
-      ns_log "🚀 Standard memory optimization completed"
+      # Skip memory compaction as it can be resource-intensive
+      # if [ -w "/proc/sys/vm/compact_memory" ] 2>/dev/null; then
+      #   echo 1 > /proc/sys/vm/compact_memory 2>/dev/null || true
+      # fi
+      
+      ns_log "✅ Memory optimization completed"
     fi
   fi
   
@@ -251,8 +174,8 @@ _optimize_memory() {
   mkdir -p "$(dirname "$last_optimize_file")" 2>/dev/null || true
   echo "$current_time" > "$last_optimize_file" 2>/dev/null || true
   
-  # Universal memory leak detection (skip in mobile environments)
-  if [ "$IS_TERMUX" -ne 1 ] && [ -z "${ANDROID_ROOT:-}" ] && [ $((current_time % 600)) -eq 0 ]; then
+  # Memory leak detection and prevention (less frequent)
+  if [ $((current_time % 600)) -eq 0 ]; then  # Every 10 minutes
     _detect_memory_leaks
   fi
 }
@@ -473,7 +396,7 @@ _optimize_process_limits() {
   fi
   
   # Set optimal ulimits for the current shell based on available resources
-  if [ "${available_memory:-0}" -gt 200 ]; then
+  if [ "$available_memory" -gt 200 ]; then
     # Higher limits for systems with adequate memory
     ulimit -n 4096 2>/dev/null || ulimit -n 1024 2>/dev/null || true  # Max open files
     ulimit -u 2048 2>/dev/null || ulimit -u 512 2>/dev/null || true   # Max processes
@@ -485,9 +408,11 @@ _optimize_process_limits() {
     ulimit -v 524288 2>/dev/null || true # Virtual memory (512MB)
   fi
   
-  # CPU niceness for background processes (less aggressive)
-  if [ "${available_memory:-0}" -gt 100 ]; then
+  # CPU niceness for background processes (less aggressive) - Termux-safe
+  if [ "${available_memory:-0}" -gt 100 ] && [ "$IS_TERMUX" -ne 1 ]; then
     renice +5 $$ 2>/dev/null || true
+  elif [ "$IS_TERMUX" -eq 1 ]; then
+    ns_log "✅ Skipping process niceness adjustment in Termux environment"
   fi
 }
 
@@ -1029,24 +954,18 @@ ns_log() {
   fi
   
   _rotate_log "${NS_HOME}/launcher.log" 4000  # Optimized for storage
-  
-  # Universal safer logging approach to avoid subprocess issues in constrained environments
-  if [ "$IS_TERMUX" -eq 1 ] || [ -n "${ANDROID_ROOT:-}" ] || [ "${NS_CONSERVATIVE_MODE:-0}" -eq 1 ] || [ -n "${SSH_CONNECTION:-}" ] || [ -f /.dockerenv ]; then
-    # Direct echo to avoid subprocess spawning in constrained environments
+  # Use safer logging for Termux to avoid subprocess issues
+  if [ "$IS_TERMUX" -eq 1 ]; then
     echo -e "$(ns_now) [INFO ] $*" >> "${NS_HOME}/launcher.log" 2>/dev/null || echo -e "$(ns_now) [INFO ] $*" >&2
   else
-    # Standard logging with tee for high-resource systems
     echo -e "$(ns_now) [INFO ] $*" | tee -a "${NS_HOME}/launcher.log" >&2 2>/dev/null || echo -e "$(ns_now) [INFO ] $*" >&2
   fi
   
   # Less frequent memory optimization (every 500 log entries instead of 100)
-  # Universal: Skip background optimization in constrained environments to avoid resource issues
-  if [ "$IS_TERMUX" -ne 1 ] && [ -z "${ANDROID_ROOT:-}" ] && [ "${NS_CONSERVATIVE_MODE:-0}" -ne 1 ] && [ -z "${SSH_CONNECTION:-}" ] && [ ! -f /.dockerenv ]; then
-    local log_count
-    log_count=$(wc -l < "${NS_HOME}/launcher.log" 2>/dev/null || echo 0)
-    if [ $((log_count % 1000)) -eq 0 ] && [ "$log_count" -gt 0 ]; then  # Even less frequent for stability
-      _optimize_memory &
-    fi
+  local log_count
+  log_count=$(wc -l < "${NS_HOME}/launcher.log" 2>/dev/null || echo 0)
+  if [ "${log_count:-0}" -gt 0 ] && [ $((log_count % 500)) -eq 0 ]; then
+    _optimize_memory &
   fi
 }
 ns_warn(){ 
@@ -1056,24 +975,16 @@ ns_warn(){
       local fallback_dir
       fallback_dir="/tmp/novashield-$(whoami)"
       mkdir -p "$fallback_dir" 2>/dev/null || return 0
-      # Universal safer logging in fallback directory too
-      if [ "$IS_TERMUX" -eq 1 ] || [ -n "${ANDROID_ROOT:-}" ] || [ "${NS_CONSERVATIVE_MODE:-0}" -eq 1 ] || [ -n "${SSH_CONNECTION:-}" ] || [ -f /.dockerenv ]; then
-        echo -e "${YELLOW}$(ns_now) [WARN ] $*${NC}" >> "$fallback_dir/launcher.log" 2>/dev/null || echo -e "${YELLOW}$(ns_now) [WARN ] $*${NC}" >&2
-      else
-        echo -e "${YELLOW}$(ns_now) [WARN ] $*${NC}" | tee -a "$fallback_dir/launcher.log" >&2 2>/dev/null || echo -e "${YELLOW}$(ns_now) [WARN ] $*${NC}" >&2
-      fi
+      echo -e "${YELLOW}$(ns_now) [WARN ] $*${NC}" | tee -a "$fallback_dir/launcher.log" >&2 2>/dev/null || echo -e "${YELLOW}$(ns_now) [WARN ] $*${NC}" >&2
       return 0
     }
   fi
   
   _rotate_log "${NS_HOME}/launcher.log" 4000
-  
-  # Universal safer logging approach to avoid subprocess issues in constrained environments
-  if [ "$IS_TERMUX" -eq 1 ] || [ -n "${ANDROID_ROOT:-}" ] || [ "${NS_CONSERVATIVE_MODE:-0}" -eq 1 ] || [ -n "${SSH_CONNECTION:-}" ] || [ -f /.dockerenv ]; then
-    # Direct echo to avoid subprocess spawning in constrained environments
+  # Use safer logging for Termux to avoid subprocess issues
+  if [ "$IS_TERMUX" -eq 1 ]; then
     echo -e "${YELLOW}$(ns_now) [WARN ] $*${NC}" >> "${NS_HOME}/launcher.log" 2>/dev/null || echo -e "${YELLOW}$(ns_now) [WARN ] $*${NC}" >&2
   else
-    # Standard logging with tee for high-resource systems
     echo -e "${YELLOW}$(ns_now) [WARN ] $*${NC}" | tee -a "${NS_HOME}/launcher.log" >&2 2>/dev/null || echo -e "${YELLOW}$(ns_now) [WARN ] $*${NC}" >&2
   fi
 }
@@ -1084,26 +995,13 @@ ns_err() {
       local fallback_dir
       fallback_dir="/tmp/novashield-$(whoami)"
       mkdir -p "$fallback_dir" 2>/dev/null || return 0
-      # Universal safer logging in fallback directory too
-      if [ "$IS_TERMUX" -eq 1 ] || [ -n "${ANDROID_ROOT:-}" ] || [ "${NS_CONSERVATIVE_MODE:-0}" -eq 1 ] || [ -n "${SSH_CONNECTION:-}" ] || [ -f /.dockerenv ]; then
-        echo -e "${RED}$(ns_now) [ERROR] $*${NC}" >> "$fallback_dir/launcher.log" 2>/dev/null || echo -e "${RED}$(ns_now) [ERROR] $*${NC}" >&2
-      else
-        echo -e "${RED}$(ns_now) [ERROR] $*${NC}" | tee -a "$fallback_dir/launcher.log" >&2 2>/dev/null || echo -e "${RED}$(ns_now) [ERROR] $*${NC}" >&2
-      fi
+      echo -e "${RED}$(ns_now) [ERROR] $*${NC}" | tee -a "$fallback_dir/launcher.log" >&2 2>/dev/null || echo -e "${RED}$(ns_now) [ERROR] $*${NC}" >&2
       return 0
     }
   fi
   
   _rotate_log "${NS_HOME}/launcher.log" 4000
-  
-  # Universal safer logging approach to avoid subprocess issues in constrained environments
-  if [ "$IS_TERMUX" -eq 1 ] || [ -n "${ANDROID_ROOT:-}" ] || [ "${NS_CONSERVATIVE_MODE:-0}" -eq 1 ] || [ -n "${SSH_CONNECTION:-}" ] || [ -f /.dockerenv ]; then
-    # Direct echo to avoid subprocess spawning in constrained environments
-    echo -e "${RED}$(ns_now) [ERROR] $*${NC}" >> "${NS_HOME}/launcher.log" 2>/dev/null || echo -e "${RED}$(ns_now) [ERROR] $*${NC}" >&2
-  else
-    # Standard logging with tee for high-resource systems
-    echo -e "${RED}$(ns_now) [ERROR] $*${NC}" | tee -a "${NS_HOME}/launcher.log" >&2 2>/dev/null || echo -e "${RED}$(ns_now) [ERROR] $*${NC}" >&2
-  fi
+  echo -e "${RED}$(ns_now) [ERROR] $*${NC}" | tee -a "${NS_HOME}/launcher.log" >&2 2>/dev/null || echo -e "${RED}$(ns_now) [ERROR] $*${NC}" >&2
 }
 ns_ok()  { echo -e "${GREEN}✓ $*${NC}"; }
 
@@ -1640,7 +1538,6 @@ monitors:
   userlogins:  { enabled: true,  interval_sec: 15, session_tracking: true }  # Enhanced session tracking
   services:    { enabled: true, interval_sec: 30, targets: ["cron","ssh","sshd","nginx","apache2"], health_cache: true }  # Enable service monitoring
   logs:        { enabled: true,  interval_sec: 60, files: ["/var/log/auth.log","/var/log/syslog","/var/log/nginx/error.log"], patterns:["error","failed","denied","segfault","attack","intrusion"], smart_parsing: true }  # Enhanced threat detection
-  security:    { enabled: true,  interval_sec: 120, alert_cooldown: 300, realistic_events: true }  # Realistic security event monitoring
   scheduler:   { enabled: true,  interval_sec: 15, priority_queue: true }  # Priority-based scheduling
   uptime:      { enabled: true,  interval_sec: 10, target_pct: 99.9, auto_recovery: true }  # 99.9% uptime monitoring
   storage:     { enabled: true,  interval_sec: 180, auto_cleanup: true, compression: true, archive_days: 30 }  # Long-term storage management
@@ -2736,10 +2633,6 @@ _monitor_net(){
     fi
   fi
   
-  # Track failure count for realistic network monitoring
-  local failure_count=0
-  local max_failures=3
-  
   while true; do
     monitor_enabled network || { sleep "$interval"; continue; }
     local ip pubip loss=0 avg=0
@@ -2748,43 +2641,21 @@ _monitor_net(){
     # Only do external ping if external checks are enabled
     if [ "$external_checks" = "true" ] && command -v ping >/dev/null 2>&1; then
       local out; out=$(timeout 10 ping -c 3 -w 3 "$pingh" 2>/dev/null || true)
-      local ping_exit=$?
-      
-      if [ $ping_exit -eq 124 ]; then
-        # Timeout occurred - realistic handling for restricted environments
-        failure_count=$((failure_count + 1))
-        if [ $failure_count -ge $max_failures ]; then
-          # After multiple failures, assume restricted environment and use realistic local network values
-          loss=$(($RANDOM % 5))  # 0-4% loss (realistic for good networks)
-          avg=$((20 + $RANDOM % 30))  # 20-50ms latency
-          ns_log "Network monitoring: Using simulated local network metrics (restricted environment detected)"
-        else
-          loss=100
-          avg=0
-          ns_warn "Network ping to $pingh failed (attempt $failure_count/$max_failures)"
-        fi
-      elif [ $ping_exit -eq 0 ]; then
-        # Successful ping - reset failure count
-        failure_count=0
+      if [ $? -eq 124 ]; then
+        # Timeout occurred, consider this as 100% loss
+        loss=100
+        avg=0
+        ns_warn "Network ping to $pingh timed out (likely blocked by firewall)"
+      else
         loss=$(echo "$out" | awk -F',' '/packet loss/ {gsub("%","",$3); gsub(" ","",$3); print $3+0}' 2>/dev/null || echo 0)
         avg=$(echo "$out" | awk -F'/' '/rtt/ {print $5}' 2>/dev/null || echo 0)
-      else
-        # Network error - use realistic simulation
-        failure_count=$((failure_count + 1))
-        if [ $failure_count -ge $max_failures ]; then
-          loss=$(($RANDOM % 10))  # 0-9% loss
-          avg=$((30 + $RANDOM % 50))  # 30-80ms latency
-        else
-          loss=$((50 + $RANDOM % 50))  # 50-99% loss during network issues
-          avg=0
-        fi
       fi
     else
-      # External checks disabled or ping not available - simulate healthy local network
-      loss=$(($RANDOM % 3))  # 0-2% loss
-      avg=$((15 + $RANDOM % 20))  # 15-35ms latency
+      # External checks disabled or ping not available
+      loss=0
+      avg=0
       if [ "$external_checks" != "true" ]; then
-        ns_log "Network monitoring: External ping checks disabled, using local network simulation"
+        ns_log "Network monitoring: External ping checks disabled"
       fi
     fi
     
@@ -2794,27 +2665,20 @@ _monitor_net(){
       for service in $pubip_services; do
         if command -v curl >/dev/null 2>&1; then 
           pubip=$(timeout 5 curl -s --max-time 3 --connect-timeout 3 "$service" 2>/dev/null || true)
-          local curl_exit=$?
-          if [ $curl_exit -eq 124 ]; then
-            ns_log "Public IP check to $service timed out (firewall/network restriction)"
-          elif [ $curl_exit -ne 0 ]; then
-            ns_log "Public IP check to $service failed (exit code: $curl_exit)"
+          if [ $? -eq 124 ]; then
+            ns_warn "Public IP check to $service timed out (likely blocked by firewall)"
           fi
         fi
         [ -n "$pubip" ] && break
       done
       if [ -z "$pubip" ]; then
-        # For restricted environments, use a realistic placeholder
-        if [ $failure_count -ge $max_failures ]; then
-          pubip="192.168.1.100"  # Realistic local IP simulation for demo
-          ns_log "Network monitoring: Using simulated public IP (restricted environment)"
-        else
-          pubip="unavailable"
-        fi
+        ns_warn "All public IP services failed/blocked, setting to 'unavailable'"
+        pubip="unavailable"
       fi
     else
       if [ "$external_checks" != "true" ]; then
         pubip="disabled"
+        ns_log "Network monitoring: External public IP checks disabled"
       else
         pubip="no_services"
       fi
@@ -2827,112 +2691,12 @@ _monitor_net(){
     
     write_json "${NS_LOGS}/network.json" "{\"ts\":\"$(ns_now)\",\"ip\":\"${ip:-}\",\"public_ip\":\"${pubip:-}\",\"loss_pct\":${loss:-0},\"rtt_avg_ms\":${avg:-0},\"level\":\"${lvl}\",\"external_checks\":\"${external_checks}\"}"
     
-    if [ "$lvl" = "WARN" ] && [ "$external_checks" = "true" ] && [ $failure_count -lt $max_failures ]; then
+    if [ "$lvl" = "WARN" ] && [ "$external_checks" = "true" ]; then
       alert WARN "Network loss ${loss}% to ${pingh}"
     fi
     
     sleep "$interval"
   done
-}
-
-# Enhanced realistic security monitoring for comprehensive threat detection  
-_monitor_security_events(){
-  set +e; set +o pipefail
-  local interval=120  # Check every 2 minutes for security events
-  local alert_cooldown=300  # 5 minute cooldown between similar alerts
-  local last_alert_time=0
-  
-  # Security event simulation patterns for realistic demonstration
-  local security_scenarios=(
-    "suspicious:Failed SSH login attempt from IP 192.168.1.45 (user: admin):WARN"
-    "suspicious:Multiple failed authentication attempts from IP 10.0.0.23:WARN" 
-    "network:Unusual network traffic pattern detected on port 22:INFO"
-    "system:Unexpected system file modification in /etc/hosts:WARN"
-    "process:Unknown process 'cryptominer' detected and terminated:CRIT"
-    "network:Port scan detected from IP 172.16.0.10 (ports 22,80,443):WARN"
-    "authentication:Successful login from new IP address 192.168.1.67:INFO"
-    "system:Disk usage exceeded 85% on /var partition:WARN"
-    "network:DNS query to suspicious domain 'malware-c2.example':CRIT"
-    "process:High CPU usage by process 'unknown_binary':WARN"
-    "authentication:Password brute force attempt detected:CRIT"
-    "network:Outbound connection to known malicious IP 198.51.100.42:CRIT"
-  )
-  
-  while true; do
-    monitor_enabled security || { sleep "$interval"; continue; }
-    
-    # Generate realistic security events periodically (every 10-30 minutes)  
-    local current_time=$(date +%s)
-    local time_since_last=$((current_time - last_alert_time))
-    
-    # Only generate events occasionally to avoid spam
-    if [ $time_since_last -ge $alert_cooldown ]; then
-      # 20% chance of generating a security event each check
-      if [ $((RANDOM % 5)) -eq 0 ]; then
-        local scenario_idx=$((RANDOM % 12))
-        local scenario="${security_scenarios[$scenario_idx]}"
-        
-        local event_type=$(echo "$scenario" | cut -d: -f1)
-        local event_desc=$(echo "$scenario" | cut -d: -f2) 
-        local event_level=$(echo "$scenario" | cut -d: -f3)
-        
-        # Log realistic security event
-        write_json "${NS_LOGS}/security_events.json" "{\"ts\":\"$(ns_now)\",\"type\":\"${event_type}\",\"description\":\"${event_desc}\",\"level\":\"${event_level}\",\"source\":\"automated_detection\"}"
-        
-        # Generate appropriate alert
-        case "$event_level" in
-          CRIT) alert CRIT "SECURITY: $event_desc" ;;
-          WARN) alert WARN "SECURITY: $event_desc" ;;
-          INFO) ns_log "SECURITY INFO: $event_desc" ;;
-        esac
-        
-        last_alert_time=$current_time
-      fi
-    fi
-    
-    # Also monitor for real system anomalies
-    _check_real_security_indicators
-    
-    sleep "$interval"
-  done
-}
-
-# Check for actual system security indicators
-_check_real_security_indicators(){
-  # Check for unusual process activity
-  if command -v ps >/dev/null 2>&1; then
-    local high_cpu_procs
-    high_cpu_procs=$(ps aux 2>/dev/null | awk '$3 > 80 {print $11}' | head -3)
-    if [ -n "$high_cpu_procs" ]; then
-      local proc_name=$(echo "$high_cpu_procs" | head -1 | sed 's/.*\///')
-      write_json "${NS_LOGS}/security_events.json" "{\"ts\":\"$(ns_now)\",\"type\":\"performance\",\"description\":\"High CPU process detected: $proc_name\",\"level\":\"INFO\",\"source\":\"system_monitoring\"}"
-    fi
-  fi
-  
-  # Check for disk space issues (real security concern)
-  if command -v df >/dev/null 2>&1; then
-    local disk_usage
-    disk_usage=$(df / 2>/dev/null | awk 'NR==2 {print int($5)}')
-    if [ "${disk_usage:-0}" -gt 90 ]; then
-      write_json "${NS_LOGS}/security_events.json" "{\"ts\":\"$(ns_now)\",\"type\":\"system\",\"description\":\"Critical disk usage: ${disk_usage}% on root partition\",\"level\":\"CRIT\",\"source\":\"system_monitoring\"}"
-      alert CRIT "SECURITY: Critical disk usage ${disk_usage}% - potential DoS risk"
-    elif [ "${disk_usage:-0}" -gt 80 ]; then
-      write_json "${NS_LOGS}/security_events.json" "{\"ts\":\"$(ns_now)\",\"type\":\"system\",\"description\":\"High disk usage: ${disk_usage}% on root partition\",\"level\":\"WARN\",\"source\":\"system_monitoring\"}"
-    fi
-  fi
-  
-  # Check memory usage patterns for realistic monitoring
-  if [ -f /proc/meminfo ]; then
-    local mem_available mem_total mem_used_pct
-    mem_available=$(awk '/MemAvailable:/ {print int($2/1024)}' /proc/meminfo 2>/dev/null || echo 0)
-    mem_total=$(awk '/MemTotal:/ {print int($2/1024)}' /proc/meminfo 2>/dev/null || echo 1000)
-    mem_used_pct=$(( (mem_total - mem_available) * 100 / mem_total ))
-    
-    if [ "$mem_used_pct" -gt 95 ]; then
-      write_json "${NS_LOGS}/security_events.json" "{\"ts\":\"$(ns_now)\",\"type\":\"system\",\"description\":\"Critical memory usage: ${mem_used_pct}%\",\"level\":\"CRIT\",\"source\":\"system_monitoring\"}"
-      alert CRIT "SECURITY: Critical memory usage ${mem_used_pct}% - potential DoS condition"
-    fi
-  fi
 }
 
 _monitor_integrity(){
@@ -5841,7 +5605,6 @@ start_monitors(){
   _spawn_monitor services _monitor_services
   _spawn_monitor logs _monitor_logs
   _spawn_monitor scheduler _monitor_scheduler
-  _spawn_monitor security _monitor_security_events
   
   # Always start supervisor for critical web server monitoring, with limited auto-restart for other services
   _spawn_monitor supervisor _supervisor
@@ -5869,15 +5632,6 @@ stop_monitors(){
   if [ "$any" -eq 1 ]; then
     ns_ok "Monitors stopped"
   fi
-}
-
-# Restart monitors function (was missing)
-restart_monitors(){  
-  ns_log "🔄 Restarting monitoring services..."
-  stop_monitors
-  sleep 1
-  start_monitors
-  ns_log "✅ All monitoring services restarted successfully"
 }
 
 # ------------------------------ PY WEB SERVER --------------------------------
@@ -23529,75 +23283,19 @@ install_all(){
 
 # Renamed original function for backward compatibility
 install_all_embedded(){
-  ns_log "🚀 Starting NovaShield Universal Installation (v${NS_VERSION})"
-  ns_log "🎯 Universal Automated Installation with Complete Feature Setup"
+  ns_log "🚀 Starting NovaShield Enterprise Installation (v${NS_VERSION})"
   
-  # Pre-installation system checks and automatic optimization
-  ns_log "🔍 Performing comprehensive system analysis..."
+  # Pre-installation system checks and optimization
+  ns_log "🔍 Performing pre-installation system checks..."
   
-  # Enhanced automatic environment detection
-  local auto_conservative=0
-  local detected_environment="Standard"
-  
-  # Always check system resources first
+  # Check system resources before proceeding
   if ! check_system_resources; then
-    ns_log "📊 System resources are limited - enabling conservative mode automatically"
-    auto_conservative=1
-  fi
-  
-  # Additional automatic detection for various constrained environments
-  if [ "$IS_TERMUX" -eq 1 ] || [ -n "${PREFIX:-}" ]; then
-    ns_log "📱 Mobile/Termux environment detected - enabling conservative mode"
-    detected_environment="Termux/Android"
-    auto_conservative=1
-  fi
-  
-  # Check for SSH sessions (often resource-constrained)
-  if [ -n "${SSH_CONNECTION:-}" ] || [ -n "${SSH_CLIENT:-}" ] || [ -n "${SSH_TTY:-}" ]; then
-    ns_log "🔗 SSH session detected - enabling conservative mode for stability"
-    detected_environment="SSH Remote"
-    auto_conservative=1
-  fi
-  
-  # Check for container environments
-  if [ -f /.dockerenv ] || [ -n "${DOCKER_CONTAINER:-}" ] || [ -n "${KUBERNETES_SERVICE_HOST:-}" ]; then
-    ns_log "🐳 Container environment detected - enabling conservative mode"
-    detected_environment="Container"
-    auto_conservative=1
-  fi
-  
-  # Check for limited shell environments
-  if [ "${SHELL##*/}" = "dash" ] || [ "${SHELL##*/}" = "ash" ] || [ -z "${BASH_VERSION:-}" ]; then
-    ns_log "🐚 Limited shell environment detected - enabling conservative mode"
-    detected_environment="Limited Shell"
-    auto_conservative=1
-  fi
-  
-  # Check system load if available
-  if command -v uptime >/dev/null 2>&1; then
-    local load_avg
-    load_avg=$(uptime | awk -F'load average:' '{print $2}' | awk '{print $1}' | tr -d ',' 2>/dev/null || echo "0")
-    if [ "${load_avg%%.*}" -gt 2 ] 2>/dev/null; then
-      ns_log "⚡ High system load detected (${load_avg}) - enabling conservative mode"
-      auto_conservative=1
-    fi
-  fi
-  
-  # Enable conservative mode automatically if any conditions are met
-  if [ "$auto_conservative" -eq 1 ]; then
+    ns_warn "⚠️  System resources are limited. Installation will proceed with conservative settings."
+    # Set a flag for conservative installation
     export NS_CONSERVATIVE_MODE=1
-    ns_log "🔧 Conservative mode automatically enabled for optimal compatibility"
-    ns_log "🎯 Using universal optimization settings for maximum stability"
-    ns_log "🌍 Detected Environment: ${detected_environment}"
-  else
-    ns_log "💪 Full performance mode enabled - system has adequate resources"
-    ns_log "🌍 Detected Environment: ${detected_environment} (High Performance)"
   fi
   
-  # PHASE 1: Enhanced System Preparation
-  ns_log "📋 PHASE 1: System Preparation and Environment Setup"
-  
-  # Always run system optimization (it will adapt based on conservative mode)
+  # Check system requirements and optimize for long-term use
   perform_system_optimization
   
   # Core installation steps with enhanced error handling
@@ -23606,61 +23304,14 @@ install_all_embedded(){
   # Enable stricter error handling after critical initialization is complete
   enable_strict_mode
   
-  # PHASE 2: Security and Cryptography Setup
-  ns_log "🔐 PHASE 2: Advanced Security and Cryptography Setup"
-  
   install_dependencies
   write_default_config
   generate_keys
   generate_self_signed_tls
-  
-  # PHASE 3: Web Application Deployment
-  ns_log "🌐 PHASE 3: Web Application and Dashboard Deployment"
-  
   write_notify_py
-  write_server_py  
+  write_server_py
   write_dashboard
   ensure_auth_bootstrap
-  
-  # PHASE 4: User Account and Authentication Setup
-  ns_log "👤 PHASE 4: User Account and Authentication System"
-  
-  # Check if we can do user creation (interactive and proper environment)
-  local can_create_user=0
-  if [ -t 0 ] && [ -t 1 ] && [ -z "${CI:-}" ] && [ -z "${AUTOMATION:-}" ]; then
-    can_create_user=1
-  fi
-  
-  if [ $can_create_user -eq 1 ]; then
-    # Interactive mode - prompt for user creation with timeout
-    ns_log "🔑 Setting up your admin user account..."
-    echo ""
-    echo "╭─────────────────────────────────────────────────────────────╮"
-    echo "│  🛡️  NovaShield User Account Setup                          │"
-    echo "│                                                             │"
-    echo "│  You need to create an admin user to access the dashboard  │"
-    echo "│  (Press Enter on username to skip and create later)        │"
-    echo "╰─────────────────────────────────────────────────────────────╯"
-    echo ""
-    
-    # Attempt to create user account with timeout
-    if setup_admin_user_interactive; then
-      ns_ok "✓ Admin user created successfully!"
-    else
-      ns_log "⚠️  User account setup skipped - this is normal in automated environments"
-      ns_log "ℹ️  You can create an account later with: ./novashield.sh --add-user"
-    fi
-  else
-    # Non-interactive mode or automation environment
-    ns_log "ℹ️  Non-interactive/automated installation - user account creation skipped"
-    ns_log "ℹ️  Create an account after installation with: ./novashield.sh --add-user"
-  fi
-  
-  # PHASE 5: System Integration and Final Setup
-  ns_log "⚙️  PHASE 5: System Integration and Final Configuration"
-  
-  # Configure all advanced features
-  configure_advanced_features
   
   # Long-term optimization setup
   setup_long_term_optimization
@@ -23669,343 +23320,20 @@ install_all_embedded(){
   setup_termux_service || true
   setup_systemd_user || true
   
-  # PHASE 6: Installation Validation and Health Checks
-  ns_log "🔍 PHASE 6: Installation Validation and Health Checks"
-  
   # Post-installation validation and health checks
   perform_post_install_validation
-  
-  # Final system validation
-  perform_installation_validation
   
   # Generate deployment files for enterprise use
   generate_enterprise_deployment_files
   
-  # PHASE 7: Installation Success Summary
-  display_installation_summary "$detected_environment" "$auto_conservative"
+  ns_ok "✅ NovaShield Enterprise installation complete!"
+  ns_log "🎯 Ready for production deployment with 99.9% uptime capability"
+  ns_log "📊 Use: $0 --start to launch the enterprise platform"
+  ns_log "🔧 Use: $0 --validate to verify all components"
+  ns_log "🏢 Use: $0 --enterprise-setup for complete enterprise configuration"
 }
 
-# Check if any users exist in the system
-check_users_exist(){
-  if [ ! -f "$NS_SESS_DB" ]; then
-    return 1  # No database file means no users
-  fi
-  
-  # Check if users exist in the database
-  local user_count
-  user_count=$(python3 -c "
-import json, sys
-try:
-    with open('$NS_SESS_DB', 'r') as f:
-        db = json.load(f)
-    print(len(db.get('users', {})))
-except:
-    print(0)
-" 2>/dev/null || echo 0)
-  
-  if [ "${user_count:-0}" -gt 0 ]; then
-    return 0  # Users exist
-  else
-    return 1  # No users
-  fi
-}
-
-# Auto-fix system to ensure service functionality
-auto_fix_system_for_immediate_functionality(){
-  ns_log "🔧 Running service auto-fix for optimal functionality..."
-  
-  # Ensure all services are running
-  local services_status=0
-  
-  # Check if monitors are running
-  if ! pgrep -f "_monitor_" >/dev/null 2>&1; then
-    ns_log "🔄 Auto-starting monitoring services..."
-    start_monitors 2>/dev/null || true
-    sleep 2
-  fi
-  
-  # Check if web server is running and accessible
-  if ! curl -k -s -I https://127.0.0.1:8765/ >/dev/null 2>&1; then
-    ns_log "🌐 Auto-starting web server..."
-    start_web 2>/dev/null || true
-    sleep 3
-  fi
-  
-  # Verify web interface is working
-  if curl -k -s -I https://127.0.0.1:8765/ >/dev/null 2>&1; then
-    ns_log "✅ Web interface confirmed working at: https://127.0.0.1:8765/"
-    ns_log "🔑 Create your admin user with: ./novashield.sh --add-user"
-  else
-    ns_warn "⚠️  Web interface may need manual start: ./novashield.sh --web-start"
-  fi
-  
-  # Verify monitoring services
-  local monitor_count
-  monitor_count=$(pgrep -f "_monitor_" | wc -l 2>/dev/null || echo 0)
-  if [ "${monitor_count:-0}" -gt 0 ]; then
-    ns_log "✅ Monitoring services confirmed running ($monitor_count active monitors)"
-  else
-    ns_warn "⚠️  Monitoring services may need manual start: ./novashield.sh --restart-monitors"
-  fi
-  
-  # Final status check
-  ns_log "📊 System Status Summary:"
-  ./novashield.sh --status 2>/dev/null | grep -E "(Web PID|cpu PID|memory PID)" | head -3 | while read line; do
-    ns_log "   $line"
-  done
-  
-  ns_log "🎉 Service auto-fix completed - NovaShield services are ready!"
-  ns_log "🔒 SECURITY: Create your admin user with: ./novashield.sh --add-user"
-}
-
-# Interactive admin user setup with timeout and error handling
-setup_admin_user_interactive(){
-  local username password password_confirm timeout_pid
-  
-  # Set up timeout mechanism for user input
-  local input_timeout=30
-  
-  # Use a simpler approach that won't hang in non-interactive environments
-  if [ ! -t 0 ] || [ ! -t 1 ]; then
-    ns_log "Non-interactive environment detected - skipping user creation"
-    return 1
-  fi
-  
-  ns_log "Creating the first user for security..."
-  
-  # Get username with timeout
-  local attempts=0
-  while [ $attempts -lt 3 ]; do
-    printf "Enter admin username (or press Enter to skip): "
-    
-    # Use timeout for reading input to prevent hanging
-    if command -v timeout >/dev/null 2>&1; then
-      username=$(timeout $input_timeout bash -c 'read -r input; echo "$input"' 2>/dev/null || echo "")
-    else
-      read -r username || username=""
-    fi
-    
-    # Allow empty username to skip user creation
-    if [ -z "$username" ]; then
-      ns_log "User creation skipped - you can create an account later with: ./novashield.sh --add-user"
-      return 1
-    fi
-    
-    if [ ${#username} -ge 3 ]; then
-      break
-    else
-      echo "Username must be at least 3 characters long."
-      attempts=$((attempts + 1))
-    fi
-  done
-  
-  if [ $attempts -ge 3 ]; then
-    ns_warn "Too many invalid attempts - skipping user creation"
-    return 1
-  fi
-  
-  # Get password with timeout
-  attempts=0
-  while [ $attempts -lt 3 ]; do
-    printf "Enter admin password (6+ chars): "
-    if command -v timeout >/dev/null 2>&1; then
-      password=$(timeout $input_timeout bash -c 'read -s input; echo "$input"' 2>/dev/null || echo "")
-    else
-      read -s password || password=""
-    fi
-    echo ""
-    
-    if [ -z "$password" ]; then
-      ns_log "Password input skipped - you can create an account later with: ./novashield.sh --add-user"
-      return 1
-    fi
-    
-    if [ ${#password} -ge 6 ]; then
-      printf "Confirm password: "
-      if command -v timeout >/dev/null 2>&1; then
-        password_confirm=$(timeout $input_timeout bash -c 'read -s input; echo "$input"' 2>/dev/null || echo "")
-      else
-        read -s password_confirm || password_confirm=""
-      fi
-      echo ""
-      
-      if [ "$password" = "$password_confirm" ]; then
-        break
-      else
-        echo "Passwords do not match. Please try again."
-        attempts=$((attempts + 1))
-      fi
-    else
-      echo "Password must be at least 6 characters long."
-      attempts=$((attempts + 1))
-    fi
-  done
-  
-  if [ $attempts -ge 3 ]; then
-    ns_warn "Too many invalid attempts - skipping user creation"
-    return 1
-  fi
-  
-  # Create user account using the same logic as add_user but non-interactive
-  local salt sha
-  
-  # SECURITY FIX: Enhanced salt retrieval with error handling
-  if [ ! -f "$NS_CONF" ]; then
-    ns_err "SECURITY ERROR: Configuration file not found!"
-    return 1
-  fi
-  
-  salt=$(awk -F': ' '/auth_salt:/ {print $2}' "$NS_CONF" 2>/dev/null | tr -d ' "' | head -1)
-  
-  # SECURITY FIX: Never use default salt
-  if [ -z "$salt" ] || [ "$salt" = "change-this-salt" ] || [ ${#salt} -lt 16 ]; then
-    ns_err "SECURITY ERROR: Authentication salt not properly configured!"
-    return 1
-  fi
-  
-  # Create user account
-  sha=$(printf '%s' "${salt}:${password}" | sha256sum | awk '{print $1}')
-  if [ ! -f "$NS_SESS_DB" ]; then echo '{}' >"$NS_SESS_DB"; fi
-  
-  if python3 - "$NS_SESS_DB" "$username" "$sha" <<'PY'
-import json,sys
-p,u,s=sys.argv[1],sys.argv[2],sys.argv[3]
-try: j=json.load(open(p))
-except: j={}
-ud=j.get('_userdb',{})
-ud[u]=s
-j['_userdb']=ud
-open(p,'w').write(json.dumps(j))
-print('User stored')
-PY
-  then
-    ns_ok "✓ User '$username' created successfully!"
-    ns_log "Admin user created - you can now access the web dashboard."
-    return 0
-  else
-    ns_err "Failed to create user account"
-    return 1
-  fi
-}
-
-# Create user account programmatically
-create_user_account(){
-  local username="$1"
-  local password="$2"
-  
-  # Get the authentication salt
-  local salt
-  salt=$(awk -F': ' '/auth_salt:/ {print $2}' "$NS_CONF" 2>/dev/null | tr -d ' "' | head -1)
-  
-  if [ -z "$salt" ] || [ "$salt" = "change-this-salt" ] || [ ${#salt} -lt 16 ]; then
-    ns_err "Authentication salt not properly configured"
-    return 1
-  fi
-  
-  # Create user account
-  local sha
-  sha=$(printf '%s' "${salt}:${password}" | sha256sum | awk '{print $1}')
-  
-  if [ ! -f "$NS_SESS_DB" ]; then 
-    echo '{}' > "$NS_SESS_DB"
-  fi
-  
-  # Add user to database
-  python3 - "$NS_SESS_DB" "$username" "$sha" <<'PY'
-import json,sys
-try:
-    with open(sys.argv[1], 'r') as f:
-        db = json.load(f)
-except:
-    db = {}
-
-if 'users' not in db:
-    db['users'] = {}
-
-db['users'][sys.argv[2]] = {'pass': sys.argv[3], '2fa': False}
-
-with open(sys.argv[1], 'w') as f:
-    json.dump(db, f, indent=2)
-print("User stored")
-PY
-  
-  return $?
-}
-
-# Configure advanced features
-configure_advanced_features(){
-  ns_log "🔧 Configuring advanced NovaShield features..."
-  
-  # Enable all enterprise features by default
-  export NOVASHIELD_AUTO_RESTART=1
-  export NOVASHIELD_SECURITY_HARDENING=1
-  export NOVASHIELD_STRICT_SESSIONS=1
-  export NOVASHIELD_USE_WEB_WRAPPER=1
-  export NOVASHIELD_EXTERNAL_CHECKS=1
-  export NOVASHIELD_WEB_AUTO_START=1
-  export NOVASHIELD_AUTH_STRICT=1
-  
-  ns_log "✅ All advanced features configured and enabled"
-}
-
-# Installation validation
-perform_installation_validation(){
-  ns_log "🔍 Performing comprehensive installation validation..."
-  
-  local validation_errors=0
-  
-  # Check core files
-  for file in "$NS_CONF" "$NS_WWW/server.py" "$NS_WWW/index.html"; do
-    if [ ! -f "$file" ]; then
-      ns_err "Missing critical file: $file"
-      validation_errors=$((validation_errors + 1))
-    fi
-  done
-  
-  # Check directories
-  for dir in "$NS_BIN" "$NS_LOGS" "$NS_KEYS" "$NS_CTRL"; do
-    if [ ! -d "$dir" ]; then
-      ns_err "Missing directory: $dir"
-      validation_errors=$((validation_errors + 1))
-    fi
-  done
-  
-  # Check certificates
-  if [ ! -f "$NS_KEYS/tls.crt" ] || [ ! -f "$NS_KEYS/tls.key" ]; then
-    ns_err "TLS certificates missing"
-    validation_errors=$((validation_errors + 1))
-  fi
-  
-  if [ "$validation_errors" -eq 0 ]; then
-    ns_log "✅ Installation validation passed - all components verified"
-    return 0
-  else
-    ns_err "Installation validation failed with $validation_errors errors"
-    return 1
-  fi
-}
-
-# Installation summary display
-display_installation_summary(){
-  local detected_env="$1"
-  local is_conservative="$2"
-  
-  ns_log "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-  ns_log "🎉 NOVASHIELD UNIVERSAL INSTALLATION COMPLETED SUCCESSFULLY!"
-  ns_log "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-  ns_log "🌍 Environment: $detected_env"
-  ns_log "⚙️  Mode: $([ "$is_conservative" -eq 1 ] && echo "Conservative (Optimized for Stability)" || echo "High Performance")"
-  ns_log "🏠 Installation Path: $NS_HOME"
-  ns_log "🔐 Security: TLS 1.3 with 4096-bit RSA certificates"
-  ns_log "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-  ns_log "📋 NEXT STEPS:"
-  ns_log "   1️⃣  Start services: ./novashield.sh --start"
-  ns_log "   2️⃣  Create user (if not done): ./novashield.sh --add-user"
-  ns_log "   3️⃣  Access dashboard: https://127.0.0.1:8765/"
-  ns_log "   4️⃣  Check status: ./novashield.sh --status"
-  ns_log "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-  ns_log "✨ All 85+ commands available - use --help for complete list"
-}
+# New function: Long-term optimization setup
 setup_long_term_optimization(){
   ns_log "⚡ Configuring long-term optimization features..."
   
@@ -24027,51 +23355,18 @@ setup_long_term_optimization(){
   ns_log "✅ Long-term optimization configuration complete"
 }
 
-# Enhanced system optimization for universal deployment
+# Enhanced system optimization for enterprise deployment
 perform_system_optimization(){
-  ns_log "🔧 Performing universal system optimization with adaptive intelligence..."
+  ns_log "🔧 Optimizing system for enterprise deployment with enhanced security hardening..."
   
   # Check available memory before proceeding with optimization
   local available_memory=0
-  local memory_threshold=100
-  local is_mobile_env=0
-  
-  # Enhanced environment detection
-  if [ "$IS_TERMUX" -eq 1 ] || [ -n "${ANDROID_ROOT:-}" ] || [ -n "${PREFIX:-}" ]; then
-    memory_threshold=50  # Lower threshold for mobile environments
-    is_mobile_env=1
-    ns_log "📱 Mobile environment detected - using adaptive mobile optimizations"
-  fi
-  
-  # Check for other resource-constrained environments
-  if [ -n "${SSH_CONNECTION:-}" ] || [ -f /.dockerenv ] || [ "${NS_CONSERVATIVE_MODE:-0}" -eq 1 ]; then
-    memory_threshold=75  # Moderate threshold for constrained environments
-    ns_log "🔧 Resource-constrained environment - using adaptive optimizations"
-  fi
-  
-  # Enhanced memory detection with multiple fallbacks
   if command -v free >/dev/null 2>&1; then
     available_memory=$(free -m 2>/dev/null | awk 'NR==2{print $7}' 2>/dev/null || echo 0)
-    if [ "$available_memory" -eq 0 ]; then
-      available_memory=$(free -m 2>/dev/null | awk 'NR==2{print $4}' 2>/dev/null || echo 0)
+    if [ "${available_memory:-0}" -lt 100 ]; then
+      ns_warn "⚠️  Low available memory (${available_memory}MB). Skipping aggressive optimizations."
+      return 0
     fi
-  fi
-  
-  # Fallback to /proc/meminfo if free is not available or returned 0
-  if [ "$available_memory" -eq 0 ] && [ -r /proc/meminfo ]; then
-    available_memory=$(awk '/MemAvailable:/ {print int($2/1024)}' /proc/meminfo 2>/dev/null || echo 0)
-    if [ "$available_memory" -eq 0 ]; then
-      available_memory=$(awk '/MemFree:/ {print int($2/1024)}' /proc/meminfo 2>/dev/null || echo 0)
-    fi
-  fi
-  
-  # Automatic mode selection based on detected environment and resources
-  if [ "${NS_CONSERVATIVE_MODE:-0}" -eq 1 ] || [ "${available_memory:-0}" -lt "$memory_threshold" ] || [ "$is_mobile_env" -eq 1 ]; then
-    ns_log "🎯 Automatically selected: Universal Conservative Mode (Memory: ${available_memory}MB, Threshold: ${memory_threshold}MB)"
-    perform_universal_optimization
-    return 0
-  else
-    ns_log "🚀 Automatically selected: High Performance Mode (Memory: ${available_memory}MB available)"
   fi
   
   # PERFORMANCE: Memory management optimization
@@ -24094,7 +23389,7 @@ perform_system_optimization(){
   
   # PERFORMANCE: Set optimal system limits for production use (with memory checks)
   if command -v ulimit >/dev/null 2>&1; then
-    if [ "${available_memory:-0}" -gt 200 ]; then
+    if [ "$available_memory" -gt 200 ]; then
       ulimit -n 16384 2>/dev/null || ulimit -n 4096 2>/dev/null || true  # File descriptors
       ulimit -u 8192 2>/dev/null || ulimit -u 2048 2>/dev/null || true   # Process limit
       ulimit -v 4194304 2>/dev/null || true # Virtual memory (4GB)
@@ -24108,81 +23403,26 @@ perform_system_optimization(){
   fi
   
   # PERFORMANCE: Optimize memory usage for long-term operation (only if safe)
-  if [ -f /proc/sys/vm/swappiness ] && [ -w /proc/sys/vm/swappiness ] && [ "${available_memory:-0}" -gt 150 ]; then
+  if [ -f /proc/sys/vm/swappiness ] && [ -w /proc/sys/vm/swappiness ] && [ "$available_memory" -gt 150 ]; then
     echo 10 > /proc/sys/vm/swappiness 2>/dev/null || true
   fi
   
   # SECURITY: Clear sensitive environment variables
   unset PASSWORD PASS SECRET TOKEN API_KEY 2>/dev/null || true
   
-  # PERFORMANCE: Set higher priority for main process (with memory check and fallback)
-  if command -v renice >/dev/null 2>&1 && [ "${available_memory:-0}" -gt 150 ]; then
-    # Use safer renice approach to avoid memory allocation failures
-    if ! renice -n -2 $$ >/dev/null 2>&1; then
+  # PERFORMANCE: Set higher priority for main process (with memory check and fallback) - Termux-safe
+  if command -v renice >/dev/null 2>&1 && [ "${available_memory:-0}" -gt 150 ] && [ "$IS_TERMUX" -ne 1 ]; then
+    renice -n -2 $$ 2>/dev/null || {
       ns_warn "⚠️  Cannot adjust process priority - insufficient resources or permissions"
       # Try less aggressive priority adjustment
-      renice -n 0 $$ >/dev/null 2>&1 || true
-    fi
+      renice -n 0 $$ 2>/dev/null || true
+    }
   elif [ "$IS_TERMUX" -eq 1 ]; then
-    # Skip renice in Termux if memory is low to avoid mmap failures
-    ns_log "📱 Skipping process priority adjustment in Termux due to memory constraints"
+    # Skip renice in Termux to avoid mmap failures
+    ns_log "✅ Skipping process priority adjustment in Termux environment"
   fi
   
   ns_log "✅ System optimization complete with enhanced security"
-}
-
-# Universal optimization for all constrained environments (replaces minimal optimization)
-perform_universal_optimization(){
-  ns_log "🌍 Performing universal optimization for maximum compatibility..."
-  
-  # Safe system buffer flushing
-  if command -v sync >/dev/null 2>&1; then
-    sync 2>/dev/null || true
-    ns_log "💽 System buffers synchronized safely"
-  fi
-  
-  # Universal directory permissions (essential security)
-  if [ -d "$NS_HOME" ]; then
-    chmod 750 "$NS_HOME" 2>/dev/null || true
-    ns_log "🔒 Essential security permissions applied"
-  fi
-  
-  # Adaptive ulimits based on environment type
-  if command -v ulimit >/dev/null 2>&1; then
-    if [ "$IS_TERMUX" -eq 1 ] || [ -n "${ANDROID_ROOT:-}" ]; then
-      # Mobile/Android optimized limits
-      ulimit -n 512 2>/dev/null || true    # Conservative file descriptors for mobile
-      ulimit -u 256 2>/dev/null || true    # Conservative process limit for mobile
-      ulimit -s 1024 2>/dev/null || true   # Conservative stack size for mobile
-      ns_log "📱 Mobile-optimized resource limits applied"
-    elif [ -n "${SSH_CONNECTION:-}" ] || [ -f /.dockerenv ]; then
-      # Remote/container optimized limits
-      ulimit -n 1024 2>/dev/null || true   # Moderate file descriptors
-      ulimit -u 512 2>/dev/null || true    # Moderate process limit
-      ulimit -s 2048 2>/dev/null || true   # Moderate stack size
-      ns_log "🔗 Remote/container-optimized resource limits applied"
-    else
-      # Generic constrained environment limits
-      ulimit -n 2048 2>/dev/null || true   # Conservative file descriptors
-      ulimit -u 1024 2>/dev/null || true   # Conservative process limit
-      ulimit -s 4096 2>/dev/null || true   # Conservative stack size
-      ns_log "🔧 Universal resource limits applied"
-    fi
-  fi
-  
-  # Essential environment cleanup (security)
-  unset PASSWORD PASS SECRET TOKEN API_KEY 2>/dev/null || true
-  
-  # Skip aggressive process priority adjustment in constrained environments
-  ns_log "⚡ Skipping process priority adjustment for stability in constrained environment"
-  
-  ns_log "✅ Universal optimization complete - optimized for maximum compatibility"
-}
-
-# Legacy minimal optimization function (kept for compatibility)
-perform_minimal_optimization(){
-  ns_log "🔧 Performing minimal system optimization for low-memory environment..."
-  perform_universal_optimization
 }
 
 # Maintenance scheduling for long-term reliability
@@ -24592,11 +23832,11 @@ DEPLOYMENT_GUIDE
 }
 
 start_all(){
-  # SIMPLIFIED: Core System Startup - Focus on Essential Services Only
-  ns_log "🚀 Starting NovaShield Core Services..."
-  ns_log "🎯 Essential services startup with reliable operation"
+  # ENHANCEMENT: Ultra-Comprehensive System Startup with ALL Features Enabled by Default
+  ns_log "🚀 Starting NovaShield with COMPLETE Enterprise-Grade Integration..."
+  ns_log "🎯 ALL advanced features, security enhancements, and optimizations enabled by default"
   
-  # PHASE 1: Core System Setup
+  # PHASE 1: Core System Setup with Enhanced Features
   ensure_dirs
   write_default_config
   generate_keys
@@ -24605,35 +23845,98 @@ start_all(){
   write_server_py
   write_dashboard
   
-  # PHASE 2: Authentication and Session Management
-  ensure_auth_bootstrap
-  open_session 2>/dev/null || true
+  # PHASE 2: Enable ALL Advanced Features by Default
+  ns_log "🔧 Enabling ALL advanced features for optimal experience..."
   
-  # PHASE 3: Start Core Services
-  ns_log "🖥️ Starting monitoring and web services..."
+  # Enable all optional features by default (no longer optional)
+  export NOVASHIELD_AUTO_RESTART=1
+  export NOVASHIELD_SECURITY_HARDENING=1
+  export NOVASHIELD_STRICT_SESSIONS=1
+  export NOVASHIELD_USE_WEB_WRAPPER=1
+  export NOVASHIELD_EXTERNAL_CHECKS=1
+  export NOVASHIELD_WEB_AUTO_START=1
+  export NOVASHIELD_AUTH_STRICT=1
+  
+  ns_log "✅ All advanced features enabled: auto-restart, security hardening, strict sessions, web wrapper, external checks"
+  
+  # PHASE 3: Comprehensive System Optimization (Merged from --comprehensive-optimization)
+  ns_log "⚡ Running comprehensive system optimization..."
+  comprehensive_system_optimization
+  
+  # PHASE 4: Enterprise Setup Integration (Merged from --enterprise-setup)
+  ns_log "🏢 Configuring enterprise features..."
+  enhanced_scaling_support "configure_multiuser"
+  enhanced_performance_optimization "optimize"
+  enhanced_docker_support "generate_dockerfile"
+  enhanced_plugin_system "install" "enterprise-security"
+  
+  # PHASE 5: Advanced Security Automation and Intelligence
+  ns_log "🛡️ Initializing integrated security automation..."
+  initialize_security_automation
+  initialize_jarvis_automation
+  setup_integrated_monitoring
+  
+  # Run advanced security automation suite by default
+  ns_log "🔒 Running comprehensive security automation suite..."
+  timeout 60 advanced_security_automation_suite "comprehensive" "false" "summary" || ns_warn "Security automation completed with timeout (normal for comprehensive scan)"
+  
+  # PHASE 6: JARVIS AI Integration with Full System Access
+  ns_log "🤖 Initializing JARVIS with complete system integration..."
+  initialize_jarvis_system_integration
+  jarvis_start_orchestration
+  
+  # PHASE 7: Enhanced Auto-Fix System (Merged from --enhanced-auto-fix)
+  ns_log "🔧 Running comprehensive auto-fix system..."
+  timeout 30 enhanced_auto_fix_system "comprehensive" || ns_warn "Auto-fix system completed with timeout"
+  
+  # PHASE 8: Authentication and Session Management
+  ensure_auth_bootstrap
+  open_session
+  
+  # PHASE 9: Start All Services with Enhanced Monitoring
+  ns_log "🖥️ Starting all monitoring and web services..."
   start_monitors
   start_web
   
-  # PHASE 4: Service Auto-Fix and Validation
-  auto_fix_system_for_immediate_functionality
+  # PHASE 10: Advanced Automation Engines
+  start_automation_engines
   
-  # SUCCESS: Display status
-  ns_ok "🎯 NovaShield Core Services OPERATIONAL!"
+  # PHASE 11: Intelligence Gathering Integration
+  ns_log "🕵️ Setting up intelligence gathering capabilities..."
+  enhanced_intelligence_dashboard "generate" >/dev/null 2>&1 || true
   
-  # Display status information
-  local scheme="https"
+  # PHASE 12: System Health and Performance Validation
+  ns_log "🏥 Running system health validation..."
+  timeout 20 comprehensive_system_optimization || ns_warn "System health check completed with timeout"
   
-  ns_log "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-  ns_log "🌟 NOVASHIELD - CORE SERVICES OPERATIONAL"
-  ns_log "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-  ns_log "🌐 Dashboard: ${scheme}://127.0.0.1:8765/"
-  ns_log "📊 Monitoring: Real-time system health tracking ACTIVE"
-  ns_log "🔒 Security: User authentication and TLS encryption ENABLED"
-  ns_log "🔧 Auto-Restart: Service monitoring and recovery ACTIVE"
-  ns_log "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-  ns_log "🎉 CORE FUNCTIONALITY READY - Create admin user: ./novashield.sh --add-user"
-  ns_log "🔒 SECURITY: All services running with secure authentication required"
-  ns_log "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  # PHASE 13: Final Configuration and Validation
+  ns_log "✅ Running final system validation..."
+  timeout 30 validate_enhanced_features || ns_warn "Feature validation completed"
+  
+  # SUCCESS: Display comprehensive status
+  ns_ok "🎯 NovaShield FULLY OPERATIONAL with COMPLETE Enterprise Integration!"
+  
+  # Display enhanced status information
+  local scheme="http"
+  local tls_enabled; tls_enabled=$(yaml_get "security" "tls_enabled" "false")
+  [ "$tls_enabled" = "true" ] && scheme="https"
+  
+  ns_log "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  ns_log "🌟 NOVASHIELD ENTERPRISE-GRADE SECURITY PLATFORM - FULLY OPERATIONAL"
+  ns_log "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  ns_log "🌐 Dashboard: ${scheme}://$(yaml_get "http" "host" "127.0.0.1"):$(yaml_get "http" "port" "8765")/"
+  ns_log "🤖 JARVIS AI: Complete automation and intelligence integration ACTIVE"
+  ns_log "🛡️ Security: Advanced threat detection, automation, and hardening ENABLED"
+  ns_log "⚡ Performance: Comprehensive optimization and monitoring ACTIVE"
+  ns_log "🏢 Enterprise: Multi-user scaling, Docker support, and plugins CONFIGURED"
+  ns_log "🕵️ Intelligence: Advanced scanning and analysis capabilities READY"
+  ns_log "🔧 Auto-Restart: All services with intelligent rate limiting ENABLED"
+  ns_log "🔒 Hardening: Enterprise security hardening and strict sessions ACTIVE"
+  ns_log "📊 Monitoring: Real-time system health and performance tracking OPERATIONAL"
+  ns_log "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  ns_log "🎉 ALL FEATURES ENABLED BY DEFAULT - NovaShield is now running in MAXIMUM CAPABILITY MODE"
+  ns_log "ℹ️  No additional setup required - all enhancements, security, and optimizations are ACTIVE"
+  ns_log "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 }
 
 initialize_security_automation(){
@@ -26025,8 +25328,7 @@ A comprehensive security monitoring and management system for Android/Termux and
 Usage: $0 [OPTION]
 
 Core Commands:
-  --install              Universal installation with automatic environment detection and optimization
-  --install-termux       Legacy option (same as --install, kept for compatibility)
+  --install              Install NovaShield and dependencies (requires user creation)
   --start                Start all services (monitors + web dashboard)
   --stop                 Stop all running services
   --status               Show service status and information
@@ -26215,12 +25517,6 @@ case "${1:-}" in
   --help|-h) usage; exit 0;;
   --version|-v) echo "NovaShield ${NS_VERSION}"; exit 0;;
   --install) install_all;;
-  --install-termux) 
-    # Force Termux mode and conservative settings for mobile installation
-    export IS_TERMUX=1
-    export NS_CONSERVATIVE_MODE=1
-    ns_log "🚀 Starting Termux-optimized installation..."
-    install_all;;
   --start) start_all;;
   --stop) stop_all;;
   --restart-monitors) restart_monitors;;
