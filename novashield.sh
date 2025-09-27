@@ -22,11 +22,31 @@ enable_strict_mode() {
 check_system_resources() {
   local min_memory_mb=50
   local available_memory=0
+  local is_constrained=0
   
-  # Enhanced Termux memory detection
+  # Enhanced universal memory detection for all terminals and environments
   if [ "$IS_TERMUX" -eq 1 ]; then
     # Termux has different memory constraints - be more conservative
     min_memory_mb=30
+    is_constrained=1
+    ns_log "📱 Termux environment detected - using mobile-optimized settings"
+  fi
+  
+  # Check for other constrained environments automatically
+  if [ -n "${ANDROID_ROOT:-}" ] || [ -n "${ANDROID_DATA:-}" ]; then
+    is_constrained=1
+    min_memory_mb=30
+    ns_log "📱 Android environment detected - enabling conservative mode"
+  fi
+  
+  # Check for limited terminal environments
+  if [ "${TERM:-}" = "linux" ] || [ "${COLORTERM:-}" = "truecolor" ] || [ -n "${SSH_CONNECTION:-}" ]; then
+    ns_log "🖥️  Terminal environment detected - using conservative settings"
+    is_constrained=1
+  fi
+  
+  # Universal memory detection with multiple fallback methods
+  if [ "$IS_TERMUX" -eq 1 ]; then
     # Try multiple ways to get memory info in Termux
     if [ -r /proc/meminfo ]; then
       available_memory=$(awk '/MemAvailable:/ {print int($2/1024)}' /proc/meminfo 2>/dev/null || echo 0)
@@ -36,18 +56,38 @@ check_system_resources() {
     fi
   fi
   
+  # Fallback memory detection for all systems
   if command -v free >/dev/null 2>&1 && [ "$available_memory" -eq 0 ]; then
     available_memory=$(free -m 2>/dev/null | awk 'NR==2{print $7}' 2>/dev/null || echo 0)
     if [ "$available_memory" -eq 0 ]; then
-      # Fallback: try to get free memory differently
+      # Try alternative free memory calculation
       available_memory=$(free -m 2>/dev/null | awk 'NR==2{print $4}' 2>/dev/null || echo 0)
     fi
   fi
   
-  if [ "${available_memory:-0}" -gt 0 ] && [ "${available_memory:-0}" -lt "$min_memory_mb" ]; then
-    echo "WARNING: Low memory detected (${available_memory}MB available, ${min_memory_mb}MB minimum recommended)" >&2
+  # Additional memory detection for systems without 'free' command
+  if [ "$available_memory" -eq 0 ] && [ -r /proc/meminfo ]; then
+    available_memory=$(awk '/MemAvailable:/ {print int($2/1024)}' /proc/meminfo 2>/dev/null || echo 0)
+    if [ "$available_memory" -eq 0 ]; then
+      available_memory=$(awk '/MemFree:/ {print int($2/1024)}' /proc/meminfo 2>/dev/null || echo 0)
+    fi
+  fi
+  
+  # If we still can't detect memory, assume constrained environment
+  if [ "$available_memory" -eq 0 ]; then
+    ns_warn "⚠️  Unable to detect available memory - assuming constrained environment"
+    is_constrained=1
     return 1
   fi
+  
+  # Always enable conservative mode for constrained environments or low memory
+  if [ "$is_constrained" -eq 1 ] || [ "${available_memory:-0}" -lt "$min_memory_mb" ]; then
+    ns_warn "⚠️  Constrained environment or low memory detected (${available_memory}MB available, ${min_memory_mb}MB minimum)"
+    ns_log "🔧 Automatically enabling conservative mode for optimal performance"
+    return 1
+  fi
+  
+  ns_log "✅ System resources adequate (${available_memory}MB available)"
   return 0
 }
 
@@ -143,51 +183,67 @@ _optimize_memory() {
     fi
   fi
   
-  # More conservative threshold for Termux and low-memory systems
+  # Adaptive memory threshold based on environment
   local memory_threshold=85
-  if [ "$IS_TERMUX" -eq 1 ] || [ "${NS_CONSERVATIVE_MODE:-0}" -eq 1 ]; then
-    memory_threshold=90  # Higher threshold for mobile/constrained environments
+  if [ "$IS_TERMUX" -eq 1 ] || [ -n "${ANDROID_ROOT:-}" ]; then
+    memory_threshold=90  # Higher threshold for mobile environments
+  elif [ "${NS_CONSERVATIVE_MODE:-0}" -eq 1 ] || [ -n "${SSH_CONNECTION:-}" ] || [ -f /.dockerenv ]; then
+    memory_threshold=88  # Slightly higher threshold for constrained environments
   fi
   
   local current_memory_usage
   
-  # Get current memory usage percentage with better error handling
+  # Universal memory usage detection with multiple fallbacks
   if command -v free >/dev/null 2>&1; then
     current_memory_usage=$(free 2>/dev/null | awk 'NR==2{printf "%.0f", $3*100/$2}' 2>/dev/null || echo "0")
+  elif [ -r /proc/meminfo ]; then
+    # Fallback calculation using /proc/meminfo
+    local total_mem used_mem
+    total_mem=$(awk '/MemTotal:/ {print $2}' /proc/meminfo 2>/dev/null || echo "0")
+    used_mem=$(awk '/MemAvailable:/ {print $2}' /proc/meminfo 2>/dev/null || echo "0")
+    if [ "$total_mem" -gt 0 ] && [ "$used_mem" -gt 0 ]; then
+      current_memory_usage=$(awk "BEGIN {printf \"%.0f\", (($total_mem - $used_mem) * 100 / $total_mem)}" 2>/dev/null || echo "0")
+    fi
+  fi
+  
+  # Only optimize if memory usage is above threshold and we have valid data
+  if [ "${current_memory_usage:-0}" -gt "$memory_threshold" ] && [ "${current_memory_usage:-0}" -lt 100 ]; then
+    ns_log "🧠 Memory usage at ${current_memory_usage}%, optimizing (threshold: ${memory_threshold}%)"
     
-    # Only optimize if memory usage is above threshold and we have valid data
-    if [ "$current_memory_usage" -gt "$memory_threshold" ] && [ "$current_memory_usage" -lt 100 ]; then
-      ns_log "Memory usage at ${current_memory_usage}%, optimizing (threshold: ${memory_threshold}%)"
-      
-      # Termux-safe memory optimization
-      if [ "$IS_TERMUX" -eq 1 ]; then
-        # Only perform the safest operations in Termux
-        history -c 2>/dev/null || true
-        # Skip aggressive cache operations that might cause mmap failures
-        ns_log "📱 Using Termux-safe memory optimization"
-      else
-        # Standard memory optimization for other systems
-        if [ -w "/proc/sys/vm/drop_caches" ] 2>/dev/null && command -v sync >/dev/null 2>&1; then
-          if sync 2>/dev/null; then
-            echo 1 > /proc/sys/vm/drop_caches 2>/dev/null || true
-          fi
-        fi
-        
-        # Clear bash history cache safely
-        history -c 2>/dev/null || true
-        
-        # Clear DNS cache if available (less aggressive)
-        if command -v systemd-resolve >/dev/null 2>&1; then
-          systemd-resolve --flush-caches 2>/dev/null || true
-        fi
-        
-        # Optimize shared memory more conservatively  
-        if [ -d "/dev/shm" ]; then
-          find /dev/shm -user "$(whoami)" -type f -mtime +7 -delete 2>/dev/null || true
+    # Universal memory optimization suitable for all environments
+    if [ "$IS_TERMUX" -eq 1 ] || [ -n "${ANDROID_ROOT:-}" ]; then
+      # Mobile-safe memory optimization
+      history -c 2>/dev/null || true
+      ns_log "📱 Mobile-safe memory optimization completed"
+    elif [ "${NS_CONSERVATIVE_MODE:-0}" -eq 1 ] || [ -n "${SSH_CONNECTION:-}" ] || [ -f /.dockerenv ]; then
+      # Conservative memory optimization for constrained environments
+      history -c 2>/dev/null || true
+      # Clear DNS cache if available and safe
+      if command -v systemd-resolve >/dev/null 2>&1; then
+        systemd-resolve --flush-caches 2>/dev/null || true
+      fi
+      ns_log "🔧 Conservative memory optimization completed"
+    else
+      # Standard memory optimization for capable systems
+      if [ -w "/proc/sys/vm/drop_caches" ] 2>/dev/null && command -v sync >/dev/null 2>&1; then
+        if sync 2>/dev/null; then
+          echo 1 > /proc/sys/vm/drop_caches 2>/dev/null || true
         fi
       fi
       
-      ns_log "✅ Memory optimization completed"
+      history -c 2>/dev/null || true
+      
+      # Clear DNS cache if available
+      if command -v systemd-resolve >/dev/null 2>&1; then
+        systemd-resolve --flush-caches 2>/dev/null || true
+      fi
+      
+      # Optimize shared memory conservatively  
+      if [ -d "/dev/shm" ]; then
+        find /dev/shm -user "$(whoami)" -type f -mtime +7 -delete 2>/dev/null || true
+      fi
+      
+      ns_log "🚀 Standard memory optimization completed"
     fi
   fi
   
@@ -195,8 +251,8 @@ _optimize_memory() {
   mkdir -p "$(dirname "$last_optimize_file")" 2>/dev/null || true
   echo "$current_time" > "$last_optimize_file" 2>/dev/null || true
   
-  # Memory leak detection and prevention (less frequent, skip in Termux)
-  if [ "$IS_TERMUX" -ne 1 ] && [ $((current_time % 600)) -eq 0 ]; then  # Every 10 minutes, not in Termux
+  # Universal memory leak detection (skip in mobile environments)
+  if [ "$IS_TERMUX" -ne 1 ] && [ -z "${ANDROID_ROOT:-}" ] && [ $((current_time % 600)) -eq 0 ]; then
     _detect_memory_leaks
   fi
 }
@@ -974,21 +1030,21 @@ ns_log() {
   
   _rotate_log "${NS_HOME}/launcher.log" 4000  # Optimized for storage
   
-  # Safer logging approach to avoid mmap failures in Termux
-  if [ "$IS_TERMUX" -eq 1 ] || [ "${NS_CONSERVATIVE_MODE:-0}" -eq 1 ]; then
+  # Universal safer logging approach to avoid subprocess issues in constrained environments
+  if [ "$IS_TERMUX" -eq 1 ] || [ -n "${ANDROID_ROOT:-}" ] || [ "${NS_CONSERVATIVE_MODE:-0}" -eq 1 ] || [ -n "${SSH_CONNECTION:-}" ] || [ -f /.dockerenv ]; then
     # Direct echo to avoid subprocess spawning in constrained environments
     echo -e "$(ns_now) [INFO ] $*" >> "${NS_HOME}/launcher.log" 2>/dev/null || echo -e "$(ns_now) [INFO ] $*" >&2
   else
-    # Standard logging with tee for other systems
+    # Standard logging with tee for high-resource systems
     echo -e "$(ns_now) [INFO ] $*" | tee -a "${NS_HOME}/launcher.log" >&2 2>/dev/null || echo -e "$(ns_now) [INFO ] $*" >&2
   fi
   
   # Less frequent memory optimization (every 500 log entries instead of 100)
-  # Skip background optimization in Termux to avoid mmap failures
-  if [ "$IS_TERMUX" -ne 1 ] && [ "${NS_CONSERVATIVE_MODE:-0}" -ne 1 ]; then
+  # Universal: Skip background optimization in constrained environments to avoid resource issues
+  if [ "$IS_TERMUX" -ne 1 ] && [ -z "${ANDROID_ROOT:-}" ] && [ "${NS_CONSERVATIVE_MODE:-0}" -ne 1 ] && [ -z "${SSH_CONNECTION:-}" ] && [ ! -f /.dockerenv ]; then
     local log_count
     log_count=$(wc -l < "${NS_HOME}/launcher.log" 2>/dev/null || echo 0)
-    if [ $((log_count % 500)) -eq 0 ] && [ "$log_count" -gt 0 ]; then
+    if [ $((log_count % 1000)) -eq 0 ] && [ "$log_count" -gt 0 ]; then  # Even less frequent for stability
       _optimize_memory &
     fi
   fi
@@ -1000,8 +1056,8 @@ ns_warn(){
       local fallback_dir
       fallback_dir="/tmp/novashield-$(whoami)"
       mkdir -p "$fallback_dir" 2>/dev/null || return 0
-      # Use safer logging in fallback directory too
-      if [ "$IS_TERMUX" -eq 1 ] || [ "${NS_CONSERVATIVE_MODE:-0}" -eq 1 ]; then
+      # Universal safer logging in fallback directory too
+      if [ "$IS_TERMUX" -eq 1 ] || [ -n "${ANDROID_ROOT:-}" ] || [ "${NS_CONSERVATIVE_MODE:-0}" -eq 1 ] || [ -n "${SSH_CONNECTION:-}" ] || [ -f /.dockerenv ]; then
         echo -e "${YELLOW}$(ns_now) [WARN ] $*${NC}" >> "$fallback_dir/launcher.log" 2>/dev/null || echo -e "${YELLOW}$(ns_now) [WARN ] $*${NC}" >&2
       else
         echo -e "${YELLOW}$(ns_now) [WARN ] $*${NC}" | tee -a "$fallback_dir/launcher.log" >&2 2>/dev/null || echo -e "${YELLOW}$(ns_now) [WARN ] $*${NC}" >&2
@@ -1012,12 +1068,12 @@ ns_warn(){
   
   _rotate_log "${NS_HOME}/launcher.log" 4000
   
-  # Safer logging approach to avoid mmap failures in Termux
-  if [ "$IS_TERMUX" -eq 1 ] || [ "${NS_CONSERVATIVE_MODE:-0}" -eq 1 ]; then
+  # Universal safer logging approach to avoid subprocess issues in constrained environments
+  if [ "$IS_TERMUX" -eq 1 ] || [ -n "${ANDROID_ROOT:-}" ] || [ "${NS_CONSERVATIVE_MODE:-0}" -eq 1 ] || [ -n "${SSH_CONNECTION:-}" ] || [ -f /.dockerenv ]; then
     # Direct echo to avoid subprocess spawning in constrained environments
     echo -e "${YELLOW}$(ns_now) [WARN ] $*${NC}" >> "${NS_HOME}/launcher.log" 2>/dev/null || echo -e "${YELLOW}$(ns_now) [WARN ] $*${NC}" >&2
   else
-    # Standard logging with tee for other systems
+    # Standard logging with tee for high-resource systems
     echo -e "${YELLOW}$(ns_now) [WARN ] $*${NC}" | tee -a "${NS_HOME}/launcher.log" >&2 2>/dev/null || echo -e "${YELLOW}$(ns_now) [WARN ] $*${NC}" >&2
   fi
 }
@@ -1028,8 +1084,8 @@ ns_err() {
       local fallback_dir
       fallback_dir="/tmp/novashield-$(whoami)"
       mkdir -p "$fallback_dir" 2>/dev/null || return 0
-      # Use safer logging in fallback directory too
-      if [ "$IS_TERMUX" -eq 1 ] || [ "${NS_CONSERVATIVE_MODE:-0}" -eq 1 ]; then
+      # Universal safer logging in fallback directory too
+      if [ "$IS_TERMUX" -eq 1 ] || [ -n "${ANDROID_ROOT:-}" ] || [ "${NS_CONSERVATIVE_MODE:-0}" -eq 1 ] || [ -n "${SSH_CONNECTION:-}" ] || [ -f /.dockerenv ]; then
         echo -e "${RED}$(ns_now) [ERROR] $*${NC}" >> "$fallback_dir/launcher.log" 2>/dev/null || echo -e "${RED}$(ns_now) [ERROR] $*${NC}" >&2
       else
         echo -e "${RED}$(ns_now) [ERROR] $*${NC}" | tee -a "$fallback_dir/launcher.log" >&2 2>/dev/null || echo -e "${RED}$(ns_now) [ERROR] $*${NC}" >&2
@@ -1040,12 +1096,12 @@ ns_err() {
   
   _rotate_log "${NS_HOME}/launcher.log" 4000
   
-  # Safer logging approach to avoid mmap failures in Termux
-  if [ "$IS_TERMUX" -eq 1 ] || [ "${NS_CONSERVATIVE_MODE:-0}" -eq 1 ]; then
+  # Universal safer logging approach to avoid subprocess issues in constrained environments
+  if [ "$IS_TERMUX" -eq 1 ] || [ -n "${ANDROID_ROOT:-}" ] || [ "${NS_CONSERVATIVE_MODE:-0}" -eq 1 ] || [ -n "${SSH_CONNECTION:-}" ] || [ -f /.dockerenv ]; then
     # Direct echo to avoid subprocess spawning in constrained environments
     echo -e "${RED}$(ns_now) [ERROR] $*${NC}" >> "${NS_HOME}/launcher.log" 2>/dev/null || echo -e "${RED}$(ns_now) [ERROR] $*${NC}" >&2
   else
-    # Standard logging with tee for other systems
+    # Standard logging with tee for high-resource systems
     echo -e "${RED}$(ns_now) [ERROR] $*${NC}" | tee -a "${NS_HOME}/launcher.log" >&2 2>/dev/null || echo -e "${RED}$(ns_now) [ERROR] $*${NC}" >&2
   fi
 }
@@ -23329,19 +23385,64 @@ install_all(){
 
 # Renamed original function for backward compatibility
 install_all_embedded(){
-  ns_log "🚀 Starting NovaShield Enterprise Installation (v${NS_VERSION})"
+  ns_log "🚀 Starting NovaShield Universal Installation (v${NS_VERSION})"
   
-  # Pre-installation system checks and optimization
-  ns_log "🔍 Performing pre-installation system checks..."
+  # Pre-installation system checks and automatic optimization
+  ns_log "🔍 Performing comprehensive system analysis..."
   
-  # Check system resources before proceeding
+  # Enhanced automatic environment detection
+  local auto_conservative=0
+  
+  # Always check system resources first
   if ! check_system_resources; then
-    ns_warn "⚠️  System resources are limited. Installation will proceed with conservative settings."
-    # Set a flag for conservative installation
-    export NS_CONSERVATIVE_MODE=1
+    ns_log "📊 System resources are limited - enabling conservative mode automatically"
+    auto_conservative=1
   fi
   
-  # Check system requirements and optimize for long-term use
+  # Additional automatic detection for various constrained environments
+  if [ "$IS_TERMUX" -eq 1 ] || [ -n "${PREFIX:-}" ]; then
+    ns_log "📱 Mobile/Termux environment detected - enabling conservative mode"
+    auto_conservative=1
+  fi
+  
+  # Check for SSH sessions (often resource-constrained)
+  if [ -n "${SSH_CONNECTION:-}" ] || [ -n "${SSH_CLIENT:-}" ] || [ -n "${SSH_TTY:-}" ]; then
+    ns_log "🔗 SSH session detected - enabling conservative mode for stability"
+    auto_conservative=1
+  fi
+  
+  # Check for container environments
+  if [ -f /.dockerenv ] || [ -n "${DOCKER_CONTAINER:-}" ] || [ -n "${KUBERNETES_SERVICE_HOST:-}" ]; then
+    ns_log "🐳 Container environment detected - enabling conservative mode"
+    auto_conservative=1
+  fi
+  
+  # Check for limited shell environments
+  if [ "${SHELL##*/}" = "dash" ] || [ "${SHELL##*/}" = "ash" ] || [ -z "${BASH_VERSION:-}" ]; then
+    ns_log "🐚 Limited shell environment detected - enabling conservative mode"
+    auto_conservative=1
+  fi
+  
+  # Check system load if available
+  if command -v uptime >/dev/null 2>&1; then
+    local load_avg
+    load_avg=$(uptime | awk -F'load average:' '{print $2}' | awk '{print $1}' | tr -d ',' 2>/dev/null || echo "0")
+    if [ "${load_avg%%.*}" -gt 2 ] 2>/dev/null; then
+      ns_log "⚡ High system load detected (${load_avg}) - enabling conservative mode"
+      auto_conservative=1
+    fi
+  fi
+  
+  # Enable conservative mode automatically if any conditions are met
+  if [ "$auto_conservative" -eq 1 ]; then
+    export NS_CONSERVATIVE_MODE=1
+    ns_log "🔧 Conservative mode automatically enabled for optimal compatibility"
+    ns_log "🎯 Using universal optimization settings for maximum stability"
+  else
+    ns_log "💪 Full performance mode enabled - system has adequate resources"
+  fi
+  
+  # Always run system optimization (it will adapt based on conservative mode)
   perform_system_optimization
   
   # Core installation steps with enhanced error handling
@@ -23401,18 +23502,26 @@ setup_long_term_optimization(){
   ns_log "✅ Long-term optimization configuration complete"
 }
 
-# Enhanced system optimization for enterprise deployment
+# Enhanced system optimization for universal deployment
 perform_system_optimization(){
-  ns_log "🔧 Optimizing system for enterprise deployment with enhanced security hardening..."
+  ns_log "🔧 Performing universal system optimization with adaptive intelligence..."
   
   # Check available memory before proceeding with optimization
   local available_memory=0
   local memory_threshold=100
+  local is_mobile_env=0
   
-  # Adjust thresholds for Termux and low-memory environments
-  if [ "$IS_TERMUX" -eq 1 ]; then
-    memory_threshold=50  # Lower threshold for Termux
-    ns_log "📱 Termux detected - using mobile-optimized settings"
+  # Enhanced environment detection
+  if [ "$IS_TERMUX" -eq 1 ] || [ -n "${ANDROID_ROOT:-}" ] || [ -n "${PREFIX:-}" ]; then
+    memory_threshold=50  # Lower threshold for mobile environments
+    is_mobile_env=1
+    ns_log "📱 Mobile environment detected - using adaptive mobile optimizations"
+  fi
+  
+  # Check for other resource-constrained environments
+  if [ -n "${SSH_CONNECTION:-}" ] || [ -f /.dockerenv ] || [ "${NS_CONSERVATIVE_MODE:-0}" -eq 1 ]; then
+    memory_threshold=75  # Moderate threshold for constrained environments
+    ns_log "🔧 Resource-constrained environment - using adaptive optimizations"
   fi
   
   # Enhanced memory detection with multiple fallbacks
@@ -23423,12 +23532,21 @@ perform_system_optimization(){
     fi
   fi
   
-  # Check for conservative mode or very low memory
-  if [ "${NS_CONSERVATIVE_MODE:-0}" -eq 1 ] || [ "${available_memory:-0}" -lt "$memory_threshold" ]; then
-    ns_warn "⚠️  Low available memory (${available_memory}MB) or conservative mode. Using minimal optimizations."
-    # Run only essential, low-impact optimizations
-    perform_minimal_optimization
+  # Fallback to /proc/meminfo if free is not available or returned 0
+  if [ "$available_memory" -eq 0 ] && [ -r /proc/meminfo ]; then
+    available_memory=$(awk '/MemAvailable:/ {print int($2/1024)}' /proc/meminfo 2>/dev/null || echo 0)
+    if [ "$available_memory" -eq 0 ]; then
+      available_memory=$(awk '/MemFree:/ {print int($2/1024)}' /proc/meminfo 2>/dev/null || echo 0)
+    fi
+  fi
+  
+  # Automatic mode selection based on detected environment and resources
+  if [ "${NS_CONSERVATIVE_MODE:-0}" -eq 1 ] || [ "${available_memory:-0}" -lt "$memory_threshold" ] || [ "$is_mobile_env" -eq 1 ]; then
+    ns_log "🎯 Automatically selected: Universal Conservative Mode (Memory: ${available_memory}MB, Threshold: ${memory_threshold}MB)"
+    perform_universal_optimization
     return 0
+  else
+    ns_log "🚀 Automatically selected: High Performance Mode (Memory: ${available_memory}MB available)"
   fi
   
   # PERFORMANCE: Memory management optimization
@@ -23488,32 +23606,58 @@ perform_system_optimization(){
   ns_log "✅ System optimization complete with enhanced security"
 }
 
-# Minimal optimization for low-memory environments and Termux
-perform_minimal_optimization(){
-  ns_log "🔧 Performing minimal system optimization for low-memory environment..."
+# Universal optimization for all constrained environments (replaces minimal optimization)
+perform_universal_optimization(){
+  ns_log "🌍 Performing universal optimization for maximum compatibility..."
   
-  # Only perform essential, low-impact optimizations
+  # Safe system buffer flushing
   if command -v sync >/dev/null 2>&1; then
-    sync 2>/dev/null || true  # Flush file system buffers safely
+    sync 2>/dev/null || true
+    ns_log "💽 System buffers synchronized safely"
   fi
   
-  # Basic directory permissions (without resource-intensive find operations)
+  # Universal directory permissions (essential security)
   if [ -d "$NS_HOME" ]; then
     chmod 750 "$NS_HOME" 2>/dev/null || true
+    ns_log "🔒 Essential security permissions applied"
   fi
   
-  # Conservative ulimits for Termux and low-memory systems
+  # Adaptive ulimits based on environment type
   if command -v ulimit >/dev/null 2>&1; then
-    ulimit -n 1024 2>/dev/null || true    # Conservative file descriptors
-    ulimit -u 512 2>/dev/null || true     # Conservative process limit
-    ulimit -s 2048 2>/dev/null || true    # Conservative stack size
+    if [ "$IS_TERMUX" -eq 1 ] || [ -n "${ANDROID_ROOT:-}" ]; then
+      # Mobile/Android optimized limits
+      ulimit -n 512 2>/dev/null || true    # Conservative file descriptors for mobile
+      ulimit -u 256 2>/dev/null || true    # Conservative process limit for mobile
+      ulimit -s 1024 2>/dev/null || true   # Conservative stack size for mobile
+      ns_log "📱 Mobile-optimized resource limits applied"
+    elif [ -n "${SSH_CONNECTION:-}" ] || [ -f /.dockerenv ]; then
+      # Remote/container optimized limits
+      ulimit -n 1024 2>/dev/null || true   # Moderate file descriptors
+      ulimit -u 512 2>/dev/null || true    # Moderate process limit
+      ulimit -s 2048 2>/dev/null || true   # Moderate stack size
+      ns_log "🔗 Remote/container-optimized resource limits applied"
+    else
+      # Generic constrained environment limits
+      ulimit -n 2048 2>/dev/null || true   # Conservative file descriptors
+      ulimit -u 1024 2>/dev/null || true   # Conservative process limit
+      ulimit -s 4096 2>/dev/null || true   # Conservative stack size
+      ns_log "🔧 Universal resource limits applied"
+    fi
   fi
   
-  # Clear only essential environment variables
+  # Essential environment cleanup (security)
   unset PASSWORD PASS SECRET TOKEN API_KEY 2>/dev/null || true
   
-  # Skip process priority adjustment in minimal mode
-  ns_log "✅ Minimal system optimization complete"
+  # Skip aggressive process priority adjustment in constrained environments
+  ns_log "⚡ Skipping process priority adjustment for stability in constrained environment"
+  
+  ns_log "✅ Universal optimization complete - optimized for maximum compatibility"
+}
+
+# Legacy minimal optimization function (kept for compatibility)
+perform_minimal_optimization(){
+  ns_log "🔧 Performing minimal system optimization for low-memory environment..."
+  perform_universal_optimization
 }
 
 # Maintenance scheduling for long-term reliability
@@ -25419,8 +25563,8 @@ A comprehensive security monitoring and management system for Android/Termux and
 Usage: $0 [OPTION]
 
 Core Commands:
-  --install              Install NovaShield and dependencies (requires user creation)
-  --install-termux       Install with Termux-optimized settings (automatic conservative mode)
+  --install              Universal installation with automatic environment detection and optimization
+  --install-termux       Legacy option (same as --install, kept for compatibility)
   --start                Start all services (monitors + web dashboard)
   --stop                 Stop all running services
   --status               Show service status and information
