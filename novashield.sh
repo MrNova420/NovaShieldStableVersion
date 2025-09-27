@@ -7431,14 +7431,43 @@ def generate_secure_setup_screen(user_count=0):
             <div class="status-item">🛡️ Security Level: <strong>MAXIMUM</strong></div>
         </div>
         
+        
         <div class="instructions">
             <strong>🔧 SYSTEM ADMINISTRATOR SETUP REQUIRED</strong><br><br>
-            To access the NovaShield dashboard, create your first admin user:<br><br>
+            Create your first admin user to access the NovaShield dashboard:
             
-            <div class="command">./novashield.sh --add-user</div><br>
+            <div id="setup-form" style="margin-top: 20px; text-align: left;">
+                <form id="userCreationForm" style="background: rgba(0,0,0,0.5); padding: 20px; border-radius: 10px; border: 1px solid #ffaa00;">
+                    <div style="margin-bottom: 15px;">
+                        <label for="username" style="display: block; margin-bottom: 5px; color: #ffaa00;">Username (3+ characters):</label>
+                        <input type="text" id="username" name="username" required minlength="3" 
+                               style="width: 100%; padding: 10px; background: #222; color: #fff; border: 1px solid #ffaa00; border-radius: 5px;">
+                    </div>
+                    
+                    <div style="margin-bottom: 15px;">
+                        <label for="password" style="display: block; margin-bottom: 5px; color: #ffaa00;">Password (8+ characters):</label>
+                        <input type="password" id="password" name="password" required minlength="8"
+                               style="width: 100%; padding: 10px; background: #222; color: #fff; border: 1px solid #ffaa00; border-radius: 5px;">
+                    </div>
+                    
+                    <div style="margin-bottom: 15px;">
+                        <label for="confirmPassword" style="display: block; margin-bottom: 5px; color: #ffaa00;">Confirm Password:</label>
+                        <input type="password" id="confirmPassword" name="confirmPassword" required minlength="8"
+                               style="width: 100%; padding: 10px; background: #222; color: #fff; border: 1px solid #ffaa00; border-radius: 5px;">
+                    </div>
+                    
+                    <button type="submit" style="width: 100%; padding: 12px; background: #ff0000; color: #fff; border: none; border-radius: 5px; font-size: 16px; cursor: pointer;">
+                        🔐 Create Admin User
+                    </button>
+                </form>
+                
+                <div id="setup-message" style="margin-top: 15px; padding: 10px; border-radius: 5px; display: none;"></div>
+            </div>
             
-            <strong>⚠️ Security Notice:</strong> This barrier protects your system from unauthorized access.<br>
-            The dashboard will remain inaccessible until proper authentication is configured.
+            <div style="margin-top: 20px; font-size: 0.9em; color: #666;">
+                <strong>Alternative CLI Setup:</strong><br>
+                <div class="command">./novashield.sh --add-user</div>
+            </div>
         </div>
     </div>
     
@@ -7466,12 +7495,90 @@ def generate_secure_setup_screen(user_count=0):
             return false;
         }});
         
-        // Auto-refresh every 30 seconds to check for user creation
+        // Handle user creation form
+        document.getElementById('userCreationForm').addEventListener('submit', async function(e) {{
+            e.preventDefault();
+            
+            const username = document.getElementById('username').value.trim();
+            const password = document.getElementById('password').value;
+            const confirmPassword = document.getElementById('confirmPassword').value;
+            const messageDiv = document.getElementById('setup-message');
+            
+            // Validation
+            if (username.length < 3) {{
+                showMessage('Username must be at least 3 characters long', 'error');
+                return;
+            }}
+            
+            if (password.length < 8) {{
+                showMessage('Password must be at least 8 characters long', 'error');
+                return;
+            }}
+            
+            if (password !== confirmPassword) {{
+                showMessage('Passwords do not match', 'error');
+                return;
+            }}
+            
+            // Show loading
+            showMessage('Creating admin user...', 'info');
+            document.querySelector('button[type=submit]').disabled = true;
+            
+            try {{
+                const response = await fetch('/api/setup/create-user', {{
+                    method: 'POST',
+                    headers: {{
+                        'Content-Type': 'application/json'
+                    }},
+                    body: JSON.stringify({{
+                        username: username,
+                        password: password
+                    }})
+                }});
+                
+                const data = await response.json();
+                
+                if (response.ok) {{
+                    showMessage('✅ Admin user created successfully! Redirecting to login...', 'success');
+                    setTimeout(() => {{
+                        window.location.reload();
+                    }}, 2000);
+                }} else {{
+                    showMessage('❌ Error: ' + (data.error || 'Failed to create user'), 'error');
+                    document.querySelector('button[type=submit]').disabled = false;
+                }}
+            }} catch (error) {{
+                showMessage('❌ Network error: ' + error.message, 'error');
+                document.querySelector('button[type=submit]').disabled = false;
+            }}
+        }});
+        
+        function showMessage(text, type) {{
+            const messageDiv = document.getElementById('setup-message');
+            messageDiv.textContent = text;
+            messageDiv.style.display = 'block';
+            
+            if (type === 'error') {{
+                messageDiv.style.background = 'rgba(255, 0, 0, 0.2)';
+                messageDiv.style.border = '1px solid #ff0000';
+                messageDiv.style.color = '#ff0000';
+            }} else if (type === 'success') {{
+                messageDiv.style.background = 'rgba(0, 255, 0, 0.2)';
+                messageDiv.style.border = '1px solid #00ff00';
+                messageDiv.style.color = '#00ff00';
+            }} else {{
+                messageDiv.style.background = 'rgba(255, 170, 0, 0.2)';
+                messageDiv.style.border = '1px solid #ffaa00';
+                messageDiv.style.color = '#ffaa00';
+            }}
+        }}
+        
+        // Auto-refresh every 60 seconds to check for user creation (reduced frequency)
         setTimeout(function() {{
             window.location.reload();
-        }}, 30000);
+        }}, 60000);
         
-        console.log('🛡️ NovaShield Security Barrier Active - No users configured');
+        console.log('🛡️ NovaShield Security Barrier Active - Setup Mode');
     </script>
 </body>
 </html>
@@ -11043,6 +11150,75 @@ class Handler(SimpleHTTPRequestHandler):
                     
                 except Exception as e:
                     security_log(f"USERS_API_ERROR error={str(e)}")
+                    self._set_headers(500)
+                    self.wfile.write(json.dumps({'error': str(e)}).encode('utf-8'))
+                    return
+
+            # User creation endpoint for setup screen (only works when no users exist)
+            if parsed.path == '/api/setup/create-user':
+                try:
+                    db = users_db()
+                    userdb = db.get('_userdb', {})
+                    
+                    # Only allow user creation if no users exist (setup mode)
+                    if len(userdb) > 0:
+                        self._set_headers(403)
+                        self.wfile.write(json.dumps({'error': 'User creation only allowed during initial setup'}).encode('utf-8'))
+                        return
+                    
+                    content_length = int(self.headers.get('Content-Length', 0))
+                    body = self.rfile.read(content_length).decode('utf-8')
+                    data = json.loads(body)
+                    
+                    username = data.get('username', '').strip()
+                    password = data.get('password', '')
+                    
+                    # Validation
+                    if not username or len(username) < 3:
+                        self._set_headers(400)
+                        self.wfile.write(json.dumps({'error': 'Username must be at least 3 characters'}).encode('utf-8'))
+                        return
+                    
+                    if not password or len(password) < 8:
+                        self._set_headers(400)
+                        self.wfile.write(json.dumps({'error': 'Password must be at least 8 characters'}).encode('utf-8'))
+                        return
+                    
+                    # Create user using the existing user creation logic
+                    import hashlib
+                    import secrets
+                    
+                    # Generate salt and hash password
+                    salt = secrets.token_hex(32)
+                    password_hash = hashlib.pbkdf2_hmac('sha256', password.encode(), salt.encode(), 10000).hex()
+                    
+                    # Add user to database
+                    if '_userdb' not in db:
+                        db['_userdb'] = {}
+                    
+                    db['_userdb'][username] = {
+                        'password_hash': password_hash,
+                        'salt': salt,
+                        'created': int(time.time()),
+                        'role': 'admin'  # First user is admin
+                    }
+                    
+                    # Save database
+                    with open(SESSIONS, 'w') as f:
+                        json.dump(db, f, indent=2)
+                    
+                    security_log(f"SETUP_USER_CREATED user={username} ip={get_client_ip(self)}")
+                    
+                    self._set_headers(200)
+                    self.wfile.write(json.dumps({
+                        'success': True, 
+                        'message': 'Admin user created successfully. Please log in.',
+                        'username': username
+                    }).encode('utf-8'))
+                    return
+                    
+                except Exception as e:
+                    security_log(f"SETUP_CREATE_USER_ERROR error={str(e)}")
                     self._set_headers(500)
                     self.wfile.write(json.dumps({'error': str(e)}).encode('utf-8'))
                     return
@@ -26701,6 +26877,14 @@ PY
     return 0
   fi
   
+  # Handle secure non-interactive installation mode
+  if [ "${NOVASHIELD_SECURE_INSTALL:-}" = "1" ]; then
+    ns_warn "🔒 Secure installation mode: System configured for first-time user setup via web interface"
+    ns_warn "💡 Navigate to the web interface to create your first administrator account"
+    ns_warn "🌐 Access the dashboard at https://127.0.0.1:8765 after startup"
+    return 0
+  fi
+  
   # Enhanced automated setup - no demo users for security
   if [ "${NS_NON_INTERACTIVE:-}" = "1" ] || [ ! -t 0 ] || [ "${NOVASHIELD_AUTO_START:-}" = "1" ]; then
     ns_warn "🔒 SECURITY NOTICE: Authentication enabled but no users exist"
@@ -27592,6 +27776,11 @@ Core Commands:
   --status               Show service status and information
   --restart-monitors     Restart all monitoring processes
   --validate             Validate comprehensive stability fixes are properly implemented
+
+Installation Modes:
+  NOVASHIELD_SECURE_INSTALL=1 ./novashield.sh --install
+                         Secure non-interactive installation for production deployment
+                         (Creates system ready for web-based user setup)
 
 Web Dashboard:
   --web-start            Start only the web dashboard server
