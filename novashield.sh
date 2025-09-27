@@ -5736,6 +5736,15 @@ stop_monitors(){
   fi
 }
 
+# Restart monitors function (was missing)
+restart_monitors(){  
+  ns_log "🔄 Restarting monitoring services..."
+  stop_monitors
+  sleep 1
+  start_monitors
+  ns_log "✅ All monitoring services restarted successfully"
+}
+
 # ------------------------------ PY WEB SERVER --------------------------------
 # Hardened server with: robust nested YAML, CSRF, optional 2FA, rate-limit/lockout/IP lists,
 # WebSocket terminal, FS ops, site builder, TLS, /logout and /api/whoami.
