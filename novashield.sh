@@ -25772,7 +25772,6 @@ loadJarvisMemory().then(() => {
 // Initialize AI enhancements on page load
 initEnhancedAI();
 JS
-}
 
 setup_termux_service(){
   if ! command -v sv-enable >/dev/null 2>&1; then return 0; fi
@@ -30593,3 +30592,4 @@ case "${1:-}" in
 esac
 
 # End of script
+# EOF
