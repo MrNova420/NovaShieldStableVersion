@@ -87,22 +87,29 @@ PY
   ns_log "   • User Count: 0"
   echo
   
-  if add_user; then
-    echo
-    read -r -p "Enable 2FA for enhanced security? [Y/n]: " yn
-    case "$yn" in 
-      [Nn]*) ns_log "2FA skipped - you can enable it later with --enable-2fa" ;;
-      *) enable_2fa ;;
-    esac
-    
-    # Show final security status
-    echo
-    ns_ok "✅ Security setup complete!"
-    ns_log "🔓 Dashboard access is now enabled for authorized users"
-    ns_log "🌐 Access your dashboard at: https://localhost:8765"
+  # Check if add_user function is available (it should be since we're embedded)
+  if command -v add_user >/dev/null 2>&1 || type add_user >/dev/null 2>&1; then
+    if add_user; then
+      echo
+      read -r -p "Enable 2FA for enhanced security? [Y/n]: " yn
+      case "$yn" in 
+        [Nn]*) ns_log "2FA skipped - you can enable it later with --enable-2fa" ;;
+        *) enable_2fa ;;
+      esac
+      
+      # Show final security status
+      echo
+      ns_ok "✅ Security setup complete!"
+      ns_log "🔓 Dashboard access is now enabled for authorized users"
+      ns_log "🌐 Access your dashboard at: https://localhost:8765"
+    else
+      ns_err "❌ Failed to create user - dashboard access remains blocked"
+      ns_err "💡 Run './novashield.sh --add-user' manually after installation"
+    fi
   else
-    ns_err "❌ Failed to create user - dashboard access remains blocked"
-    ns_err "💡 Run './novashield.sh --add-user' manually after installation"
+    # Fallback if add_user function is not available
+    ns_err "❌ User creation function not available during installation"
+    ns_err "💡 Complete installation will proceed, then run: './novashield.sh --add-user'"
   fi
 }
 
