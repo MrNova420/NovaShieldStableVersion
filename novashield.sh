@@ -30530,34 +30530,8 @@ case "${1:-}" in
   --optimize)
     action="${2:-all}"
     ns_log "🚀 Running consolidated optimization: $action"
-    case "$action" in
-      "all"|"comprehensive") 
-        comprehensive_optimization
-        ;;
-      "memory") 
-        echo "🧠 Optimizing memory usage and management..."
-        _optimize_memory ;;
-      "storage") 
-        echo "💿 Optimizing storage and cleanup..."
-        _cleanup_storage "$NS_HOME" 30
-        _cleanup_storage "$NS_LOGS" 7
-        _cleanup_storage "$NS_TMP" 1 ;;
-      "connections") 
-        echo "🔗 Optimizing network connections..."
-        _optimize_connections ;;
-      "pids") 
-        echo "🔧 Optimizing process and PID management..."
-        _optimize_pids ;;
-      "apis") 
-        echo "🚀 Optimizing API performance..."
-        _optimize_apis ;;
-      "production") optimize_for_production ;;
-      "performance") optimize_system_performance ;;
-      *) 
-        ns_err "Unknown optimization type: $action"
-        ns_log "Available: all, memory, storage, connections, pids, apis, production, performance"
-        exit 1 ;;
-    esac ;;
+    comprehensive_optimization
+    ;;
     
   # Legacy individual commands (maintained for compatibility)
   --optimize-memory)
@@ -30617,3 +30591,5 @@ case "${1:-}" in
   --menu) menu;;
   *) usage; exit 1;;
 esac
+
+# End of script
