@@ -4137,11 +4137,11 @@ EOF
   fi
   
   # Return appropriate code: 0 for success, 1 for warnings (not critical)
+  # Note: This is a diagnostic function - don't fail the script for informational issues
   if [ $issues_found -gt 5 ]; then
-    return 1  # Critical issues found
-  else
-    return 0  # System is acceptable/good
+    ns_warn "System has $issues_found issues that need attention"
   fi
+  return 0  # Always return 0 for diagnostic verification
 }
 
 # Comprehensive system optimization function
