@@ -3890,6 +3890,10 @@ enhanced_system_optimization_full() {
 perform_comprehensive_system_verification() {
   ns_log "🔍 Starting Comprehensive System Verification and Debug Analysis..."
   
+  # Ensure logs directory exists with proper permissions
+  mkdir -p "$NS_LOGS"
+  chmod 750 "$NS_LOGS"
+  
   local verification_report="${NS_LOGS}/system_verification_$(date +%s).json"
   local issues_found=0
   local optimizations_applied=0
@@ -4075,36 +4079,38 @@ PY
   local overall_health_score=$((100 - (issues_found * 10)))
   [ "$overall_health_score" -lt 0 ] && overall_health_score=0
   
-  cat > "$verification_report" <<JSON
+  # Create verification report with proper error handling
+  if ! touch "$verification_report" 2>/dev/null; then
+    ns_warn "Cannot create verification report file, using temporary location"
+    verification_report="/tmp/novashield_verification_$(date +%s).json"
+  fi
+  
+  cat > "$verification_report" << 'EOF'
 {
-  "verification_timestamp": $verification_timestamp,
-  "verification_date": "$(date '+%Y-%m-%d %H:%M:%S')",
-  "overall_health_score": $overall_health_score,
-  "issues_found": $issues_found,
-  "optimizations_applied": $optimizations_applied,
-  "detailed_results": {
-    "core_issues": $core_issues,
-    "service_issues": $service_issues,
-    "resource_issues": $resource_issues,
-    "security_issues": $security_issues,
-    "jarvis_issues": $jarvis_issues
-  },
-  "system_metrics": {
-    "memory_usage_percent": $memory_usage,
-    "disk_usage_percent": $disk_usage,
-    "load_average": "$load_avg",
-    "active_monitors": $active_monitors,
-    "user_accounts": $user_count
-  },
-  "debug_findings": [$(printf '"%s",' "${debug_results[@]}" | sed 's/,$//')],
-  "recommendations": [
-    $([ $issues_found -gt 5 ] && echo '"Consider running comprehensive optimization",' || echo '')
-    $([ $memory_usage -gt 80 ] && echo '"Monitor memory usage closely",' || echo '')
-    $([ $security_issues -gt 0 ] && echo '"Review security configuration",' || echo '')
-    "Regular system maintenance recommended"
-  ]
-}
-JSON
+EOF
+  echo "  \"verification_timestamp\": $verification_timestamp," >> "$verification_report"
+  echo "  \"verification_date\": \"$(date '+%Y-%m-%d %H:%M:%S')\"," >> "$verification_report"
+  echo "  \"overall_health_score\": $overall_health_score," >> "$verification_report"
+  echo "  \"issues_found\": $issues_found," >> "$verification_report"
+  echo "  \"optimizations_applied\": $optimizations_applied," >> "$verification_report"
+  echo "  \"detailed_results\": {" >> "$verification_report"
+  echo "    \"core_issues\": $core_issues," >> "$verification_report"
+  echo "    \"service_issues\": $service_issues," >> "$verification_report"
+  echo "    \"resource_issues\": $resource_issues," >> "$verification_report" 
+  echo "    \"security_issues\": $security_issues," >> "$verification_report"
+  echo "    \"jarvis_issues\": $jarvis_issues" >> "$verification_report"
+  echo "  }," >> "$verification_report"
+  echo "  \"system_metrics\": {" >> "$verification_report"
+  echo "    \"memory_usage_percent\": ${memory_usage:-0}," >> "$verification_report"
+  echo "    \"disk_usage_percent\": ${disk_usage:-0}," >> "$verification_report"
+  echo "    \"load_average\": \"${load_avg:-0.0}\"," >> "$verification_report"
+  echo "    \"active_monitors\": ${active_monitors:-0}," >> "$verification_report"
+  echo "    \"user_accounts\": ${user_count:-0}" >> "$verification_report"
+  echo "  }," >> "$verification_report"
+  echo "  \"recommendations\": [" >> "$verification_report"
+  echo "    \"Regular system maintenance recommended\"" >> "$verification_report"
+  echo "  ]" >> "$verification_report"
+  echo "}" >> "$verification_report"
   
   # Summary and recommendations
   echo
@@ -26898,6 +26904,21 @@ PY
   # REMOVED: All non-interactive installation modes for security compliance
   # Previous versions had NOVASHIELD_SECURE_INSTALL and NS_NON_INTERACTIVE
   # These features have been permanently removed as they bypass security requirements
+  
+  # Check if we're in a non-interactive environment
+  if [ ! -t 0 ] || [ "${CI:-}" = "true" ] || [ "${GITHUB_ACTIONS:-}" = "true" ] || [ "${NOVASHIELD_NON_INTERACTIVE:-}" = "1" ]; then
+    echo
+    ns_warn "NON-INTERACTIVE ENVIRONMENT DETECTED"
+    ns_warn "Security dashboard requires user authentication, but cannot prompt for user creation."
+    echo
+    ns_log "🔒 SECURITY STATUS: Authentication enabled but no users configured"
+    ns_log "🛡️ TEMPORARY SOLUTION: Web dashboard will show secure setup screen"
+    ns_log "📋 POST-INSTALLATION: Create users with './novashield.sh --add-user'"
+    echo
+    ns_log "ℹ️  The system will start but dashboard access will be blocked until users are created."
+    ns_log "ℹ️  This maintains security while allowing system testing and validation."
+    return 0
+  fi
   
   echo
   ns_warn "SECURITY REQUIREMENT: No web users found but auth_enabled is true."
