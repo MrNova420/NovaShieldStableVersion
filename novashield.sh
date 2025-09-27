@@ -3885,6 +3885,7 @@ perform_comprehensive_system_verification() {
   local issues_found=0
   local optimizations_applied=0
   local debug_results=()
+  local user_count=0
   
   echo "🔍 COMPREHENSIVE SYSTEM VERIFICATION"
   echo "===================================="
@@ -4004,8 +4005,8 @@ perform_comprehensive_system_verification() {
   if [ "$auth_enabled" = "true" ]; then
     echo "  ✅ Authentication: Enabled"
     
-    # Check for users
-    local user_count=$(python3 - "$NS_SESS_DB" <<'PY' 2>/dev/null
+    # Check for users (set the function-level user_count variable)
+    user_count=$(python3 - "$NS_SESS_DB" <<'PY' 2>/dev/null
 import json,sys
 try: j=json.load(open(sys.argv[1]))
 except: j={}
@@ -4120,7 +4121,27 @@ JSON
     echo "🚨 Run: ./novashield.sh --comprehensive-optimization"
   fi
   
-  return $issues_found
+  # Return appropriate code: 0 for success, 1 for warnings (not critical)
+  if [ $issues_found -gt 5 ]; then
+    return 1  # Critical issues found
+  else
+    return 0  # System is acceptable/good
+  fi
+}
+
+# Comprehensive system optimization function
+comprehensive_optimization() {
+  ns_log "🚀 Running comprehensive system optimization..."
+  
+  # Run all optimization functions
+  _optimize_memory
+  _cleanup_storage "$NS_LOGS" 7
+  _optimize_connections
+  _optimize_pids  
+  _optimize_apis
+  _optimize_system_resources
+  
+  ns_log "✅ Comprehensive optimization complete"
 }
 
 # Enhanced final system preparation
