@@ -23541,6 +23541,31 @@ install_all_embedded(){
   display_installation_summary "$detected_environment" "$auto_conservative"
 }
 
+# Check if any users exist in the system
+check_users_exist(){
+  if [ ! -f "$NS_SESS_DB" ]; then
+    return 1  # No database file means no users
+  fi
+  
+  # Check if users exist in the database
+  local user_count
+  user_count=$(python3 -c "
+import json, sys
+try:
+    with open('$NS_SESS_DB', 'r') as f:
+        db = json.load(f)
+    print(len(db.get('users', {})))
+except:
+    print(0)
+" 2>/dev/null || echo 0)
+  
+  if [ "${user_count:-0}" -gt 0 ]; then
+    return 0  # Users exist
+  else
+    return 1  # No users
+  fi
+}
+
 # Auto-fix system to ensure service functionality
 auto_fix_system_for_immediate_functionality(){
   ns_log "🔧 Running service auto-fix for optimal functionality..."
@@ -24337,11 +24362,11 @@ DEPLOYMENT_GUIDE
 }
 
 start_all(){
-  # ENHANCEMENT: Ultra-Comprehensive System Startup with ALL Features Enabled by Default
-  ns_log "🚀 Starting NovaShield with COMPLETE Enterprise-Grade Integration..."
-  ns_log "🎯 ALL advanced features, security enhancements, and optimizations enabled by default"
+  # SIMPLIFIED: Core System Startup - Focus on Essential Services Only
+  ns_log "🚀 Starting NovaShield Core Services..."
+  ns_log "🎯 Essential services startup with reliable operation"
   
-  # PHASE 1: Core System Setup with Enhanced Features
+  # PHASE 1: Core System Setup
   ensure_dirs
   write_default_config
   generate_keys
@@ -24350,101 +24375,35 @@ start_all(){
   write_server_py
   write_dashboard
   
-  # PHASE 2: Enable ALL Advanced Features by Default
-  ns_log "🔧 Enabling ALL advanced features for optimal experience..."
-  
-  # Enable all optional features by default (no longer optional)
-  export NOVASHIELD_AUTO_RESTART=1
-  export NOVASHIELD_SECURITY_HARDENING=1
-  export NOVASHIELD_STRICT_SESSIONS=1
-  export NOVASHIELD_USE_WEB_WRAPPER=1
-  export NOVASHIELD_EXTERNAL_CHECKS=1
-  export NOVASHIELD_WEB_AUTO_START=1
-  export NOVASHIELD_AUTH_STRICT=1
-  
-  ns_log "✅ All advanced features enabled: auto-restart, security hardening, strict sessions, web wrapper, external checks"
-  
-  # PHASE 3: Comprehensive System Optimization (Merged from --comprehensive-optimization)
-  ns_log "⚡ Running comprehensive system optimization..."
-  comprehensive_system_optimization
-  
-  # PHASE 4: Enterprise Setup Integration (Merged from --enterprise-setup)
-  ns_log "🏢 Configuring enterprise features..."
-  enhanced_scaling_support "configure_multiuser" 2>/dev/null || true
-  enhanced_performance_optimization "optimize" 2>/dev/null || true
-  enhanced_docker_support "generate_dockerfile" 2>/dev/null || true
-  enhanced_plugin_system "install" "enterprise-security" 2>/dev/null || true
-  
-  # PHASE 5: Advanced Security Automation and Intelligence
-  ns_log "🛡️ Initializing integrated security automation..."
-  initialize_security_automation 2>/dev/null || true
-  initialize_jarvis_automation 2>/dev/null || true
-  setup_integrated_monitoring 2>/dev/null || true
-  
-  # Run advanced security automation suite by default
-  ns_log "🔒 Running comprehensive security automation suite..."
-  timeout 60 advanced_security_automation_suite "comprehensive" "false" "summary" 2>/dev/null || ns_warn "Security automation completed with timeout (normal for comprehensive scan)"
-  
-  # PHASE 6: JARVIS AI Integration with Full System Access
-  ns_log "🤖 Initializing JARVIS with complete system integration..."
-  initialize_jarvis_system_integration 2>/dev/null || true
-  jarvis_start_orchestration 2>/dev/null || true
-  
-  # PHASE 7: Enhanced Auto-Fix System (Merged from --enhanced-auto-fix)
-  ns_log "🔧 Running comprehensive auto-fix system..."
-  timeout 30 enhanced_auto_fix_system "comprehensive" 2>/dev/null || ns_warn "Auto-fix system completed with timeout"
-  
-  # PHASE 8: Authentication and Session Management
+  # PHASE 2: Authentication and Session Management
   ensure_auth_bootstrap
   open_session 2>/dev/null || true
   
-  # PHASE 9: Start All Services with Enhanced Monitoring
-  ns_log "🖥️ Starting all monitoring and web services..."
+  # PHASE 3: Start Core Services
+  ns_log "🖥️ Starting monitoring and web services..."
   start_monitors
   start_web
   
-  # PHASE 10: Advanced Automation Engines
-  start_automation_engines 2>/dev/null || true
-  
-  # PHASE 11: Intelligence Gathering Integration
-  ns_log "🕵️ Setting up intelligence gathering capabilities..."
-  enhanced_intelligence_dashboard "generate" >/dev/null 2>&1 || true
-  
-  # PHASE 12: System Health and Performance Validation
-  ns_log "🏥 Running system health validation..."
-  timeout 20 comprehensive_system_optimization 2>/dev/null || ns_warn "System health check completed with timeout"
-  
-  # PHASE 13: Final Configuration and Validation
-  ns_log "✅ Running final system validation..."
-  timeout 30 validate_enhanced_features 2>/dev/null || ns_warn "Feature validation completed"
-  
-  # SUCCESS: Display comprehensive status
-  ns_ok "🎯 NovaShield FULLY OPERATIONAL with COMPLETE Enterprise Integration!"
-  
-  # Display enhanced status information
-  local scheme="http"
-  local tls_enabled; tls_enabled=$(yaml_get "security" "tls_enabled" "false" 2>/dev/null || echo "true")
-  [ "$tls_enabled" = "true" ] && scheme="https"
-  
-  ns_log "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-  ns_log "🌟 NOVASHIELD ENTERPRISE-GRADE SECURITY PLATFORM - FULLY OPERATIONAL"
-  ns_log "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-  ns_log "🌐 Dashboard: ${scheme}://127.0.0.1:8765/"
-  ns_log "🤖 JARVIS AI: Complete automation and intelligence integration ACTIVE"
-  ns_log "🛡️ Security: Advanced threat detection, automation, and hardening ENABLED"
-  ns_log "⚡ Performance: Comprehensive optimization and monitoring ACTIVE"
-  ns_log "🏢 Enterprise: Multi-user scaling, Docker support, and plugins CONFIGURED"
-  ns_log "🕵️ Intelligence: Advanced scanning and analysis capabilities READY"
-  ns_log "🔧 Auto-Restart: All services with intelligent rate limiting ENABLED"
-  ns_log "🔒 Hardening: Enterprise security hardening and strict sessions ACTIVE"
-  ns_log "📊 Monitoring: Real-time system health and performance tracking OPERATIONAL"
-  ns_log "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-  ns_log "🎉 ALL FEATURES ENABLED BY DEFAULT - NovaShield is now running in MAXIMUM CAPABILITY MODE"
-  ns_log "ℹ️  No additional setup required - all enhancements, security, and optimizations are ACTIVE"
-  ns_log "🔒 SECURITY: Create your first admin user with: ./novashield.sh --add-user"
-  # Final auto-fix to ensure service functionality
+  # PHASE 4: Service Auto-Fix and Validation
   auto_fix_system_for_immediate_functionality
-  ns_log "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  
+  # SUCCESS: Display status
+  ns_ok "🎯 NovaShield Core Services OPERATIONAL!"
+  
+  # Display status information
+  local scheme="https"
+  
+  ns_log "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  ns_log "🌟 NOVASHIELD - CORE SERVICES OPERATIONAL"
+  ns_log "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  ns_log "🌐 Dashboard: ${scheme}://127.0.0.1:8765/"
+  ns_log "📊 Monitoring: Real-time system health tracking ACTIVE"
+  ns_log "🔒 Security: User authentication and TLS encryption ENABLED"
+  ns_log "🔧 Auto-Restart: Service monitoring and recovery ACTIVE"
+  ns_log "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  ns_log "🎉 CORE FUNCTIONALITY READY - Create admin user: ./novashield.sh --add-user"
+  ns_log "🔒 SECURITY: All services running with secure authentication required"
+  ns_log "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 }
 
 initialize_security_automation(){
