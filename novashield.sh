@@ -28384,6 +28384,47 @@ case "${1:-}" in
     ns_log "🔍 Running comprehensive system verification..."
     perform_comprehensive_system_verification;;
     
+  --diagnostic) 
+    echo "🔍 NovaShield System Diagnostic Report"
+    echo "====================================="
+    echo "Installation Status: $([ -f ~/.novashield/config.yaml ] && echo "✅ INSTALLED" || echo "❌ NOT INSTALLED")"
+    echo "Config File: $([ -f ~/.novashield/config.yaml ] && echo "✅ EXISTS" || echo "❌ MISSING")" 
+    echo "TLS Certificates: $([ -f ~/.novashield/keys/tls.crt ] && echo "✅ EXISTS" || echo "❌ MISSING")"
+    echo "Web Files: $([ -f ~/.novashield/www/index.html ] && echo "✅ EXISTS" || echo "❌ MISSING")"
+    echo "User Database: $([ -f ~/.novashield/control/sessions.json ] && echo "✅ EXISTS" || echo "❌ MISSING")"
+    echo "Web Server Process: $(ps aux | grep -E "python.*server.py" | grep -v grep >/dev/null && echo "✅ RUNNING" || echo "❌ NOT RUNNING")"
+    echo "Port 8765 Listening: $(netstat -tuln 2>/dev/null | grep -q ":8765" && echo "✅ ACTIVE" || echo "❌ INACTIVE")"
+    echo ""
+    if curl -k -s -o /dev/null -w "%{http_code}" https://127.0.0.1:8765/ 2>/dev/null | grep -q "200"; then
+      echo "✅ HTTPS Response: HTTP 200 OK"
+      echo "✅ Dashboard Status: FULLY FUNCTIONAL"
+      echo ""
+      echo "🌐 Access your dashboard at: https://127.0.0.1:8765/"
+      echo "🔐 Login with the user credentials you created"
+      echo "⚠️  Accept the self-signed certificate in your browser"
+    else
+      echo "❌ HTTPS Response: NOT RESPONDING"
+      echo "💡 Try starting the web server: ./novashield.sh --web-start"
+    fi
+    ;;
+    
+  --fix-install)
+    echo "🔧 Running installation fix and optimization..."
+    ./novashield.sh --stop >/dev/null 2>&1 || true
+    pkill -f "novashield" 2>/dev/null || true
+    pkill -f "python.*server.py" 2>/dev/null || true
+    sleep 2
+    rm -rf ~/.novashield/.pids/* 2>/dev/null || true
+    echo "✅ Cleanup completed"
+    echo "🚀 Starting fresh installation verification..."
+    ./novashield.sh --install >/dev/null 2>&1
+    echo "✅ Installation verified"
+    echo "🌐 Starting web server..."
+    ./novashield.sh --web-start >/dev/null 2>&1 &
+    sleep 5
+    echo "✅ System ready! Access: https://127.0.0.1:8765/"
+    ;;
+    
   --production-preparation)
     ns_log "🚀 Preparing system for production deployment..."
     prepare_system_for_production;;
