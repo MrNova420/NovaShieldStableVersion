@@ -1,12 +1,21 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# NovaShield Terminal 3.3.0-Enterprise — JARVIS Edition — Ultra Long-Term Optimized
+# NovaShield Terminal 3.6.0-Enterprise-AAA-Plus — JARVIS Edition — Ultra Long-Term Optimized
 # ==============================================================================
 # Author  : niteas aka MrNova420
 # Project : NovaShield Enterprise Security Operations Center
 # License : MIT
 # Platform: Termux (Android) + Linux (Debian/Ubuntu/Arch/Fedora) auto-detect
 # OPTIMIZED: 99.9% Uptime, Storage Efficiency, Multi-User Support, Long-Term Reliability
+# ==============================================================================
+#
+# SECURITY NOTICE: CRITICAL SECURITY REQUIREMENTS
+# ==============================================================================
+# 1. NON-INTERACTIVE USER CREATION IS PROHIBITED - Security Flaw Prevention
+# 2. User selection and creation is MANDATORY for security compliance
+# 3. All authentication bypasses have been PERMANENTLY REMOVED
+# 4. Demo users and default accounts are FORBIDDEN - Security Risk
+# 5. Interactive setup ensures proper security configuration
 # ==============================================================================
 
 # Use less aggressive error handling during initialization to prevent memory-related failures
@@ -33,7 +42,7 @@ check_system_resources() {
   return 0
 }
 
-NS_VERSION="3.4.0-Enterprise-AAA-JARVIS-Centralized"  # JARVIS-Centralized System
+NS_VERSION="3.6.0-Enterprise-AAA-Plus"  # Complete Enterprise Transformation with Full Jarvis Integration
 
 NS_HOME="${HOME}/.novashield"
 NS_BIN="${NS_HOME}/bin"
