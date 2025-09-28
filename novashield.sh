@@ -15208,9 +15208,7 @@ write_dashboard(){
 </body>
 </html>
 HTML
-}
 
-write_styles(){
   write_file "${NS_WWW}/style.css" 644 <<'CSS'
 :root { 
   --bg:#0a1a3d; 
@@ -19691,9 +19689,7 @@ body.login-active main{
 }
 
 CSS
-}
 
-write_javascript(){
   write_file "${NS_WWW}/app.js" 644 <<'JS'
 const $ = sel => document.querySelector(sel);
 const $$ = sel => Array.from(document.querySelectorAll(sel));
@@ -27644,8 +27640,7 @@ start_all(){
     ns_err "❌ PHASE 1 failed - core system setup incomplete"
     return 1
   fi
-}
-
+  
 # Enhanced startup tracking system
 _initialize_startup_tracking() {
   local startup_db="$1"
@@ -27878,7 +27873,7 @@ PY
 #   ns_log "🎉 ALL FEATURES ENABLED BY DEFAULT - NovaShield is now running in MAXIMUM CAPABILITY MODE"
 #   ns_log "ℹ️  No additional setup required - all enhancements, security, and optimizations are ACTIVE"
 #   ns_log "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-# }
+}
 
 initialize_security_automation(){
   ns_log "🛡️ Initializing integrated security automation..."
