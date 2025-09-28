@@ -13214,8 +13214,6 @@ write_dashboard(){
   <link rel="stylesheet" href="/static/style.css" />
 </head>
 <body>
-  <!-- Main dashboard content - hidden by default until authenticated -->
-  <div id="dashboard-content" style="display:none;">
   <header class="enterprise-header">
     <div class="header-left">
       <div class="brand-enterprise">
@@ -13268,164 +13266,105 @@ write_dashboard(){
     </div>
   </header>
 
-  <!-- Enhanced Navigation System -->
-  <nav class="enterprise-nav">
-    <div class="nav-container">
-      <div class="nav-section">
-        <div class="nav-category">Core Operations</div>
-        <button data-tab="ai" class="nav-item active" type="button">
-          <span class="nav-icon">🤖</span>
-          <span class="nav-text">JARVIS AI</span>
-          <span class="nav-indicator" id="ai-indicator">●</span>
-        </button>
-        <button data-tab="status" class="nav-item" type="button">
-          <span class="nav-icon">📈</span>
-          <span class="nav-text">System Status</span>
-          <span class="nav-indicator" id="status-indicator">●</span>
-        </button>
-        <button data-tab="network" class="nav-item" type="button">
-          <span class="nav-icon">🌐</span>
-          <span class="nav-text">Network Monitor</span>
-        </button>
-      </div>
-      
-      <div class="nav-section">
-        <div class="nav-category">Security Operations</div>
-        <button data-tab="security" class="nav-item" type="button">
-          <span class="nav-icon">🛡️</span>
-          <span class="nav-text">Security Center</span>
-          <span class="nav-badge" id="security-alerts">0</span>
-        </button>
-        <button data-tab="alerts" class="nav-item" type="button">
-          <span class="nav-icon">🚨</span>
-          <span class="nav-text">Threat Alerts</span>
-          <span class="nav-badge alert" id="alert-count">0</span>
-        </button>
-      </div>
-      
-      <div class="nav-section">
-        <div class="nav-category">Tools & Management</div>
-        <button data-tab="tools" class="nav-item" type="button">
-          <span class="nav-icon">🔧</span>
-          <span class="nav-text">Security Tools</span>
-        </button>
-        <button data-tab="files" class="nav-item" type="button">
-          <span class="nav-icon">📁</span>
-          <span class="nav-text">File Manager</span>
-        </button>
-        <button data-tab="terminal" class="nav-item" type="button">
-          <span class="nav-icon">💻</span>
-          <span class="nav-text">Terminal</span>
-        </button>
-        <button data-tab="webgen" class="nav-item" type="button">
-          <span class="nav-icon">🌐</span>
-          <span class="nav-text">Web Builder</span>
-        </button>
-      </div>
-      
-      <div class="nav-section">
-        <div class="nav-category">Configuration</div>
-        <button data-tab="config" class="nav-item" type="button">
-          <span class="nav-icon">⚙️</span>
-          <span class="nav-text">Configuration</span>
-        </button>
-        <button data-tab="results" class="nav-item" type="button">
-          <span class="nav-icon">📊</span>
-          <span class="nav-text">Results</span>
-        </button>
-      </div>
+  <nav class="enterprise-nav" aria-label="Main Navigation">
+    <div class="nav-section">
+      <div class="nav-category">AI & Intelligence</div>
+      <button data-tab="ai" class="nav-item active" type="button">
+        <span class="nav-icon">🤖</span>
+        <span class="nav-text">JARVIS AI</span>
+        <span class="nav-badge" id="ai-conversations">0</span>
+      </button>
+      <button data-tab="intelligence" class="nav-item" type="button">
+        <span class="nav-icon">🔍</span>
+        <span class="nav-text">Intelligence Dashboard</span>
+        <span class="nav-indicator" id="intel-indicator">●</span>
+      </button>
+      <button data-tab="business" class="nav-item" type="button">
+        <span class="nav-icon">💼</span>
+        <span class="nav-text">Business Dashboard</span>
+        <span class="nav-indicator" id="business-indicator">●</span>
+      </button>
+      <button data-tab="analytics" class="nav-item" type="button">
+        <span class="nav-icon">📈</span>
+        <span class="nav-text">Advanced Analytics</span>
+      </button>
+    </div>
+    
+    <div class="nav-section">
+      <div class="nav-category">Operations Center</div>
+      <button data-tab="dashboard" class="nav-item" type="button">
+        <span class="nav-icon">📊</span>
+        <span class="nav-text">Dashboard</span>
+      </button>
+      <button data-tab="status" class="nav-item" type="button">
+        <span class="nav-icon">📈</span>
+        <span class="nav-text">System Status</span>
+        <span class="nav-indicator" id="status-indicator">●</span>
+      </button>
+      <button data-tab="network" class="nav-item" type="button">
+        <span class="nav-icon">🌐</span>
+        <span class="nav-text">Network Monitor</span>
+      </button>
+    </div>
+    
+    <div class="nav-section">
+      <div class="nav-category">Security Operations</div>
+      <button data-tab="security" class="nav-item" type="button">
+        <span class="nav-icon">🛡️</span>
+        <span class="nav-text">Security Center</span>
+        <span class="nav-badge" id="security-alerts">0</span>
+      </button>
+      <button data-tab="alerts" class="nav-item" type="button">
+        <span class="nav-icon">🚨</span>
+        <span class="nav-text">Threat Alerts</span>
+        <span class="nav-badge alert" id="alert-count">0</span>
+      </button>
+    </div>
+    
+    <div class="nav-section">
+      <div class="nav-category">Tools & Management</div>
+      <button data-tab="tools" class="nav-item" type="button">
+        <span class="nav-icon">🔧</span>
+        <span class="nav-text">Security Tools</span>
+      </button>
+      <button data-tab="files" class="nav-item" type="button">
+        <span class="nav-icon">📁</span>
+        <span class="nav-text">File Explorer</span>
+      </button>
+      <button data-tab="terminal" class="nav-item" type="button">
+        <span class="nav-icon">💻</span>
+        <span class="nav-text">Terminal</span>
+      </button>
+      <button data-tab="webgen" class="nav-item" type="button">
+        <span class="nav-icon">🌐</span>
+        <span class="nav-text">Web Builder</span>
+      </button>
+      <button data-tab="config" class="nav-item" type="button">
+        <span class="nav-icon">⚙️</span>
+        <span class="nav-text">Configuration</span>
+      </button>
     </div>
   </nav>
 
   <main>
-    <section id="tab-status" class="tab" aria-labelledby="Status">
-      <p class="section-description">Real-time system monitoring dashboard showing CPU load, memory usage, disk space, network connectivity, and security status. Use the monitor controls below to enable/disable specific monitoring modules.</p>
-      
-      <!-- Live Monitoring Stats Section -->
-      <section class="live-stats-panel">
-        <h2 class="stats-title">🔴 Live System Metrics</h2>
-        <div class="stats-grid">
-          <div class="stat-card">
-            <div class="stat-header">CPU Load</div>
-            <div class="stat-visual">
-              <div class="progress-bar">
-                <div class="progress-fill" id="cpu-progress"></div>
-              </div>
-              <span class="stat-value" id="cpu-stat">0%</span>
-            </div>
+    <!-- ULTRA-ENHANCED SYSTEM STATUS MONITORING -->
+    <section id="tab-status" class="tab" aria-labelledby="Advanced System Status">
+      <div class="status-center-header">
+        <h2>📊 Advanced System Status Center</h2>
+        <div class="status-controls">
+          <div class="system-uptime" id="system-uptime">
+            <span class="uptime-value">99.97%</span>
+            <span class="uptime-label">Uptime</span>
           </div>
-          <div class="stat-card">
-            <div class="stat-header">Memory</div>
-            <div class="stat-visual">
-              <div class="progress-bar">
-                <div class="progress-fill" id="mem-progress"></div>
-              </div>
-              <span class="stat-value" id="mem-stat">0%</span>
-            </div>
+          <div class="last-update" id="last-status-update">
+            <span class="update-time">2s ago</span>
+            <span class="update-label">Last Update</span>
           </div>
-          <div class="stat-card">
-            <div class="stat-header">Disk</div>
-            <div class="stat-visual">
-              <div class="progress-bar">
-                <div class="progress-fill" id="disk-progress"></div>
-              </div>
-              <span class="stat-value" id="disk-stat">0%</span>
-            </div>
-          </div>
-          <div class="stat-card">
-            <div class="stat-header">Network</div>
-            <div class="stat-visual">
-              <div class="status-indicator" id="net-indicator"></div>
-              <span class="stat-value" id="net-stat">Checking...</span>
-            </div>
-          </div>
-          <div class="stat-card">
-            <div class="stat-header">Security</div>
-            <div class="stat-visual">
-              <div class="status-indicator" id="sec-indicator"></div>
-              <span class="stat-value" id="sec-stat">Monitoring</span>
-            </div>
-          </div>
-          <div class="stat-card">
-            <div class="stat-header">Monitors</div>
-            <div class="stat-visual">
-              <div class="monitor-count" id="monitor-count">
-                <span class="active" id="monitors-active">0</span>/<span id="monitors-total">0</span>
-              </div>
-              <span class="stat-value" id="monitor-stat">Active</span>
-            </div>
-          </div>
-        </div>
-      </section>
-      
-      <section class="grid">
-        <div class="card" id="card-cpu" title="System CPU load averages with warning and critical thresholds"><h2>CPU Load</h2><div class="value" id="cpu"></div></div>
-        <div class="card" id="card-mem" title="Memory usage percentage with available memory and threshold monitoring"><h2>Memory Usage</h2><div class="value" id="mem"></div></div>
-        <div class="card" id="card-disk" title="Disk space usage for all mounted filesystems with free space reporting"><h2>Disk Space</h2><div class="value" id="disk"></div></div>
-        <div class="card" id="card-net" title="Network connectivity status and external reachability checks"><h2>Network Status</h2><div class="value" id="net"></div></div>
-        <div class="card" id="card-int" title="File system integrity monitoring and critical file change detection"><h2>File Integrity</h2><div class="value" id="int"></div></div>
-        <div class="card" id="card-proc" title="Running process monitoring and resource usage tracking"><h2>Process Monitor</h2><div class="value" id="proc"></div></div>
-        <div class="card" id="card-user" title="User login monitoring and session tracking"><h2>User Sessions</h2><div class="value" id="user"></div></div>
-        <div class="card" id="card-svc" title="System service status monitoring and health checks"><h2>Service Status</h2><div class="value" id="svc"></div></div>
-        <div class="card" id="card-meta" title="System metadata including uptime, load averages, and performance metrics"><h2>System Info</h2><div class="value" id="meta"></div></div>
-      </section>
-      <div class="panel">
-        <h3>Monitor Controls</h3>
-        <p class="panel-description">Enable or disable individual monitoring modules. Active monitors will continuously collect data and generate alerts when thresholds are exceeded.</p>
-        <div class="toggles">
-          <button class="toggle" data-target="cpu" type="button" title="Monitor CPU load averages and performance">CPU Monitor</button>
-          <button class="toggle" data-target="memory" type="button" title="Monitor memory usage and availability">Memory Monitor</button>
-          <button class="toggle" data-target="disk" type="button" title="Monitor disk space usage and I/O">Disk Monitor</button>
-          <button class="toggle" data-target="network" type="button" title="Monitor network connectivity and external checks">Network Monitor</button>
-          <button class="toggle" data-target="integrity" type="button" title="Monitor file system changes and integrity">Integrity Monitor</button>
-          <button class="toggle" data-target="process" type="button" title="Monitor running processes and resource usage">Process Monitor</button>
-          <button class="toggle" data-target="userlogins" type="button" title="Monitor user logins and session activity">User Monitor</button>
-          <button class="toggle" data-target="services" type="button" title="Monitor system service status and health">Service Monitor</button>
-          <button class="toggle" data-target="logs" type="button" title="Monitor system logs for important events">Log Monitor</button>
-          <button class="toggle" data-target="scheduler" type="button" title="Monitor scheduled tasks and automation">Scheduler Monitor</button>
+          <button class="control-btn" id="auto-monitor-toggle" onclick="toggleAutoMonitoring()">🔄 Auto-Monitor: ON</button>
         </div>
       </div>
-    </section>
+      
+      <p class="section-description">Comprehensive real-time system monitoring with predictive analytics, automated health checks, performance optimization, and 99.9% uptime tracking. Advanced monitoring with microsecond precision and intelligent alerting.</p>
       
       <!-- Critical System Metrics Overview -->
       <div class="critical-status-grid">
@@ -15245,10 +15184,9 @@ write_dashboard(){
       </div>
     </section>
   </main>
-  </div> <!-- End dashboard-content -->
 
-  <!-- Full-screen blackout + login overlay - shown by default -->
-  <div id="login" class="login" style="display:flex;" aria-modal="true" role="dialog" aria-labelledby="login-title">
+  <!-- Full-screen blackout + login overlay -->
+  <div id="login" class="login" style="display:none;" aria-modal="true" role="dialog" aria-labelledby="login-title">
     <div class="login-card">
       <div class="login-logo">
         <span class="ring"></span>
@@ -15270,7 +15208,9 @@ write_dashboard(){
 </body>
 </html>
 HTML
+}
 
+write_styles(){
   write_file "${NS_WWW}/style.css" 644 <<'CSS'
 :root { 
   --bg:#0a1a3d; 
@@ -19751,7 +19691,9 @@ body.login-active main{
 }
 
 CSS
+}
 
+write_javascript(){
   write_file "${NS_WWW}/app.js" 644 <<'JS'
 const $ = sel => document.querySelector(sel);
 const $$ = sel => Array.from(document.querySelectorAll(sel));
@@ -22418,13 +22360,11 @@ $('#terminal-reconnect')?.addEventListener('click', () => {
 
 function showLogin() {
     $('#login').style.display = 'flex';
-    $('#dashboard-content').style.display = 'none';
     document.body.classList.add('login-active');
 }
 
 function hideLogin() {
     $('#login').style.display = 'none';
-    $('#dashboard-content').style.display = 'block';
     document.body.classList.remove('login-active');
 }
 
@@ -27704,8 +27644,7 @@ start_all(){
     ns_err "❌ PHASE 1 failed - core system setup incomplete"
     return 1
   fi
-}
-
+  
 # Enhanced startup tracking system
 _initialize_startup_tracking() {
   local startup_db="$1"
