@@ -27644,7 +27644,8 @@ start_all(){
     ns_err "❌ PHASE 1 failed - core system setup incomplete"
     return 1
   fi
-  
+}
+
 # Enhanced startup tracking system
 _initialize_startup_tracking() {
   local startup_db="$1"
