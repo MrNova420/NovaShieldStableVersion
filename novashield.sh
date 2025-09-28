@@ -13214,6 +13214,8 @@ write_dashboard(){
   <link rel="stylesheet" href="/static/style.css" />
 </head>
 <body>
+  <!-- Main dashboard content - hidden by default until authenticated -->
+  <div id="dashboard-content" style="display:none;">
   <header class="enterprise-header">
     <div class="header-left">
       <div class="brand-enterprise">
@@ -15184,9 +15186,10 @@ write_dashboard(){
       </div>
     </section>
   </main>
+  </div> <!-- End dashboard-content -->
 
-  <!-- Full-screen blackout + login overlay -->
-  <div id="login" class="login" style="display:none;" aria-modal="true" role="dialog" aria-labelledby="login-title">
+  <!-- Full-screen blackout + login overlay - shown by default -->
+  <div id="login" class="login" style="display:flex;" aria-modal="true" role="dialog" aria-labelledby="login-title">
     <div class="login-card">
       <div class="login-logo">
         <span class="ring"></span>
@@ -22356,11 +22359,13 @@ $('#terminal-reconnect')?.addEventListener('click', () => {
 
 function showLogin() {
     $('#login').style.display = 'flex';
+    $('#dashboard-content').style.display = 'none';
     document.body.classList.add('login-active');
 }
 
 function hideLogin() {
     $('#login').style.display = 'none';
+    $('#dashboard-content').style.display = 'block';
     document.body.classList.remove('login-active');
 }
 
@@ -25565,6 +25570,7 @@ loadJarvisMemory().then(() => {
 // Initialize AI enhancements on page load
 initEnhancedAI();
 JS
+}
 
 setup_termux_service(){
   if ! command -v sv-enable >/dev/null 2>&1; then return 0; fi
