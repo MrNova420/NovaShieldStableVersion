@@ -26684,6 +26684,12 @@ _enhanced_web_startup() {
   export NOVASHIELD_AI_INTEGRATION=1
   export NOVASHIELD_HTTPS_ONLY=1
   
+  # Function to check if web wrapper is enabled
+  is_web_wrapper_enabled() {
+    # Web wrapper is enabled by default for enhanced stability
+    return 0
+  }
+
   # Start with enhanced internal stability wrapper if enabled
   if is_web_wrapper_enabled; then
     ns_log "Starting web server with enhanced internal stability wrapper..."
