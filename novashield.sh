@@ -13248,24 +13248,94 @@ write_dashboard(){
   </nav>
 
   <main>
-    <!-- ULTRA-ENHANCED SYSTEM STATUS MONITORING -->
-    <section id="tab-status" class="tab" aria-labelledby="Advanced System Status">
-      <div class="status-center-header">
-        <h2>📊 Advanced System Status Center</h2>
-        <div class="status-controls">
-          <div class="system-uptime" id="system-uptime">
-            <span class="uptime-value">99.97%</span>
-            <span class="uptime-label">Uptime</span>
+    <section id="tab-status" class="tab" aria-labelledby="Status">
+      <p class="section-description">Real-time system monitoring dashboard showing CPU load, memory usage, disk space, network connectivity, and security status. Use the monitor controls below to enable/disable specific monitoring modules.</p>
+      
+      <!-- Live Monitoring Stats Section -->
+      <section class="live-stats-panel">
+        <h2 class="stats-title">🔴 Live System Metrics</h2>
+        <div class="stats-grid">
+          <div class="stat-card">
+            <div class="stat-header">CPU Load</div>
+            <div class="stat-visual">
+              <div class="progress-bar">
+                <div class="progress-fill" id="cpu-progress"></div>
+              </div>
+              <span class="stat-value" id="cpu-stat">0%</span>
+            </div>
           </div>
-          <div class="last-update" id="last-status-update">
-            <span class="update-time">2s ago</span>
-            <span class="update-label">Last Update</span>
+          <div class="stat-card">
+            <div class="stat-header">Memory</div>
+            <div class="stat-visual">
+              <div class="progress-bar">
+                <div class="progress-fill" id="mem-progress"></div>
+              </div>
+              <span class="stat-value" id="mem-stat">0%</span>
+            </div>
           </div>
-          <button class="control-btn" id="auto-monitor-toggle" onclick="toggleAutoMonitoring()">🔄 Auto-Monitor: ON</button>
+          <div class="stat-card">
+            <div class="stat-header">Disk</div>
+            <div class="stat-visual">
+              <div class="progress-bar">
+                <div class="progress-fill" id="disk-progress"></div>
+              </div>
+              <span class="stat-value" id="disk-stat">0%</span>
+            </div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-header">Network</div>
+            <div class="stat-visual">
+              <div class="status-indicator" id="net-indicator"></div>
+              <span class="stat-value" id="net-stat">Checking...</span>
+            </div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-header">Security</div>
+            <div class="stat-visual">
+              <div class="status-indicator" id="sec-indicator"></div>
+              <span class="stat-value" id="sec-stat">Monitoring</span>
+            </div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-header">Monitors</div>
+            <div class="stat-visual">
+              <div class="monitor-count" id="monitor-count">
+                <span class="active" id="monitors-active">0</span>/<span id="monitors-total">0</span>
+              </div>
+              <span class="stat-value" id="monitor-stat">Active</span>
+            </div>
+          </div>
+        </div>
+      </section>
+      
+      <section class="grid">
+        <div class="card" id="card-cpu" title="System CPU load averages with warning and critical thresholds"><h2>CPU Load</h2><div class="value" id="cpu"></div></div>
+        <div class="card" id="card-mem" title="Memory usage percentage with available memory and threshold monitoring"><h2>Memory Usage</h2><div class="value" id="mem"></div></div>
+        <div class="card" id="card-disk" title="Disk space usage for all mounted filesystems with free space reporting"><h2>Disk Space</h2><div class="value" id="disk"></div></div>
+        <div class="card" id="card-net" title="Network connectivity status and external reachability checks"><h2>Network Status</h2><div class="value" id="net"></div></div>
+        <div class="card" id="card-int" title="File system integrity monitoring and critical file change detection"><h2>File Integrity</h2><div class="value" id="int"></div></div>
+        <div class="card" id="card-proc" title="Running process monitoring and resource usage tracking"><h2>Process Monitor</h2><div class="value" id="proc"></div></div>
+        <div class="card" id="card-user" title="User login monitoring and session tracking"><h2>User Sessions</h2><div class="value" id="user"></div></div>
+        <div class="card" id="card-svc" title="System service status monitoring and health checks"><h2>Service Status</h2><div class="value" id="svc"></div></div>
+        <div class="card" id="card-meta" title="System metadata including uptime, load averages, and performance metrics"><h2>System Info</h2><div class="value" id="meta"></div></div>
+      </section>
+      <div class="panel">
+        <h3>Monitor Controls</h3>
+        <p class="panel-description">Enable or disable individual monitoring modules. Active monitors will continuously collect data and generate alerts when thresholds are exceeded.</p>
+        <div class="toggles">
+          <button class="toggle" data-target="cpu" type="button" title="Monitor CPU load averages and performance">CPU Monitor</button>
+          <button class="toggle" data-target="memory" type="button" title="Monitor memory usage and availability">Memory Monitor</button>
+          <button class="toggle" data-target="disk" type="button" title="Monitor disk space usage and I/O">Disk Monitor</button>
+          <button class="toggle" data-target="network" type="button" title="Monitor network connectivity and external checks">Network Monitor</button>
+          <button class="toggle" data-target="integrity" type="button" title="Monitor file system changes and integrity">Integrity Monitor</button>
+          <button class="toggle" data-target="process" type="button" title="Monitor running processes and resource usage">Process Monitor</button>
+          <button class="toggle" data-target="userlogins" type="button" title="Monitor user logins and session activity">User Monitor</button>
+          <button class="toggle" data-target="services" type="button" title="Monitor system service status and health">Service Monitor</button>
+          <button class="toggle" data-target="logs" type="button" title="Monitor system logs for important events">Log Monitor</button>
+          <button class="toggle" data-target="scheduler" type="button" title="Monitor scheduled tasks and automation">Scheduler Monitor</button>
         </div>
       </div>
-      
-      <p class="section-description">Comprehensive real-time system monitoring with predictive analytics, automated health checks, performance optimization, and 99.9% uptime tracking. Advanced monitoring with microsecond precision and intelligent alerting.</p>
+    </section>
       
       <!-- Critical System Metrics Overview -->
       <div class="critical-status-grid">
