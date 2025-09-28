@@ -13216,35 +13216,125 @@ write_dashboard(){
 <body>
   <!-- Main dashboard content - hidden by default until authenticated -->
   <div id="dashboard-content" style="display:none;">
-  <header>
-    <div class="brand">
-      <div class="ring"></div>
-      <h1>NovaShield <span class="mini">JARVIS</span></h1>
-      <div class="by">Created by @MrNova420</div>
+  <header class="enterprise-header">
+    <div class="header-left">
+      <div class="brand-enterprise">
+        <div class="nova-logo">⚡</div>
+        <div class="brand-text">
+          <h1>NovaShield <span class="edition">ENTERPRISE</span></h1>
+          <div class="tagline">Advanced Security & Intelligence Platform</div>
+        </div>
+      </div>
     </div>
-    <div class="actions">
-      <button id="btn-420-theme" type="button" title="Toggle 420 themed colors (purple, green, blue)">🌿 420 Mode</button>
-      <button id="btn-refresh" type="button" title="Refresh all dashboard data and status information">Refresh Dashboard</button>
-      <button data-act="backup" type="button" title="Create a backup of important system files and configurations">Create Backup</button>
-      <button data-act="version" type="button" title="Create a system snapshot with current state and version info">Create Snapshot</button>
-      <button data-act="restart_monitors" type="button" title="Restart all monitoring services and background processes">Restart Monitors</button>
-      <a href="/logout" class="logout-link" aria-label="Logout">
-        <button type="button" title="Sign out and return to login screen">Logout</button>
-      </a>
+    <div class="header-center">
+      <div class="system-status-bar">
+        <div class="status-item" id="connection-status">
+          <span class="status-icon">🔴</span>
+          <span class="status-text">Initializing...</span>
+        </div>
+        <div class="status-item" id="security-level">
+          <span class="status-icon">🛡️</span>
+          <span class="status-text">Secure</span>
+        </div>
+        <div class="status-item" id="ai-status">
+          <span class="status-icon">🤖</span>
+          <span class="status-text">JARVIS Online</span>
+        </div>
+      </div>
+    </div>
+    <div class="header-right">
+      <div class="user-profile">
+        <div class="user-avatar">👤</div>
+        <div class="user-info">
+          <span class="user-name" id="current-user">Admin</span>
+          <span class="user-role">Administrator</span>
+        </div>
+      </div>
+      <div class="enterprise-actions">
+        <button class="action-btn primary" id="btn-enterprise-dashboard" title="Enterprise Command Center">📊 Command Center</button>
+        <button class="action-btn secondary" id="btn-420-theme" title="Toggle 420 themed colors">🌿 420 Mode</button>
+        <button class="action-btn secondary" id="btn-refresh" title="Refresh dashboard">🔄 Refresh</button>
+        <div class="dropdown-container">
+          <button class="action-btn dropdown-trigger" id="system-actions" title="System Actions">⚙️ System ▼</button>
+          <div class="dropdown-menu" id="system-dropdown">
+            <button data-act="backup" class="dropdown-item">💾 Create Backup</button>
+            <button data-act="version" class="dropdown-item">📸 Create Snapshot</button>
+            <button data-act="restart_monitors" class="dropdown-item">🔄 Restart Monitors</button>
+            <hr class="dropdown-divider">
+            <a href="/logout" class="dropdown-item logout-link">🚪 Logout</a>
+          </div>
+        </div>
+      </div>
     </div>
   </header>
 
-  <nav class="tabs" aria-label="Main">
-    <button data-tab="ai" class="active" type="button">🤖 Jarvis AI</button>
-    <button data-tab="alerts" type="button">Alerts</button>
-    <button data-tab="status" type="button">Status</button>
-    <button data-tab="security" type="button">Security</button>
-    <button data-tab="tools" type="button">Tools</button>
-    <button data-tab="files" type="button">Files</button>
-    <button data-tab="terminal" type="button">Terminal</button>
-    <button data-tab="webgen" type="button">Web Builder</button>
-    <button data-tab="config" type="button">Config</button>
-    <button data-tab="results" type="button">Results</button>
+  <!-- Enhanced Navigation System -->
+  <nav class="enterprise-nav">
+    <div class="nav-container">
+      <div class="nav-section">
+        <div class="nav-category">Core Operations</div>
+        <button data-tab="ai" class="nav-item active" type="button">
+          <span class="nav-icon">🤖</span>
+          <span class="nav-text">JARVIS AI</span>
+          <span class="nav-indicator" id="ai-indicator">●</span>
+        </button>
+        <button data-tab="status" class="nav-item" type="button">
+          <span class="nav-icon">📈</span>
+          <span class="nav-text">System Status</span>
+          <span class="nav-indicator" id="status-indicator">●</span>
+        </button>
+        <button data-tab="network" class="nav-item" type="button">
+          <span class="nav-icon">🌐</span>
+          <span class="nav-text">Network Monitor</span>
+        </button>
+      </div>
+      
+      <div class="nav-section">
+        <div class="nav-category">Security Operations</div>
+        <button data-tab="security" class="nav-item" type="button">
+          <span class="nav-icon">🛡️</span>
+          <span class="nav-text">Security Center</span>
+          <span class="nav-badge" id="security-alerts">0</span>
+        </button>
+        <button data-tab="alerts" class="nav-item" type="button">
+          <span class="nav-icon">🚨</span>
+          <span class="nav-text">Threat Alerts</span>
+          <span class="nav-badge alert" id="alert-count">0</span>
+        </button>
+      </div>
+      
+      <div class="nav-section">
+        <div class="nav-category">Tools & Management</div>
+        <button data-tab="tools" class="nav-item" type="button">
+          <span class="nav-icon">🔧</span>
+          <span class="nav-text">Security Tools</span>
+        </button>
+        <button data-tab="files" class="nav-item" type="button">
+          <span class="nav-icon">📁</span>
+          <span class="nav-text">File Manager</span>
+        </button>
+        <button data-tab="terminal" class="nav-item" type="button">
+          <span class="nav-icon">💻</span>
+          <span class="nav-text">Terminal</span>
+        </button>
+        <button data-tab="webgen" class="nav-item" type="button">
+          <span class="nav-icon">🌐</span>
+          <span class="nav-text">Web Builder</span>
+        </button>
+      </div>
+      
+      <div class="nav-section">
+        <div class="nav-category">Configuration</div>
+        <button data-tab="config" class="nav-item" type="button">
+          <span class="nav-icon">⚙️</span>
+          <span class="nav-text">Configuration</span>
+        </button>
+        <button data-tab="results" class="nav-item" type="button">
+          <span class="nav-icon">📊</span>
+          <span class="nav-text">Results</span>
+        </button>
+      </div>
+    </div>
   </nav>
 
   <main>
