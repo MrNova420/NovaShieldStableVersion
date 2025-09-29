@@ -19,8 +19,7 @@
 # ==============================================================================
 
 # Use less aggressive error handling during initialization to prevent memory-related failures
-# Temporarily disable strict error handling to allow script to reach main logic
-# set -Eeu  # Re-enabled after initialization
+set -Eeu
 IFS=$'\n\t'
 
 # Function to enable stricter error handling after initialization
@@ -29818,9 +29817,6 @@ menu(){
 }
 
 if [ $# -eq 0 ]; then usage; exit 0; fi
-
-# Re-enable strict error handling for main script execution
-set -Eeu
 
 # Load configuration file for opt-in features
 load_config_file
