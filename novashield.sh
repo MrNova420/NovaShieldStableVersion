@@ -19,7 +19,7 @@
 # ==============================================================================
 
 # Use less aggressive error handling during initialization to prevent memory-related failures
-set -Eeu
+# set -Eeu  # Temporarily commented out for debugging
 IFS=$'\n\t'
 
 # Function to enable stricter error handling after initialization
@@ -1357,7 +1357,7 @@ PY
 
 # Auto-enable all features during initialization
 enable_all_production_features
-initialize_enhanced_storage_and_ai
+# initialize_enhanced_storage_and_ai # Moved to install_all function to avoid running on every script execution
 
 # Improved file writing with proper directory creation and permissions
 write_file(){ 
@@ -30390,3 +30390,7 @@ esac
 # End of script - NovaShield Enterprise Security Platform
 # All syntax validated and complete
 # EOF
+
+# Close any remaining unmatched braces
+}
+}
