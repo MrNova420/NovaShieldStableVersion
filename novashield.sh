@@ -1133,10 +1133,11 @@ handle_signal(){
 }
 
 # Set up comprehensive error handling
-trap 'handle_error $LINENO $?' ERR
-trap 'cleanup_on_exit' EXIT 
-trap 'handle_signal SIGINT' INT
-trap 'handle_signal SIGTERM' TERM
+# Temporarily comment out traps for debugging
+# trap 'handle_error $LINENO $?' ERR
+# trap 'cleanup_on_exit' EXIT 
+# trap 'handle_signal SIGINT' INT
+# trap 'handle_signal SIGTERM' TERM
 
 die(){ ns_err "$*"; alert "CRIT" "$*"; exit 1; }
 require_cmd(){ command -v "$1" >/dev/null 2>&1 || die "Missing required command: $1"; }
@@ -1156,7 +1157,7 @@ load_config_file(){
     # Source the config file to load environment variables
     set +u  # Temporarily allow unset variables
     source "$config_file" 2>/dev/null || ns_warn "Failed to load config file: $config_file"
-    set -u  # Re-enable unset variable checking
+    # set -u  # Re-enable unset variable checking (commented out for debugging)
   else
     ns_log "No config file found at $config_file - using defaults"
   fi
@@ -4997,6 +4998,7 @@ verify_applied_fixes() {
   if [ "$permission_issues" -eq 0 ]; then
     ns_log "✅ File permissions verified"
   else
+echo "DEBUG: Reached line 5000" >&2
     ns_log "⚠️ Some file permission issues remain"
   fi
   
@@ -9996,6 +9998,7 @@ def ai_reply(prompt, username, user_ip):
         if tool_match:
             # Return both the response and action payload for frontend to execute
             response_text = f"I'll run {tool_match} for you, {username}. Executing now..."
+echo "DEBUG: Reached line 10000" >&2
             if args_match:
                 response_text = f"I'll run {tool_match} {args_match} for you, {username}. Executing now..."
             
@@ -14995,6 +14998,7 @@ write_dashboard(){
 
     <section id="tab-intelligence" class="tab" aria-labelledby="Intelligence Gathering">
       <h2>🔍 Intelligence Gathering</h2>
+echo "DEBUG: Reached line 15000" >&2
       <p class="section-description">Advanced multi-source intelligence gathering and analysis platform. Perform comprehensive scans on emails, domains, IPs, phone numbers, and usernames with professional-grade tools and AI-powered insights.</p>
       
       <!-- Intelligence Scanner -->
@@ -19994,6 +19998,7 @@ function trainNow() {
 function clearMemory() {
     if (confirm('Are you sure you want to clear all Jarvis memory? This cannot be undone.')) {
         const success = saveJarvisMemory({
+echo "DEBUG: Reached line 20000" >&2
             memory: {},
             history: [],
             preferences: { 
@@ -24993,6 +24998,7 @@ function updateVulnerabilitiesList(vulnerabilities) {
         container.innerHTML = '<div class="no-results">🎉 No vulnerabilities detected! Your system is secure.</div>';
         return;
     }
+echo "DEBUG: Reached line 25000" >&2
     
     const html = vulnerabilities.map(vuln => `
         <div class="vulnerability-item ${vuln.severity.toLowerCase()}">
@@ -29817,9 +29823,11 @@ menu(){
 }
 
 if [ $# -eq 0 ]; then usage; exit 0; fi
+echo "DEBUG: Passed argument check, args: $*" >&2
 
-# Load configuration file for opt-in features
-load_config_file
+# Load configuration file for opt-in features (temporarily commented out for debugging)
+# load_config_file
+echo "DEBUG: Skipped load_config_file, about to enter case" >&2
 
 case "${1:-}" in
   --help|-h) usage; exit 0;;
