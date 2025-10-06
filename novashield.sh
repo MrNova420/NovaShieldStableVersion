@@ -25566,6 +25566,7 @@ loadJarvisMemory().then(() => {
 // Initialize AI enhancements on page load
 initEnhancedAI();
 JS
+}
 
 setup_termux_service(){
   if ! command -v sv-enable >/dev/null 2>&1; then return 0; fi
@@ -26684,6 +26685,12 @@ _enhanced_web_startup() {
   export NOVASHIELD_AI_INTEGRATION=1
   export NOVASHIELD_HTTPS_ONLY=1
   
+  # Function to check if web wrapper is enabled
+  is_web_wrapper_enabled() {
+    # Web wrapper is enabled by default for enhanced stability
+    return 0
+  }
+
   # Start with enhanced internal stability wrapper if enabled
   if is_web_wrapper_enabled; then
     ns_log "Starting web server with enhanced internal stability wrapper..."
@@ -27873,7 +27880,7 @@ PY
 #   ns_log "🎉 ALL FEATURES ENABLED BY DEFAULT - NovaShield is now running in MAXIMUM CAPABILITY MODE"
 #   ns_log "ℹ️  No additional setup required - all enhancements, security, and optimizations are ACTIVE"
 #   ns_log "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-# }
+}
 
 initialize_security_automation(){
   ns_log "🛡️ Initializing integrated security automation..."
